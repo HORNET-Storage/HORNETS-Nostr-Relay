@@ -10,7 +10,6 @@ require (
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/fxamacker/cbor/v2 v2.5.0
 	github.com/libp2p/go-libp2p v0.30.0
-	github.com/multiformats/go-multiaddr v0.11.0
 )
 
 require (
@@ -56,6 +55,7 @@ require (
 	github.com/miekg/dns v1.1.55 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
+	github.com/multiformats/go-multiaddr v0.11.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.3.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multistream v0.4.1 // indirect
