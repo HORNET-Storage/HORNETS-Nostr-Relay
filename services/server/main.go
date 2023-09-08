@@ -14,24 +14,25 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/transport"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
-	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 
 	keys "github.com/HORNET-Storage/hornet-storage/lib/context"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers"
 )
+
+const DefaultPort = "9000"
 
 func main() {
 	ctx := context.Background()
 
 	wg := new(sync.WaitGroup)
 
+	keyFlag := flag.String("key", "", "Private key used to identify this node")
 	webFlag := flag.Bool("web", false, "Launch web server: true/false")
+	portFlag := flag.String("port", "", "Port to run the node on")
+
 	flag.Parse()
 
 	// Web Panel
@@ -49,8 +50,37 @@ func main() {
 		}()
 	}
 
-	//ctx = InitDatabase(ctx)
-	//ctx = InitGrpcServer(ctx)
+	// Port
+	port := DefaultPort
+	if portFlag != nil {
+		port = *portFlag
+	}
+
+	// Private key
+	var priv crypto.PrivKey
+	if keyFlag != nil {
+		bytes, err := hex.DecodeString(*keyFlag)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		privateKey, err := crypto.UnmarshalPrivateKey(bytes)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		priv = privateKey
+	} else {
+		privateKey, _, err := crypto.GenerateKeyPair(
+			crypto.Ed25519,
+			-1,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		priv = privateKey
+	}
 
 	// Database
 	leafDatabase, err := hornet_badger.Open("leaves")
@@ -69,31 +99,7 @@ func main() {
 	defer leafDatabase.Db.Close()
 	defer contentDatabase.Db.Close()
 
-	// Just a pre-generated key for the minute for testing purposes
-	// TODO: Make this a launch param
-	bytes, err := hex.DecodeString("0801124080c150e2d76a6832045b0e3766860b007da392870f736804caa695891ea19f0c89b604f23c7fe06941627a960326dbd28b422e751c65e86afef310fe6379a08e")
-	if err != nil {
-		panic(err)
-	}
-
-	priv, err := crypto.UnmarshalPrivateKey(bytes)
-	if err != nil {
-		panic(err)
-	}
-
-	/*
-		priv, _, err := crypto.GenerateKeyPair(
-			crypto.Ed25519, // Select your key type. Ed25519 are nice short
-			-1,             // Select key length when possible (i.e. RSA).
-		)
-
-		if err != nil {
-			panic(err)
-		}
-	*/
-
-	//var idht *dht.IpfsDHT
-
+	// Setup libp2p Connection Manager
 	connmgr, err := connmgr.NewConnManager(
 		100, // Lowwater
 		400, // HighWater,
@@ -103,27 +109,14 @@ func main() {
 		panic(err)
 	}
 
-	/*
-		transport, err := libp2pquic.NewTransport(priv, nil, nil, nil, nil)
-		if err != nil {
-			panic(err)
-		}
-
-		serverAddress := "/ip4/0.0.0.0/udp/9000/quic" // replace this with the server's multiaddress
-		maddr, err := multiaddr.NewMultiaddr(serverAddress)
-
-		listener, err := transport.Listen(maddr)
-		if err != nil {
-			panic(err)
-		}
-	*/
-
 	// Libp2p Host
+	listenAddress := fmt.Sprintf("/ip4/0.0.0.0/tcp/%s", port)
+
 	host, err := libp2p.New(
 		libp2p.Identity(priv),
 		// Multiple listen addresses
 		libp2p.ListenAddrStrings(
-			"/ip4/0.0.0.0/tcp/9000",
+			listenAddress,
 		),
 		// support TLS connections
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
@@ -162,9 +155,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Stream Handlers
 	host.SetStreamHandler("/upload/1.0.0", handlers.UploadStreamHandler)
 	host.SetStreamHandler("/download/1.0.0", handlers.DownloadStreamHandler)
-	host.SetStreamHandler("/branch/1.0.0", handlers.BranchStreamhandler)
 
 	defer host.Close()
 
@@ -175,34 +168,4 @@ func main() {
 	keys.SetContext(ctx)
 
 	wg.Wait()
-}
-
-func InitDatabase(ctx context.Context) context.Context {
-
-	return ctx
-}
-
-func customQUICConstructor(h host.Host, u *transport.Upgrader) (transport.Transport, error) {
-	priv, _, err := crypto.GenerateKeyPair(
-		crypto.Ed25519, // Select your key type. Ed25519 are nice short
-		-1,             // Select key length when possible (i.e. RSA).
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	reuse, err := quicreuse.NewConnManager([32]byte{})
-	if err != nil {
-		panic(err)
-	}
-
-	return libp2pquic.NewTransport(priv, reuse, nil, nil, nil)
-}
-
-func privKeyToHex(privKey crypto.PrivKey) (string, error) {
-	keyBytes, err := crypto.MarshalPrivateKey(privKey)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(keyBytes), nil
 }
