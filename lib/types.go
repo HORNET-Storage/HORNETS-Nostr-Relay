@@ -4,6 +4,10 @@ import (
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
+type ErrorMessage struct {
+	Message string
+}
+
 type UploadMessage struct {
 	Root  string
 	Count int
@@ -20,4 +24,8 @@ type DownloadMessage struct {
 	Label *string
 	Hash  *string
 	Range *LeafRange
+}
+
+type ResponseMessage struct {
+	Ok bool
 }
