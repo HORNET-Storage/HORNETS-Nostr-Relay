@@ -22,8 +22,6 @@ func UploadStreamHandler(stream network.Stream) {
 	dec := cbor.NewDecoder(stream)
 	//enc := cbor.NewEncoder(stream)
 
-	log.Println("Starting Upload Handler")
-
 	contentDb := ctx.Value(keys.ContentDatabase).(*hornet_badger.BadgerDB)
 	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
 
@@ -36,21 +34,31 @@ func UploadStreamHandler(stream network.Stream) {
 			continue
 		}
 
-		log.Printf("Leaf recieved with count: %d\n", message.Count)
-		log.Printf("Already recieved: %d\n", len(leaves))
-
 		encoding, _, err := multibase.Decode(message.Root)
 		encoder := multibase.MustNewEncoder(encoding)
 
-		result, err := message.Leaf.VerifyLeaf(encoder)
-		if err != nil {
-			log.Fatal(err)
-		}
+		if message.Leaf.Hash == message.Root {
+			result, err := message.Leaf.VerifyRootLeaf(encoder)
+			if err != nil {
+				log.Fatal(err)
+			}
 
-		if result {
-			log.Println("Leaf verified correctly")
+			if result {
+				log.Println("Leaf verified correctly")
+			} else {
+				log.Println("Failed to verify leaf")
+			}
 		} else {
-			log.Println("Failed to verify leaf")
+			result, err := message.Leaf.VerifyLeaf(encoder)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if result {
+				log.Println("Leaf verified correctly")
+			} else {
+				log.Println("Failed to verify leaf")
+			}
 		}
 
 		h := sha256.New()
@@ -66,7 +74,7 @@ func UploadStreamHandler(stream network.Stream) {
 			log.Fatal(err)
 		}
 
-		blockDb.Update(message.Root, cborData)
+		blockDb.Update(message.Leaf.Hash, cborData)
 
 		leaves[message.Leaf.Hash] = message
 
@@ -102,7 +110,6 @@ func UploadStreamHandler(stream network.Stream) {
 			rootLeaf.Data = contentLeafBytes
 
 			builder.AddLeaf(rootLeaf, encoder, nil)
-			log.Println("Leaf added: " + rootLeaf.Hash)
 
 			AddLeaves(ctx, builder, encoder, rootLeaf)
 
