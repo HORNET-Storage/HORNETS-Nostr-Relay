@@ -8,7 +8,7 @@ The Hornet relay currently uses BadgerDB to focus on SSD storage. While SSDs mig
 Hornet utilizes Libp2p for its transport layers and networking, eliminating dependence on the centralized web. This forms the basis for the Hornet browser extension, similar to the IPFS companion browser extension.
 
 ### Nostr Integration
-Hornet storage operates beneath Nostr, storing relay data as signed Scionic Merkle DAGs in its key-value database. The relay manager lets operators view data usage per application over time periods and allows them to toggle which applications they want to host.
+Hornet storage operates beneath Nostr, storing relay data as signed Scionic Merkle DAGs in its key-value database. The relay manager lets operators view data usage per application over time periods, and it will also allow them to toggle which applications they want to host.
 
 ### Toggling Nostr Apps/Services
 Data is tagged with a unique identifier indicating its type of application, such as "nostr note" for posts, "nostrtube" for a nostr YouTube video, "stemstr" for a stemstr music note, "git" for a git repository folder, et al.
