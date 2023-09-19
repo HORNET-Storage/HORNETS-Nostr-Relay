@@ -36,8 +36,6 @@ func IsHash(s string) bool {
 func UploadStreamHandler(stream network.Stream) {
 	ctx := keys.GetContext()
 
-	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
-
 	result, message := WaitForUploadMessage(ctx, stream)
 	if !result {
 		WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
@@ -81,17 +79,9 @@ func UploadStreamHandler(stream network.Stream) {
 
 	SplitLeafContent(ctx, &message.Leaf)
 
-	cborData, err := cbor.Marshal(message.Leaf)
+	err = AddLeafToDatabase(ctx, &message.Leaf)
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	key := merkle_dag.GetHash(message.Leaf.Hash)
-
-	log.Printf("Adding key to block database: %s\n", key)
-	err = blockDb.Update(key, cborData)
-	if err != nil {
-		WriteErrorToStream(stream, "Failed to add leaf to block database", err)
+		WriteErrorToStream(stream, "Failed to verify root leaf", err)
 
 		stream.Close()
 		return
@@ -169,15 +159,7 @@ func UploadStreamHandler(stream network.Stream) {
 
 		SplitLeafContent(ctx, &message.Leaf)
 
-		cborData, err := cbor.Marshal(message.Leaf)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		key := merkle_dag.GetHash(message.Leaf.Hash)
-
-		log.Printf("Adding key to block database: %s\n", key)
-		err = blockDb.Update(key, cborData)
+		err = AddLeafToDatabase(ctx, &message.Leaf)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to add leaf to block database", err)
 
@@ -195,8 +177,6 @@ func UploadStreamHandler(stream network.Stream) {
 			break
 		}
 	}
-
-	time.Sleep(5 * time.Second)
 
 	log.Println("Building and verifying dag")
 
@@ -445,25 +425,21 @@ func BuildDagFromDatabase(ctx context.Context, root string) (*merkle_dag.Dag, er
 
 	builder.AddLeaf(rootLeaf, encoder, nil)
 
-	AddLeavesFromDatabase(ctx, builder, encoder, rootLeaf)
+	err = AddLeavesFromDatabase(ctx, builder, encoder, rootLeaf)
+	if err != nil {
+		log.Println("Failed to add leaves from database")
+		return nil, err
+	}
 
 	return builder.BuildDag(root), nil
 }
 
-func AddLeavesFromDatabase(ctx context.Context, builder *merkle_dag.DagBuilder, encoder multibase.Encoder, leaf *merkle_dag.DagLeaf) {
-	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
-
+func AddLeavesFromDatabase(ctx context.Context, builder *merkle_dag.DagBuilder, encoder multibase.Encoder, leaf *merkle_dag.DagLeaf) error {
 	for _, hash := range leaf.Links {
-		childLeafBytes, err := blockDb.Get(hash)
+		childLeaf, err := GetLeafFromDatabase(ctx, hash)
 		if err != nil {
-			log.Fatal(err)
-		}
-
-		var childLeaf *merkle_dag.DagLeaf = &merkle_dag.DagLeaf{}
-
-		err = cbor.Unmarshal(childLeafBytes, childLeaf)
-		if err != nil {
-			log.Fatal(err)
+			log.Println("Unable to find leaf in the database")
+			return err
 		}
 
 		err = RepairLeafContent(ctx, childLeaf)
@@ -472,6 +448,8 @@ func AddLeavesFromDatabase(ctx context.Context, builder *merkle_dag.DagBuilder, 
 
 		AddLeavesFromDatabase(ctx, builder, encoder, childLeaf)
 	}
+
+	return nil
 }
 
 func SplitLeafContent(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
@@ -520,6 +498,26 @@ func GetLeafFromDatabase(ctx context.Context, hash string) (*merkle_dag.DagLeaf,
 	}
 
 	return leaf, nil
+}
+
+func AddLeafToDatabase(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
+	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
+
+	cborData, err := cbor.Marshal(leaf)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	key := merkle_dag.GetHash(leaf.Hash)
+
+	log.Printf("Adding key to block database: %s\n", key)
+
+	err = blockDb.Update(key, cborData)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func WriteErrorToStream(stream network.Stream, message string, err error) error {
