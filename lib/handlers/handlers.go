@@ -141,7 +141,7 @@ func UploadStreamHandler(stream network.Stream) {
 			break
 		}
 
-		_, err = GetLeafFromDatabase(ctx, message.Parent)
+		parent, err := GetLeafFromDatabase(ctx, message.Parent)
 		if err != nil || !result {
 			WriteErrorToStream(stream, "Failed to find parent leaf", err)
 
@@ -149,13 +149,15 @@ func UploadStreamHandler(stream network.Stream) {
 			break
 		}
 
-		//result, err = parent.VerifyBranch(message.Branch)
-		//if err != nil || !result {
-		//	WriteErrorToStream(stream, "Failed to verify leaf branch", err)
+		if message.Branch != nil {
+			result, err = parent.VerifyBranch(message.Branch)
+			if err != nil || !result {
+				WriteErrorToStream(stream, "Failed to verify leaf branch", err)
 
-		//	stream.Close()
-		//	break
-		//}
+				stream.Close()
+				break
+			}
+		}
 
 		SplitLeafContent(ctx, &message.Leaf)
 

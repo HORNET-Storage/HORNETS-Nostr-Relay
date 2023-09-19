@@ -13,7 +13,7 @@ type UploadMessage struct {
 	Count  int
 	Leaf   merkle_dag.DagLeaf
 	Parent string
-	Branch merkle_dag.ClassicTreeBranch
+	Branch *merkle_dag.ClassicTreeBranch
 }
 
 type LeafRange struct {

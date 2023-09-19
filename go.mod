@@ -3,7 +3,7 @@ module github.com/HORNET-Storage/hornet-storage
 go 1.19
 
 require (
-	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20230820005429-e3f9f6359d05
+	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20230919145008-5cbce8bb46ac
 	github.com/boltdb/bolt v1.3.1
 	github.com/btcsuite/btcd v0.23.4
 	github.com/btcsuite/btcd/btcutil v1.1.3
