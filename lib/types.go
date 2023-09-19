@@ -9,9 +9,11 @@ type ErrorMessage struct {
 }
 
 type UploadMessage struct {
-	Root  string
-	Count int
-	Leaf  merkle_dag.DagLeaf
+	Root   string
+	Count  int
+	Leaf   merkle_dag.DagLeaf
+	Parent string
+	Branch merkle_dag.ClassicTreeBranch
 }
 
 type LeafRange struct {
@@ -28,4 +30,9 @@ type DownloadMessage struct {
 
 type ResponseMessage struct {
 	Ok bool
+}
+
+type BlockData struct {
+	Leaf   merkle_dag.DagLeaf
+	Branch merkle_dag.ClassicTreeBranch
 }

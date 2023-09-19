@@ -1,6 +1,10 @@
 package badger
 
-import "github.com/dgraph-io/badger/v4"
+import (
+	"log"
+
+	"github.com/dgraph-io/badger/v4"
+)
 
 type BadgerDB struct {
 	Db *badger.DB
@@ -22,8 +26,15 @@ func Open(name string) (*BadgerDB, error) {
 func (db *BadgerDB) Update(key string, value []byte) error {
 	err := db.Db.Update(func(txn *badger.Txn) error {
 		e := txn.Set([]byte(key), value)
+		if e != nil {
+			log.Printf("Failed to update database: %e\n", e)
+		}
 		return e
 	})
+
+	if err != nil {
+		log.Printf("Failed to update database: %e\n", err)
+	}
 
 	return err
 }
