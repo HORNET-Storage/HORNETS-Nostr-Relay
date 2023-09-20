@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
@@ -20,18 +18,6 @@ import (
 	hornet_badger "github.com/HORNET-Storage/hornet-storage/lib/database/badger"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
-
-func IsHash(s string) bool {
-	// A SHA-256 hash should be exactly 64 characters long
-	if len(s) != 64 {
-		return false
-	}
-
-	// A SHA-256 hash consists only of hexadecimal characters
-	matched, _ := regexp.MatchString("^[a-fA-F0-9]+$", s)
-
-	return matched
-}
 
 func UploadStreamHandler(stream network.Stream) {
 	ctx := keys.GetContext()
@@ -55,19 +41,6 @@ func UploadStreamHandler(stream network.Stream) {
 	}
 
 	encoder := multibase.MustNewEncoder(encoding)
-
-	/*
-		data := encoder.Encode(message.Leaf.Data)
-
-		if IsHash(data) {
-			if err := RepairLeafContent(ctx, &message.Leaf); err != nil {
-				WriteErrorToStream(stream, "Server does not contain leaf data: %e", err)
-
-				stream.Close()
-				return
-			}
-		}
-	*/
 
 	result, err = message.Leaf.VerifyRootLeaf(encoder)
 	if err != nil || !result {
@@ -208,111 +181,53 @@ func UploadStreamHandler(stream network.Stream) {
 	return
 }
 
-func WriteResponseToStream(ctx context.Context, stream network.Stream, response bool) error {
-	streamEncoder := cbor.NewEncoder(stream)
-
-	message := lib.ResponseMessage{
-		Ok: response,
-	}
-
-	if err := streamEncoder.Encode(&message); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func WaitForResponse(ctx context.Context, stream network.Stream) bool {
-	streamDecoder := cbor.NewDecoder(stream)
-
-	var response lib.ResponseMessage
-
-	timeout := time.NewTimer(5 * time.Second)
-
-wait:
-	for {
-		select {
-		case <-timeout.C:
-			return false
-		default:
-			if err := streamDecoder.Decode(&response); err == nil {
-				if err == io.EOF {
-					return false
-				}
-
-				break wait
-			}
-		}
-	}
-
-	if !response.Ok {
-		return false
-	}
-
-	return true
-}
-
-func WaitForUploadMessage(ctx context.Context, stream network.Stream) (bool, *lib.UploadMessage) {
-	streamDecoder := cbor.NewDecoder(stream)
-
-	var message lib.UploadMessage
-
-	timeout := time.NewTimer(5 * time.Second)
-
-wait:
-	for {
-		select {
-		case <-timeout.C:
-			return false, nil
-		default:
-			err := streamDecoder.Decode(&message)
-
-			if err != nil {
-				log.Printf("Error reading from stream: %e", err)
-			}
-
-			if err == io.EOF {
-				return false, nil
-			}
-
-			if err == nil {
-				break wait
-			}
-		}
-	}
-
-	return true, &message
-}
-
 func DownloadStreamHandler(stream network.Stream) {
 	ctx := keys.GetContext()
 
-	dec := cbor.NewDecoder(stream)
 	enc := cbor.NewEncoder(stream)
 
-	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
+	result, message := WaitForDownloadMessage(ctx, stream)
+	if !result {
+		WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
 
-	var message lib.DownloadMessage
-
-	timeout := time.NewTimer(5 * time.Second)
-
-first:
-	for {
-		select {
-		case <-timeout.C:
-			stream.Close()
-			return
-		default:
-			if err := dec.Decode(&message); err == nil {
-				break first
-			}
-		}
+		stream.Close()
+		return
 	}
 
-	timeout.Stop()
-
 	// Ensure the node is storing the root leaf
-	blockDb.Get(message.Root)
+	rootLeaf, err := GetLeafFromDatabase(ctx, message.Root)
+	if err != nil {
+		WriteErrorToStream(stream, "Node does not have root leaf", nil)
+
+		stream.Close()
+		return
+	}
+
+	encoding, _, err := multibase.Decode(message.Root)
+	if err != nil {
+		WriteErrorToStream(stream, "Failed to discover encoding from root hash: %e", err)
+
+		stream.Close()
+		return
+	}
+
+	encoder := multibase.MustNewEncoder(encoding)
+
+	err = RepairLeafContent(ctx, rootLeaf)
+	if err != nil {
+		WriteErrorToStream(stream, "Node does not have root leaf content", nil)
+
+		stream.Close()
+		return
+	}
+
+	result, err = rootLeaf.VerifyRootLeaf(encoder)
+	if err != nil || !result {
+		WriteErrorToStream(stream, "Failed to verify root leaf", err)
+
+		stream.Close()
+		return
+	}
 
 	if message.Hash != nil {
 
@@ -326,8 +241,9 @@ first:
 		// Specific Leaf from hash
 
 	} else {
-		// Entire dag
+		log.Printf("Download requested for: %s\n", message.Root)
 
+		// Entire dag
 		dag, err := BuildDagFromDatabase(ctx, message.Root)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to build dag from root %e", err)
@@ -336,74 +252,135 @@ first:
 			return
 		}
 
-		dags := *dag
-
 		count := len(dag.Leafs)
 
 		rootLeaf := dag.Leafs[dag.Root]
 
-		parsed, err := strconv.ParseInt(rootLeaf.LatestLabel, 10, 64)
-		if err != nil {
-			fmt.Println("Failed to parse label")
+		message := lib.UploadMessage{
+			Root:  dag.Root,
+			Count: count,
+			Leaf:  *rootLeaf,
 		}
 
-		latestLabel := int(parsed)
+		if err := enc.Encode(&message); err != nil {
+			WriteErrorToStream(stream, "Failed to write to stream", err)
 
-		for i := 1; i < latestLabel; i++ {
-			var foundLeaf *merkle_dag.DagLeaf
+			stream.Close()
+			return
+		}
 
-			for hash, leaf := range dags.Leafs {
-				label := merkle_dag.GetLabel(hash)
+		log.Println("Uploaded root leaf")
 
-				if label != "" {
-					if label == strconv.FormatInt(int64(i), 64) {
-						foundLeaf = leaf
-					}
-				}
+		if result := WaitForResponse(ctx, stream); !result {
+			WriteErrorToStream(stream, "Did not recieve a valid response", nil)
+
+			stream.Close()
+			return
+		}
+
+		log.Println("Response received")
+
+		err = UploadLeafChildren(ctx, stream, rootLeaf, dag)
+		if err != nil {
+			WriteErrorToStream(stream, "Failed to upload leaf children: %e", err)
+
+			stream.Close()
+			return
+		}
+
+		log.Println("Dag has been uploaded")
+	}
+
+	stream.Close()
+}
+
+func UploadLeafChildren(ctx context.Context, stream network.Stream, leaf *merkle_dag.DagLeaf, dag *merkle_dag.Dag) error {
+	streamEncoder := cbor.NewEncoder(stream)
+
+	encoding, _, err := multibase.Decode(dag.Root)
+	if err != nil {
+		log.Println("Failed to discover encoding")
+		return err
+	}
+
+	encoder := multibase.MustNewEncoder(encoding)
+
+	count := len(dag.Leafs)
+
+	for label, hash := range leaf.Links {
+		child, exists := dag.Leafs[hash]
+		if !exists {
+			return fmt.Errorf("Leaf with has does not exist in dag")
+		}
+
+		result, err := child.VerifyLeaf(encoder)
+		if err != nil {
+			log.Println("Failed to verify leaf")
+			return err
+		}
+
+		if !result {
+			return fmt.Errorf("Failed to verify leaf")
+		}
+
+		var branch *merkle_dag.ClassicTreeBranch
+
+		if len(leaf.Links) > 1 {
+			branch, err = leaf.GetBranch(label)
+			if err != nil {
+				log.Println("Failed to get branch")
+				return err
 			}
 
-			if foundLeaf == nil {
-				continue
+			result, err = leaf.VerifyBranch(branch)
+			if err != nil {
+				log.Println("Failed to verify branch")
+				return err
 			}
 
-			message := lib.UploadMessage{
-				Root:  dag.Root,
-				Count: count,
-				Leaf:  *foundLeaf,
+			if !result {
+				return fmt.Errorf("Failed to verify branch for leaf")
 			}
+		}
 
-			if err := enc.Encode(&message); err != nil {
-				WriteErrorToStream(stream, "Failed to encode leaf to stream: %e", err)
+		message := lib.UploadMessage{
+			Root:   dag.Root,
+			Count:  count,
+			Leaf:   *child,
+			Parent: leaf.Hash,
+			Branch: branch,
+		}
 
-				stream.Close()
-				return
-			}
+		if err := streamEncoder.Encode(&message); err != nil {
+			log.Println("Failed to encode to stream")
+			return err
+		}
 
-			var response lib.ResponseMessage
+		log.Println("Uploaded next leaf")
 
-			timeout := time.NewTimer(5 * time.Second)
+		if result = WaitForResponse(ctx, stream); !result {
+			return fmt.Errorf("Did not recieve a valid response")
+		}
 
-		wait:
-			for {
-				select {
-				case <-timeout.C:
-					stream.Close()
-					return
-				default:
-					if err := dec.Decode(&response); err == nil {
-						break wait
-					}
-				}
-			}
+		log.Println("Response recieved")
+	}
 
-			if !response.Ok {
-				stream.Close()
-				return
+	for _, hash := range leaf.Links {
+		child, exists := dag.Leafs[hash]
+		if !exists {
+			return fmt.Errorf("Leaf with hash does not exist in dag")
+		}
+
+		if len(child.Links) > 0 {
+			err = UploadLeafChildren(ctx, stream, child, dag)
+			if err != nil {
+				log.Println("Failed to Upload Leaf Children")
+				return err
 			}
 		}
 	}
 
-	stream.Close()
+	return nil
 }
 
 func BuildDagFromDatabase(ctx context.Context, root string) (*merkle_dag.Dag, error) {
@@ -536,4 +513,112 @@ func WriteErrorToStream(stream network.Stream, message string, err error) error 
 	}
 
 	return nil
+}
+
+func WriteResponseToStream(ctx context.Context, stream network.Stream, response bool) error {
+	streamEncoder := cbor.NewEncoder(stream)
+
+	message := lib.ResponseMessage{
+		Ok: response,
+	}
+
+	if err := streamEncoder.Encode(&message); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func WaitForResponse(ctx context.Context, stream network.Stream) bool {
+	streamDecoder := cbor.NewDecoder(stream)
+
+	var response lib.ResponseMessage
+
+	timeout := time.NewTimer(5 * time.Second)
+
+wait:
+	for {
+		select {
+		case <-timeout.C:
+			return false
+		default:
+			if err := streamDecoder.Decode(&response); err == nil {
+				if err == io.EOF {
+					return false
+				}
+
+				break wait
+			}
+		}
+	}
+
+	if !response.Ok {
+		return false
+	}
+
+	return true
+}
+
+func WaitForUploadMessage(ctx context.Context, stream network.Stream) (bool, *lib.UploadMessage) {
+	streamDecoder := cbor.NewDecoder(stream)
+
+	var message lib.UploadMessage
+
+	timeout := time.NewTimer(5 * time.Second)
+
+wait:
+	for {
+		select {
+		case <-timeout.C:
+			return false, nil
+		default:
+			err := streamDecoder.Decode(&message)
+
+			if err != nil {
+				log.Printf("Error reading from stream: %e", err)
+			}
+
+			if err == io.EOF {
+				return false, nil
+			}
+
+			if err == nil {
+				break wait
+			}
+		}
+	}
+
+	return true, &message
+}
+
+func WaitForDownloadMessage(ctx context.Context, stream network.Stream) (bool, *lib.DownloadMessage) {
+	streamDecoder := cbor.NewDecoder(stream)
+
+	var message lib.DownloadMessage
+
+	timeout := time.NewTimer(5 * time.Second)
+
+wait:
+	for {
+		select {
+		case <-timeout.C:
+			return false, nil
+		default:
+			err := streamDecoder.Decode(&message)
+
+			if err != nil {
+				log.Printf("Error reading from stream: %e", err)
+			}
+
+			if err == io.EOF {
+				return false, nil
+			}
+
+			if err == nil {
+				break wait
+			}
+		}
+	}
+
+	return true, &message
 }
