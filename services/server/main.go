@@ -10,6 +10,7 @@ import (
 	"time"
 
 	hornet_badger "github.com/HORNET-Storage/hornet-storage/lib/database/badger"
+	"github.com/HORNET-Storage/hornet-storage/lib/storage"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
 	"github.com/libp2p/go-libp2p"
@@ -82,7 +83,7 @@ func main() {
 		priv = privateKey
 	}
 
-	// Database
+	// Database (To be replaced by bbolt implementation in lib/storage)
 	leafDatabase, err := hornet_badger.Open("leaves")
 	if err != nil {
 		log.Fatal(err)
@@ -98,6 +99,18 @@ func main() {
 
 	defer leafDatabase.Db.Close()
 	defer contentDatabase.Db.Close()
+
+	// New storage implementation (will replace the above)
+	store, err := storage.CreateStorage("main")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx = context.WithValue(ctx, keys.Storage, store)
+
+	// This works but feels weird, open to better solutions
+	defer store.UserDatabase.Db.Close()
+	defer store.ContentDatabase.Db.Close()
 
 	// Setup libp2p Connection Manager
 	connmgr, err := connmgr.NewConnManager(
