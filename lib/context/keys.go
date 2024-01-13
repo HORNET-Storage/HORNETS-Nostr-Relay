@@ -5,10 +5,8 @@ type ContextKey struct {
 }
 
 var (
-	BlockDatabase   = &ContextKey{key: "BlockDatabase"}
-	ContentDatabase = &ContextKey{key: "ContentDatabase"}
-	CacheDatabase   = &ContextKey{key: "CacheDatabase"}
-	Host            = &ContextKey{key: "Host"}
+	Storage = &ContextKey{key: "Storage"}
+	Host    = &ContextKey{key: "Host"}
 
 	PrivateKey = &ContextKey{key: "PrivateKey"}
 	PublicKey  = &ContextKey{key: "PublicKey"}
