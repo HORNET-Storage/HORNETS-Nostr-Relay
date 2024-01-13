@@ -1,12 +1,9 @@
 package storage
 
 import (
-	"context"
 	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/database/bbolt"
-
-	keys "github.com/HORNET-Storage/hornet-storage/lib/context"
 )
 
 type Storage struct {
@@ -40,11 +37,8 @@ func CreateStorage(prefix string) (*Storage, error) {
 	return storage, nil
 }
 
-func CreateUserStorage(ctx context.Context, pubkey string) error {
-	storage := ctx.Value(keys.ContentDatabase).(*Storage)
-
-	// Anything uploaded that does not specify an app name should use this bucket
-	err := storage.UserDatabase.CreateBucket("default")
+func (storage *Storage) CreateUserStorage(pubkey string) error {
+	err := storage.UserDatabase.CreateBucket(pubkey)
 	if err != nil {
 		return err
 	}
@@ -52,26 +46,35 @@ func CreateUserStorage(ctx context.Context, pubkey string) error {
 	return nil
 }
 
-func CreateUserAppStorage(ctx context.Context, pubkey string, app string) error {
-	storage := ctx.Value(keys.ContentDatabase).(*Storage)
-
-	err := storage.ContentDatabase.CreatedNestedBucket(pubkey, app)
+func (storage *Storage) CreateUserAppStorage(pubkey string, app string) error {
+	err := storage.UserDatabase.CreatedNestedBucket(pubkey, app)
 
 	return err
 }
 
-func UpdateUserAppData(ctx context.Context, pubkey string, app string, key string, value []byte) error {
-	storage := ctx.Value(keys.ContentDatabase).(*Storage)
-
-	err := storage.ContentDatabase.UpdateNestedValue(pubkey, app, key, value)
+func (storage *Storage) UpdateUserAppData(pubkey string, app string, key string, value []byte) error {
+	err := storage.UserDatabase.UpdateNestedValue(pubkey, app, key, value)
 
 	return err
 }
 
-func GetUserAppData(ctx context.Context, pubkey string, app string, key string) ([]byte, error) {
-	storage := ctx.Value(keys.ContentDatabase).(*Storage)
+func (storage *Storage) GetUserAppData(pubkey string, app string, key string) ([]byte, error) {
+	bytes, err := storage.UserDatabase.GetNestedValue(pubkey, app, key)
+	if err != nil {
+		return nil, err
+	}
 
-	bytes, err := storage.ContentDatabase.GetNestedValue(pubkey, app, key)
+	return bytes, nil
+}
+
+func (storage *Storage) UpdateContentData(key string, value []byte) error {
+	err := storage.UserDatabase.UpdateValue("default", key, value)
+
+	return err
+}
+
+func (storage *Storage) GetContentData(key string) ([]byte, error) {
+	bytes, err := storage.UserDatabase.GetValue("default", key)
 	if err != nil {
 		return nil, err
 	}
