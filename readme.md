@@ -1,5 +1,5 @@
-# Hornet Relay
-H.O.R.N.E.T.S. stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. It is a Multimedia Nostr relay aiming to support chunked file storage with Scionic Merkle Trees.
+# H.O.R.N.E.T Storage: Multimedia Nostr Relay
+H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. The Multimedia Nostr Relay supports chunked file storage with Scionic Merkle Trees and is equipped with Libp2p to sync with other Multimedia Nostr Relays, free of centralized certificate authories.
 
 ### bbolt: Stateful Buckets
 bbolt provides support for bucketing, meaning content can be organized in an incredibly organized way. Bucketing is like a library. 📚 First, the librarian traverses the name of each book title (name of each bucket/database instance), then moves on to the pages (key-value pairs in that bucket) within the book. This traversal method is a lot quicker than skimming through every page in the library to find something specific. Nested databases (buckets) allow for this type of hierarchical data organization, so far more databases can be accessed concurrently, meaning traversal speeds may be faster even if bbolt doesn’t match-up to the raw speed of LMDB.
