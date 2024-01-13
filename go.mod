@@ -3,7 +3,7 @@ module github.com/HORNET-Storage/hornet-storage
 go 1.19
 
 require (
-	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20230820005429-e3f9f6359d05
+	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20230919145008-5cbce8bb46ac
 	github.com/boltdb/bolt v1.3.1
 	github.com/btcsuite/btcd v0.23.4
 	github.com/btcsuite/btcd/btcutil v1.1.3
@@ -74,6 +74,7 @@ require (
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/txaty/gool v0.1.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	go.etcd.io/bbolt v1.3.8 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.20.0 // indirect
