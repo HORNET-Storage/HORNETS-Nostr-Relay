@@ -1,8 +1,8 @@
 # Hornet Relay
 H.O.R.N.E.T.S. stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. It is a decentralized off-chain storage system.
 
-### BadgerDB: SSD-focused Storage
-The Hornet relay currently uses BadgerDB to focus on SSD storage. While SSDs might not be as fast as RAM (memory-mapped/LMDB), SSDs are still faster than HDDs. This means SSD are the middle-way and may actually be a balanced solution that's both economical for relay operators and offers better performance than HDDs, making the task of running a relay more manageable -- further promoting decentralization.
+### bbolt: Stateful Buckets
+bbolt provides support for bucketing, meaning content can be organized in an incredibly organized way. Bucketing is like a library. 📚 First, the librarian traverses the name of each book title (name of each bucket/database instance), then moves on to the pages (key-value pairs in that bucket) within the book. This traversal method is a lot quicker than skimming through every page in the library to find something specific. Nested databases (buckets) allow for this type of hierarchical data organization, so far more databases can be accessed concurrently, meaning traversal speeds may be faster even if bbolt doesn’t match-up to the raw speed of LMDB.
 
 ### Libp2p: Transport and Networking
 Hornet Storage utilizes libp2p for its transport layers and networking, eliminating dependence on the centralized web. This forms the basis for the Hornet browser extension, similar to the [IPFS companion](https://github.com/ipfs/ipfs-companion) browser extension.
