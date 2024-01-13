@@ -44,6 +44,7 @@ func (bdb *Database) GetValue(name string, key string) ([]byte, error) {
 	err := bdb.Db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(name))
 		value = bucket.Get([]byte(key))
+
 		return nil
 	})
 

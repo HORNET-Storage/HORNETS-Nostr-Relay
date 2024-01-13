@@ -15,8 +15,9 @@ import (
 	"github.com/multiformats/go-multibase"
 
 	keys "github.com/HORNET-Storage/hornet-storage/lib/context"
-	hornet_badger "github.com/HORNET-Storage/hornet-storage/lib/database/badger"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/storage"
 )
 
 func UploadStreamHandler(stream network.Stream) {
@@ -432,13 +433,13 @@ func AddLeavesFromDatabase(ctx context.Context, builder *merkle_dag.DagBuilder, 
 }
 
 func SplitLeafContent(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
-	contentDb := ctx.Value(keys.ContentDatabase).(*hornet_badger.BadgerDB)
+	store := ctx.Value(keys.Storage).(*storage.Storage)
 
 	h := sha256.New()
 	h.Write(leaf.Data)
 	hashed := h.Sum(nil)
 
-	contentDb.UpdateFromByteKey(hashed, leaf.Data)
+	store.UpdateContentData(string(hashed), leaf.Data)
 
 	leaf.Data = hashed
 
@@ -446,9 +447,9 @@ func SplitLeafContent(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
 }
 
 func RepairLeafContent(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
-	contentDb := ctx.Value(keys.ContentDatabase).(*hornet_badger.BadgerDB)
+	store := ctx.Value(keys.Storage).(*storage.Storage)
 
-	bytes, err := contentDb.GetFromByteKey(leaf.Data)
+	bytes, err := store.GetContentData(string(leaf.Data))
 	if err != nil {
 		return err
 	}
@@ -459,12 +460,12 @@ func RepairLeafContent(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
 }
 
 func GetLeafFromDatabase(ctx context.Context, hash string) (*merkle_dag.DagLeaf, error) {
-	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
+	store := ctx.Value(keys.Storage).(*storage.Storage)
 
 	key := merkle_dag.GetHash(hash)
 
 	log.Printf("Searching for leaf with key: %s\n", key)
-	bytes, err := blockDb.Get(key)
+	bytes, err := store.GetContentData(key)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +481,7 @@ func GetLeafFromDatabase(ctx context.Context, hash string) (*merkle_dag.DagLeaf,
 }
 
 func AddLeafToDatabase(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
-	blockDb := ctx.Value(keys.BlockDatabase).(*hornet_badger.BadgerDB)
+	store := ctx.Value(keys.Storage).(*storage.Storage)
 
 	cborData, err := cbor.Marshal(leaf)
 	if err != nil {
@@ -491,7 +492,7 @@ func AddLeafToDatabase(ctx context.Context, leaf *merkle_dag.DagLeaf) error {
 
 	log.Printf("Adding key to block database: %s\n", key)
 
-	err = blockDb.Update(key, cborData)
+	err = store.UpdateContentData(key, cborData)
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	hornet_badger "github.com/HORNET-Storage/hornet-storage/lib/database/badger"
 	"github.com/HORNET-Storage/hornet-storage/lib/storage"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
@@ -82,23 +81,6 @@ func main() {
 
 		priv = privateKey
 	}
-
-	// Database (To be replaced by bbolt implementation in lib/storage)
-	leafDatabase, err := hornet_badger.Open("leaves")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	contentDatabase, err := hornet_badger.Open("content")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ctx = context.WithValue(ctx, keys.BlockDatabase, leafDatabase)
-	ctx = context.WithValue(ctx, keys.ContentDatabase, contentDatabase)
-
-	defer leafDatabase.Db.Close()
-	defer contentDatabase.Db.Close()
 
 	// New storage implementation (will replace the above)
 	store, err := storage.CreateStorage("main")
