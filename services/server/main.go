@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/storage"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
 	"github.com/libp2p/go-libp2p"
@@ -20,6 +19,10 @@ import (
 
 	keys "github.com/HORNET-Storage/hornet-storage/lib/context"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers"
+
+	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
+
+	stores_bbolt "github.com/HORNET-Storage/hornet-storage/lib/stores/bbolt"
 )
 
 const DefaultPort = "9000"
@@ -83,10 +86,9 @@ func main() {
 	}
 
 	// New storage implementation (will replace the above)
-	store, err := storage.CreateStorage("main")
-	if err != nil {
-		log.Fatal(err)
-	}
+	store := &stores_bbolt.BBoltStore{}
+
+	store.InitStore("main")
 
 	ctx = context.WithValue(ctx, keys.Storage, store)
 
@@ -150,9 +152,20 @@ func main() {
 		log.Fatal(err)
 	}
 
+	log.Println("Adding download handler")
+
 	// Stream Handlers
-	host.SetStreamHandler("/upload/1.0.0", handlers.UploadStreamHandler)
-	host.SetStreamHandler("/download/1.0.0", handlers.DownloadStreamHandler)
+	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf) bool {
+		// Check keys or potential future permissions here
+
+		return true
+	})
+
+	log.Println("Adding upload handler")
+
+	handlers.AddUploadHandler(host, store, func(dag *merkle_dag.Dag) {
+		// Don't need to do anything here right now
+	})
 
 	defer host.Close()
 
