@@ -59,7 +59,7 @@ func BuildUploadStreamHandler(store stores.Store, handleRecievedDag func(dag *me
 			return
 		}
 
-		err = store.StoreLeaf(&message.Leaf)
+		err = store.StoreLeaf(message.Root, &message.Leaf)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to verify root leaf", err)
 
@@ -123,7 +123,7 @@ func BuildUploadStreamHandler(store stores.Store, handleRecievedDag func(dag *me
 				break
 			}
 
-			parent, err := store.RetrieveLeaf(message.Parent)
+			parent, err := store.RetrieveLeaf(message.Root, message.Parent)
 			if err != nil || !result {
 				WriteErrorToStream(stream, "Failed to find parent leaf", err)
 
@@ -141,7 +141,7 @@ func BuildUploadStreamHandler(store stores.Store, handleRecievedDag func(dag *me
 				}
 			}
 
-			err = store.StoreLeaf(&message.Leaf)
+			err = store.StoreLeaf(message.Root, &message.Leaf)
 			if err != nil {
 				WriteErrorToStream(stream, "Failed to add leaf to block database", err)
 
@@ -207,7 +207,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		}
 
 		// Ensure the node is storing the root leaf
-		rootLeaf, err := store.RetrieveLeaf(message.Root)
+		rootLeaf, err := store.RetrieveLeaf(message.Root, message.Root)
 		if err != nil {
 			WriteErrorToStream(stream, "Node does not have root leaf", nil)
 

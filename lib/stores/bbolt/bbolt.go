@@ -60,7 +60,7 @@ func (store *BBoltStore) InitStore(args ...interface{}) error {
 	return nil
 }
 
-func (store *BBoltStore) StoreLeaf(leaf *merkle_dag.DagLeaf) error {
+func (store *BBoltStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) error {
 	if leaf.Data != nil {
 		h := sha256.New()
 		h.Write(leaf.Data)
@@ -88,7 +88,7 @@ func (store *BBoltStore) StoreLeaf(leaf *merkle_dag.DagLeaf) error {
 	return nil
 }
 
-func (store *BBoltStore) RetrieveLeaf(hash string) (*merkle_dag.DagLeaf, error) {
+func (store *BBoltStore) RetrieveLeaf(root string, hash string) (*merkle_dag.DagLeaf, error) {
 	key := hash // merkle_dag.GetHash(hash)
 
 	log.Printf("Searching for leaf with key: %s\n", key)

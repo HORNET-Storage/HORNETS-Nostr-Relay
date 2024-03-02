@@ -9,8 +9,8 @@ import (
 
 type Store interface {
 	InitStore(args ...interface{}) error
-	StoreLeaf(*merkle_dag.DagLeaf) error
-	RetrieveLeaf(hash string) (*merkle_dag.DagLeaf, error)
+	StoreLeaf(root string, leaf *merkle_dag.DagLeaf) error
+	RetrieveLeaf(root string, hash string) (*merkle_dag.DagLeaf, error)
 	StoreDag(dag *merkle_dag.Dag) error
 	BuildDagFromStore(root string) (*merkle_dag.Dag, error)
 }
@@ -28,7 +28,7 @@ func BuildDagFromStore(store Store, root string) (*merkle_dag.Dag, error) {
 	var addLeavesRecursively func(builder *merkle_dag.DagBuilder, encoder multibase.Encoder, hash string) error
 
 	addLeavesRecursively = func(builder *merkle_dag.DagBuilder, encoder multibase.Encoder, hash string) error {
-		leaf, err := store.RetrieveLeaf(hash)
+		leaf, err := store.RetrieveLeaf(root, hash)
 		if err != nil {
 			log.Println("Unable to find leaf in the database:", err)
 			return err

@@ -22,7 +22,9 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
-	stores_bbolt "github.com/HORNET-Storage/hornet-storage/lib/stores/bbolt"
+	//stores_bbolt "github.com/HORNET-Storage/hornet-storage/lib/stores/bbolt"
+	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
+	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 )
 
 const DefaultPort = "9000"
@@ -86,15 +88,15 @@ func main() {
 	}
 
 	// New storage implementation (will replace the above)
-	store := &stores_bbolt.BBoltStore{}
+	store := &stores_graviton.GravitonStore{}
 
-	store.InitStore("main")
+	store.InitStore()
 
 	ctx = context.WithValue(ctx, keys.Storage, store)
 
 	// This works but feels weird, open to better solutions
-	defer store.UserDatabase.Db.Close()
-	defer store.ContentDatabase.Db.Close()
+	//defer store.UserDatabase.Db.Close()
+	//defer store.ContentDatabase.Db.Close()
 
 	// Setup libp2p Connection Manager
 	connmgr, err := connmgr.NewConnManager(
