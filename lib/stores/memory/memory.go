@@ -19,7 +19,7 @@ func (store *MemoryStore) InitStore(args ...interface{}) error {
 	return nil
 }
 
-func (store *MemoryStore) StoreLeaf(leaf *merkle_dag.DagLeaf) error {
+func (store *MemoryStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) error {
 	key := leaf.Hash // merkle_dag.GetHash(leaf.Hash)
 
 	log.Printf("Adding key to block database: %s\n", key)
@@ -29,7 +29,7 @@ func (store *MemoryStore) StoreLeaf(leaf *merkle_dag.DagLeaf) error {
 	return nil
 }
 
-func (store *MemoryStore) RetrieveLeaf(hash string) (*merkle_dag.DagLeaf, error) {
+func (store *MemoryStore) RetrieveLeaf(root string, hash string) (*merkle_dag.DagLeaf, error) {
 	key := hash // merkle_dag.GetHash(hash)
 
 	log.Printf("Searching for leaf with key: %s\n", key)
