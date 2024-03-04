@@ -25,11 +25,11 @@ func AddDownloadHandler(libp2phost host.Host, store stores.Store, canDownloadDag
 	libp2phost.SetStreamHandler("/download/1.0.0", BuildDownloadStreamHandler(store, canDownloadDag))
 }
 
-func AddUploadHandler(libp2phost host.Host, store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag)) {
+func AddUploadHandler(libp2phost host.Host, store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string)) {
 	libp2phost.SetStreamHandler("/upload/1.0.0", BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag))
 }
 
-func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag)) func(stream network.Stream) {
+func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string)) func(stream network.Stream) {
 	uploadStreamHandler := func(stream network.Stream) {
 		result, message := WaitForUploadMessage(stream)
 		if !result {
@@ -193,7 +193,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		log.Println("Upload finished")
 
-		handleRecievedDag(dag)
+		handleRecievedDag(dag, &message.PublicKey)
 
 		stream.Close()
 	}
