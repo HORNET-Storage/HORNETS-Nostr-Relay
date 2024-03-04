@@ -157,7 +157,7 @@ func main() {
 	log.Println("Adding download handler")
 
 	// Stream Handlers
-	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf) bool {
+	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		// Check keys or potential future permissions here
 
 		return true
@@ -165,7 +165,11 @@ func main() {
 
 	log.Println("Adding upload handler")
 
-	handlers.AddUploadHandler(host, store, func(dag *merkle_dag.Dag) {
+	handlers.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+		// Check keys or potential future permissions here
+
+		return true
+	}, func(dag *merkle_dag.Dag) {
 		// Don't need to do anything here right now
 	})
 

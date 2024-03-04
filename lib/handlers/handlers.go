@@ -21,15 +21,15 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 )
 
-func AddDownloadHandler(libp2phost host.Host, store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf) bool) {
+func AddDownloadHandler(libp2phost host.Host, store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) {
 	libp2phost.SetStreamHandler("/download/1.0.0", BuildDownloadStreamHandler(store, canDownloadDag))
 }
 
-func AddUploadHandler(libp2phost host.Host, store stores.Store, handleRecievedDag func(dag *merkle_dag.Dag)) {
-	libp2phost.SetStreamHandler("/upload/1.0.0", BuildUploadStreamHandler(store, handleRecievedDag))
+func AddUploadHandler(libp2phost host.Host, store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag)) {
+	libp2phost.SetStreamHandler("/upload/1.0.0", BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag))
 }
 
-func BuildUploadStreamHandler(store stores.Store, handleRecievedDag func(dag *merkle_dag.Dag)) func(stream network.Stream) {
+func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag)) func(stream network.Stream) {
 	uploadStreamHandler := func(stream network.Stream) {
 		result, message := WaitForUploadMessage(stream)
 		if !result {
@@ -54,6 +54,13 @@ func BuildUploadStreamHandler(store stores.Store, handleRecievedDag func(dag *me
 		result, err = message.Leaf.VerifyRootLeaf(encoder)
 		if err != nil || !result {
 			WriteErrorToStream(stream, "Failed to verify root leaf", err)
+
+			stream.Close()
+			return
+		}
+
+		if !canUploadDag(&message.Leaf, &message.PublicKey, &message.Signature) {
+			WriteErrorToStream(stream, "Not allowed to upload this", nil)
 
 			stream.Close()
 			return
@@ -194,7 +201,7 @@ func BuildUploadStreamHandler(store stores.Store, handleRecievedDag func(dag *me
 	return uploadStreamHandler
 }
 
-func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf) bool) func(network.Stream) {
+func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) func(network.Stream) {
 	downloadStreamHandler := func(stream network.Stream) {
 		enc := cbor.NewEncoder(stream)
 
@@ -243,7 +250,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			return
 		}
 
-		if !canDownloadDag(rootLeaf) {
+		if !canDownloadDag(rootLeaf, &message.PublicKey, &message.Signature) {
 			WriteErrorToStream(stream, "Not allowed to download this", nil)
 
 			stream.Close()

@@ -5,18 +5,22 @@ import (
 )
 
 type UploadMessage struct {
-	Root   string
-	Count  int
-	Leaf   merkle_dag.DagLeaf
-	Parent string
-	Branch *merkle_dag.ClassicTreeBranch
+	Root      string
+	Count     int
+	Leaf      merkle_dag.DagLeaf
+	Parent    string
+	Branch    *merkle_dag.ClassicTreeBranch
+	PublicKey string
+	Signature string
 }
 
 type DownloadMessage struct {
-	Root  string
-	Label *string
-	Hash  *string
-	Range *LeafRange
+	Root      string
+	Label     *string
+	Hash      *string
+	Range     *LeafRange
+	PublicKey string
+	Signature string
 }
 
 type BlockData struct {
