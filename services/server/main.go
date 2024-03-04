@@ -169,7 +169,7 @@ func main() {
 		// Check keys or potential future permissions here
 
 		return true
-	}, func(dag *merkle_dag.Dag) {
+	}, func(dag *merkle_dag.Dag, pubKey *string) {
 		// Don't need to do anything here right now
 	})
 
