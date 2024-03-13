@@ -11,11 +11,11 @@ import (
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
-type GravitonStore struct {
+type GravitonMemoryStore struct {
 	Database *graviton.Store
 }
 
-func (store *GravitonStore) InitStore(args ...interface{}) error {
+func (store *GravitonMemoryStore) InitStore(args ...interface{}) error {
 	//db, err := graviton.NewDiskStore("gravitondb")
 	db, err := graviton.NewMemStore()
 	if err != nil {
@@ -42,7 +42,7 @@ func (store *GravitonStore) InitStore(args ...interface{}) error {
 	return nil
 }
 
-func (store *GravitonStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) error {
+func (store *GravitonMemoryStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) error {
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (store *GravitonStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) err
 	return nil
 }
 
-func (store *GravitonStore) RetrieveLeaf(root string, hash string) (*merkle_dag.DagLeaf, error) {
+func (store *GravitonMemoryStore) RetrieveLeaf(root string, hash string) (*merkle_dag.DagLeaf, error) {
 	key := []byte(hash) // merkle_dag.GetHash(hash)
 
 	snapshot, err := store.Database.LoadSnapshot(0)
@@ -149,10 +149,10 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string) (*merkle_dag.
 	return leaf, nil
 }
 
-func (store *GravitonStore) BuildDagFromStore(root string) (*merkle_dag.Dag, error) {
+func (store *GravitonMemoryStore) BuildDagFromStore(root string) (*merkle_dag.Dag, error) {
 	return stores.BuildDagFromStore(store, root)
 }
 
-func (store *GravitonStore) StoreDag(dag *merkle_dag.Dag) error {
+func (store *GravitonMemoryStore) StoreDag(dag *merkle_dag.Dag) error {
 	return stores.StoreDag(store, dag)
 }
