@@ -21,3 +21,5 @@ web/node_modules
 leaves
 content
 gravitondb
+
+config.json
