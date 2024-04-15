@@ -6,13 +6,14 @@ import (
 	"io"
 	"log"
 	"os"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/multiformats/go-multibase"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
@@ -41,18 +42,8 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		log.Println("Recieved upload message")
 
-		encoding, _, err := multibase.Decode(message.Root)
+		err := message.Leaf.VerifyRootLeaf()
 		if err != nil {
-			WriteErrorToStream(stream, "Failed to discover encoding from root hash: %e", err)
-
-			stream.Close()
-			return
-		}
-
-		encoder := multibase.MustNewEncoder(encoding)
-
-		result, err = message.Leaf.VerifyRootLeaf(encoder)
-		if err != nil || !result {
 			WriteErrorToStream(stream, "Failed to verify root leaf", err)
 
 			stream.Close()
@@ -99,38 +90,15 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 			log.Println("Recieved upload message")
 
-			encoding, _, err := multibase.Decode(message.Root)
+			err = message.Leaf.VerifyLeaf()
 			if err != nil {
-				WriteErrorToStream(stream, "Failed to discover encoding from root hash: %e", err)
-
-				stream.Close()
-				break
-			}
-
-			encoder := multibase.MustNewEncoder(encoding)
-
-			/*
-				data := encoder.Encode(message.Leaf.Data)
-
-				if IsHash(data) {
-					if err := RepairLeafContent(ctx, &message.Leaf); err != nil {
-						WriteErrorToStream(stream, "Server does not contain leaf data: %e", err)
-
-						stream.Close()
-						return
-					}
-				}
-			*/
-
-			result, err = message.Leaf.VerifyLeaf(encoder)
-			if err != nil || !result {
 				WriteErrorToStream(stream, "Failed to verify leaf", err)
 
 				stream.Close()
 				break
 			}
 
-			parent, err := store.RetrieveLeaf(message.Root, message.Parent)
+			parent, err := store.RetrieveLeaf(message.Root, message.Parent, false)
 			if err != nil || !result {
 				WriteErrorToStream(stream, "Failed to find parent leaf", err)
 
@@ -139,7 +107,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			}
 
 			if message.Branch != nil {
-				result, err = parent.VerifyBranch(message.Branch)
+				err = parent.VerifyBranch(message.Branch)
 				if err != nil || !result {
 					WriteErrorToStream(stream, "Failed to verify leaf branch", err)
 
@@ -171,7 +139,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		log.Printf("Building and verifying dag for %d leaves\n", leafCount)
 
-		dag, err := store.BuildDagFromStore(message.Root)
+		dag, err := store.BuildDagFromStore(message.Root, true)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to build dag from provided leaves: %e", err)
 
@@ -179,16 +147,12 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		result, err = dag.Verify(encoder)
+		err = dag.Verify()
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to verify dag: %e", err)
 
 			stream.Close()
 			return
-		}
-
-		if !result {
-			log.Printf("Failed to verify dag: %s\n", message.Root)
 		}
 
 		log.Println("Upload finished")
@@ -214,7 +178,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		}
 
 		// Ensure the node is storing the root leaf
-		rootLeaf, err := store.RetrieveLeaf(message.Root, message.Root)
+		rootLeaf, err := store.RetrieveLeaf(message.Root, message.Root, true)
 		if err != nil {
 			WriteErrorToStream(stream, "Node does not have root leaf", nil)
 
@@ -222,17 +186,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			return
 		}
 
-		encoding, _, err := multibase.Decode(message.Root)
-		if err != nil {
-			WriteErrorToStream(stream, "Failed to discover encoding from root hash: %e", err)
-
-			stream.Close()
-			return
-		}
-
-		encoder := multibase.MustNewEncoder(encoding)
-
-		result, err = rootLeaf.VerifyRootLeaf(encoder)
+		err = rootLeaf.VerifyRootLeaf()
 		if err != nil {
 			WriteErrorToStream(stream, "Error occured when trying to verify root leaf", err)
 
@@ -257,45 +211,31 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			return
 		}
 
-		if message.Hash != nil {
-			// Specific Leaf from hash
-		} else if message.Range != nil {
-			// Range of leaves by labels
+		log.Printf("Download requested for: %s\n", message.Root)
 
-		} else if message.Label != nil {
-			// Specific Leaf from label
+		// Entire dag
+		dag, err := store.BuildDagFromStore(message.Root, true)
+		if err != nil {
+			WriteErrorToStream(stream, "Failed to build dag from root %e", err)
 
-		} else {
-			log.Printf("Download requested for: %s\n", message.Root)
+			stream.Close()
+			return
+		}
 
-			// Entire dag
-			dag, err := store.BuildDagFromStore(message.Root)
-			if err != nil {
-				WriteErrorToStream(stream, "Failed to build dag from root %e", err)
+		count := len(dag.Leafs)
 
-				stream.Close()
-				return
-			}
+		streamEncoder := cbor.NewEncoder(stream)
 
-			count := len(dag.Leafs)
-
-			streamEncoder := cbor.NewEncoder(stream)
-
-			err = dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) {
+		if message.Filter != nil {
+			err = dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) error {
 				if leaf.Hash == dag.Root {
-					result, err := leaf.VerifyRootLeaf(encoder)
+					err := leaf.VerifyRootLeaf()
 					if err != nil {
-						WriteErrorToStream(stream, "Failed to verify root leaf %e", err)
-
-						stream.Close()
-						return
+						return err
 					}
 
-					if !result {
-						WriteErrorToStream(stream, "Failed to verify root leaf", nil)
-
-						stream.Close()
-						return
+					if !message.Filter.IncludeContent {
+						leaf.Content = nil
 					}
 
 					message := lib.UploadMessage{
@@ -305,33 +245,109 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					}
 
 					if err := enc.Encode(&message); err != nil {
-						return //nil, err
+						return err
 					}
 
 					log.Println("Uploaded root leaf")
 
 					if result := WaitForResponse(stream); !result {
-						WriteErrorToStream(stream, "Did not recieve a valid response%e", err)
-
-						stream.Close()
-						return
+						return err
 					}
 
 					log.Println("Response received")
 				} else {
-					result, err := leaf.VerifyLeaf(encoder)
-					if err != nil {
-						WriteErrorToStream(stream, "Failed to verify leaf %e", err)
+					valid, err := CheckFilter(leaf, message.Filter)
 
-						stream.Close()
-						return
+					if err != nil && valid {
+						if !message.Filter.IncludeContent {
+							leaf.Content = nil
+						}
+
+						err := leaf.VerifyLeaf()
+						if err != nil {
+							return err
+						}
+
+						label := merkle_dag.GetLabel(leaf.Hash)
+
+						var branch *merkle_dag.ClassicTreeBranch
+
+						if len(leaf.Links) > 1 {
+							branch, err = parent.GetBranch(label)
+							if err != nil {
+								return err
+							}
+
+							err = parent.VerifyBranch(branch)
+							if err != nil {
+								return err
+							}
+
+							if !result {
+								return err
+							}
+						}
+
+						message := lib.UploadMessage{
+							Root:   dag.Root,
+							Count:  count,
+							Leaf:   *leaf,
+							Parent: parent.Hash,
+							Branch: branch,
+						}
+
+						if err := streamEncoder.Encode(&message); err != nil {
+							return err
+						}
+
+						log.Println("Uploaded next leaf")
+
+						if result = WaitForResponse(stream); !result {
+							return err
+						}
+
+						log.Println("Response recieved")
+					}
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				WriteErrorToStream(stream, "Failed to download dag %e", err)
+
+				stream.Close()
+				return
+			}
+		} else {
+			err = dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) error {
+				if leaf.Hash == dag.Root {
+					err := leaf.VerifyRootLeaf()
+					if err != nil {
+						return err
 					}
 
-					if !result {
-						WriteErrorToStream(stream, "Failed to verify leaf %e", err)
+					message := lib.UploadMessage{
+						Root:  dag.Root,
+						Count: count,
+						Leaf:  *rootLeaf,
+					}
 
-						stream.Close()
-						return
+					if err := enc.Encode(&message); err != nil {
+						return err
+					}
+
+					log.Println("Uploaded root leaf")
+
+					if result := WaitForResponse(stream); !result {
+						return err
+					}
+
+					log.Println("Response received")
+				} else {
+					err := leaf.VerifyLeaf()
+					if err != nil {
+						return err
 					}
 
 					label := merkle_dag.GetLabel(leaf.Hash)
@@ -341,25 +357,12 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					if len(leaf.Links) > 1 {
 						branch, err = parent.GetBranch(label)
 						if err != nil {
-							WriteErrorToStream(stream, "Failed to get branch %e", err)
-
-							stream.Close()
-							return
+							return err
 						}
 
-						result, err = parent.VerifyBranch(branch)
+						err = parent.VerifyBranch(branch)
 						if err != nil {
-							WriteErrorToStream(stream, "Failed to verify branch %e", err)
-
-							stream.Close()
-							return
-						}
-
-						if !result {
-							WriteErrorToStream(stream, "Failed to verify branch for leaf %e", err)
-
-							stream.Close()
-							return
+							return err
 						}
 					}
 
@@ -372,23 +375,19 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					}
 
 					if err := streamEncoder.Encode(&message); err != nil {
-						WriteErrorToStream(stream, "Failed to encode to stream %e", err)
-
-						stream.Close()
-						return
+						return err
 					}
 
 					log.Println("Uploaded next leaf")
 
 					if result = WaitForResponse(stream); !result {
-						WriteErrorToStream(stream, "Did not recieve a valid response %e", err)
-
-						stream.Close()
-						return
+						return fmt.Errorf("did not recieve a valid response")
 					}
 
 					log.Println("Response recieved")
 				}
+
+				return nil
 			})
 
 			if err != nil {
@@ -398,13 +397,44 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 				return
 			}
 
-			log.Println("Dag has been downloaded")
 		}
+
+		log.Println("Dag has been downloaded")
 
 		stream.Close()
 	}
 
 	return downloadStreamHandler
+}
+
+func CheckFilter(leaf *merkle_dag.DagLeaf, filter *lib.DownloadFilter) (bool, error) {
+	label := merkle_dag.GetLabel(leaf.Hash)
+
+	if slices.Contains(filter.Leaves, label) {
+		return true, nil
+	}
+
+	labelInt, err := strconv.Atoi(label)
+	if err != nil {
+		return false, err
+	}
+
+	for _, rangeItem := range filter.LeafRanges {
+		fromInt, err := strconv.Atoi(rangeItem.From)
+		if err != nil {
+			continue // Skip invalid ranges
+		}
+		toInt, err := strconv.Atoi(rangeItem.To)
+		if err != nil {
+			continue // Skip invalid ranges
+		}
+
+		if labelInt >= fromInt && labelInt <= toInt {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func WriteErrorToStream(stream network.Stream, message string, err error) error {

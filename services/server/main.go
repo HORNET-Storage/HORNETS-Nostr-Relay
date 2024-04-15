@@ -1,23 +1,37 @@
 package main
 
 import (
-	"context"
 	"encoding/hex"
-	"flag"
 	"fmt"
+	"io"
 	"log"
+	"strings"
 	"sync"
-	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/filter"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
+	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
+	"github.com/HORNET-Storage/hornet-storage/lib/proxy"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
-	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/protocol"
 
-	keys "github.com/HORNET-Storage/hornet-storage/lib/context"
+	//"github.com/libp2p/go-libp2p/p2p/security/noise"
+	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
@@ -27,109 +41,72 @@ import (
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 )
 
-const DefaultPort = "9000"
+func init() {
+	viper.SetDefault("key", "")
+	viper.SetDefault("web", false)
+	viper.SetDefault("proxy", true)
+	viper.SetDefault("port", "9000")
+
+	viper.AddConfigPath(".")
+	viper.SetConfigType("json")
+
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			viper.SafeWriteConfig()
+		}
+	}
+
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		fmt.Println("Config file changed:", e.Name)
+	})
+
+	viper.WatchConfig()
+}
 
 func main() {
-	ctx := context.Background()
-
 	wg := new(sync.WaitGroup)
 
-	keyFlag := flag.String("key", "", "Private key used to identify this node")
-	webFlag := flag.Bool("web", false, "Launch web server: true/false")
-	portFlag := flag.String("port", "", "Port to run the node on")
-
-	flag.Parse()
-
-	// Web Panel
-	if *webFlag {
-		wg.Add(1)
-		fmt.Println("Starting with web server enabled")
-		go func() {
-			err := web.StartServer()
-
-			if err != nil {
-				fmt.Println("Fatal error occured in web server")
-			}
-
-			wg.Done()
-		}()
-	}
-
-	// Port
-	port := DefaultPort
-	if portFlag != nil {
-		port = *portFlag
-	}
-
 	// Private key
-	var priv crypto.PrivKey
-	if keyFlag != nil {
-		bytes, err := hex.DecodeString(*keyFlag)
-		if err != nil {
-			log.Fatal(err)
-		}
+	key := strings.TrimPrefix(viper.GetString("key"), "nsec")
 
-		privateKey, err := crypto.UnmarshalPrivateKey(bytes)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		priv = privateKey
-	} else {
-		privateKey, _, err := crypto.GenerateKeyPair(
-			crypto.Ed25519,
-			-1,
-		)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		priv = privateKey
+	decodedKey, err := hex.DecodeString(key)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// New storage implementation (will replace the above)
+	privateKey, err := crypto.UnmarshalSecp256k1PrivateKey(decodedKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create and initialize database
 	store := &stores_graviton.GravitonStore{}
 
 	store.InitStore()
 
-	ctx = context.WithValue(ctx, keys.Storage, store)
-
-	// This works but feels weird, open to better solutions
-	//defer store.UserDatabase.Db.Close()
-	//defer store.ContentDatabase.Db.Close()
-
-	// Setup libp2p Connection Manager
-	connmgr, err := connmgr.NewConnManager(
-		100, // Lowwater
-		400, // HighWater,
-		connmgr.WithGracePeriod(time.Minute),
-	)
-	if err != nil {
-		panic(err)
-	}
-
 	// Libp2p Host
-	listenAddress := fmt.Sprintf("/ip4/0.0.0.0/tcp/%s", port)
+	listenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", viper.GetString("port"))
 
 	host, err := libp2p.New(
-		libp2p.Identity(priv),
+		libp2p.Identity(privateKey),
 		// Multiple listen addresses
 		libp2p.ListenAddrStrings(
 			listenAddress,
 		),
 		// support TLS connections
-		libp2p.Security(libp2ptls.ID, libp2ptls.New),
+		//libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		// support noise connections
-		libp2p.Security(noise.ID, noise.New),
+		//libp2p.Security(noise.ID, noise.New),
 
 		//libp2p.Transport(customQUICConstructor),
 		// support any other default transports (TCP)
-		libp2p.DefaultTransports,
+		//libp2p.DefaultTransports,
+		libp2p.Transport(libp2pquic.NewTransport),
 		//libp2p.Transport(transport),
 		// Let's prevent our peer from having too many
 		// connections by attaching a connection manager.
 
-		libp2p.ConnectionManager(connmgr),
+		//libp2p.ConnectionManager(connmgr),
 		// Attempt to open ports using uPNP for NATed hosts.
 
 		//libp2p.NATPortMap(),
@@ -154,16 +131,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Println("Adding download handler")
-
 	// Stream Handlers
 	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		// Check keys or potential future permissions here
 
 		return true
 	})
-
-	log.Println("Adding upload handler")
 
 	handlers.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		// Check keys or potential future permissions here
@@ -173,13 +146,77 @@ func main() {
 		// Don't need to do anything here right now
 	})
 
+	// Register Our Nostr Stream Handlers
+	nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
+	nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
+	nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
+	nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
+	nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
+	nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
+	nostr.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
+	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
+	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
+
+	// Register a libp2p handler for every stream handler
+	for kind, handler := range nostr.GetHandlers() {
+		wrapper := func(stream network.Stream) {
+			read := func() ([]byte, error) {
+				return io.ReadAll(stream)
+			}
+
+			write := func(messageType string, params ...interface{}) {
+				response := nostr.BuildResponse(messageType, params)
+
+				if len(response) > 0 {
+					stream.Write(response)
+				}
+			}
+
+			handler(read, write)
+
+			stream.Close()
+		}
+
+		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), wrapper)
+	}
+
+	// Web Panel
+	if viper.GetBool("web") {
+		wg.Add(1)
+
+		fmt.Println("Starting with web server enabled")
+
+		go func() {
+			err := web.StartServer()
+
+			if err != nil {
+				fmt.Println("Fatal error occured in web server")
+			}
+
+			wg.Done()
+		}()
+	}
+
+	// Proxy web sockets
+	if viper.GetBool("proxy") {
+		wg.Add(1)
+
+		fmt.Println("Starting with legacy nostr proxy web server enabled")
+
+		go func() {
+			err := proxy.StartServer()
+
+			if err != nil {
+				fmt.Println("Fatal error occured in web server")
+			}
+
+			wg.Done()
+		}()
+	}
+
 	defer host.Close()
 
-	ctx = context.WithValue(ctx, keys.Host, host)
-
 	fmt.Printf("Host started with id: %s\n", host.ID())
-
-	keys.SetContext(ctx)
 
 	wg.Wait()
 }

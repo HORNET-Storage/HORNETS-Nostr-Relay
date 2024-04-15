@@ -16,21 +16,26 @@ type UploadMessage struct {
 
 type DownloadMessage struct {
 	Root      string
-	Label     *string
-	Hash      *string
-	Range     *LeafRange
 	PublicKey string
 	Signature string
+	Filter    *DownloadFilter
+}
+
+type LeafLabelRange struct {
+	From           string
+	To             string
+	IncludeContent bool
+}
+
+type DownloadFilter struct {
+	Leaves         []string
+	LeafRanges     []LeafLabelRange
+	IncludeContent bool // IncludeContent from LeafLabelRange always overrides this
 }
 
 type BlockData struct {
 	Leaf   merkle_dag.DagLeaf
 	Branch merkle_dag.ClassicTreeBranch
-}
-
-type LeafRange struct {
-	From int
-	To   int
 }
 
 type ResponseMessage struct {

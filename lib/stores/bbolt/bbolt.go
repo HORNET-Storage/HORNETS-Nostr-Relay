@@ -1,5 +1,6 @@
 package bbolt
 
+/*
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -127,3 +128,4 @@ func (store *BBoltStore) BuildDagFromStore(root string) (*merkle_dag.Dag, error)
 func (store *BBoltStore) StoreDag(dag *merkle_dag.Dag) error {
 	return stores.StoreDag(store, dag)
 }
+*/
