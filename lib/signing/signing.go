@@ -1,57 +1,52 @@
 package signing
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcutil/bech32"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-func DeserializePrivateKey(serializedKey string) (*btcec.PrivateKey, *btcec.PublicKey, error) {
-	trimmedKey := strings.TrimPrefix(serializedKey, "nsec")
-
-	keyBytes, err := hex.DecodeString(trimmedKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	privateKey, publicKey := btcec.PrivKeyFromBytes(keyBytes)
-
-	return privateKey, publicKey, nil
-}
-
-func DeserializePublicKey(serializedKey string) (*btcec.PublicKey, error) {
-	trimmedKey := strings.TrimPrefix(serializedKey, "npub")
-
-	keyBytes, err := hex.DecodeString(trimmedKey)
+func DecodeKey(serializedKey string) ([]byte, error) {
+	_, bytesToBits, err := bech32.Decode(serializedKey)
 	if err != nil {
 		return nil, err
 	}
 
-	publicKey, err := btcec.ParsePubKey(keyBytes)
+	privateKeyBytes, err := bech32.ConvertBits(bytesToBits, 5, 8, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return privateKeyBytes, nil
+}
+
+func DeserializePrivateKey(serializedKey string) (*secp256k1.PrivateKey, *secp256k1.PublicKey, error) {
+	privateKeyBytes, err := DecodeKey(serializedKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	privateKey, publicKey := btcec.PrivKeyFromBytes(privateKeyBytes)
+
+	return privateKey, publicKey, nil
+}
+
+func DeserializePublicKey(serializedKey string) (*secp256k1.PublicKey, error) {
+	publicKeyBytes, err := DecodeKey(serializedKey)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKey, err := btcec.ParsePubKey(publicKeyBytes)
 	if err != nil {
 		return nil, err
 	}
 
 	return publicKey, nil
-}
-
-func SerializePrivateKey(key *btcec.PrivateKey) string {
-	keyBytes := key.Serialize()
-
-	encodedKey := hex.EncodeToString(keyBytes)
-
-	return fmt.Sprintf("nsec:%s", encodedKey)
-}
-
-func SerializePublicKey(key *btcec.PublicKey) string {
-	keyBytes := key.SerializeCompressed()
-
-	encodedKey := hex.EncodeToString(keyBytes)
-
-	return fmt.Sprintf("npub:%s", encodedKey)
 }
 
 func TrimPrivateKey(privateKey string) string {
@@ -71,11 +66,54 @@ func SignData(data []byte, privateKey *btcec.PrivateKey) (*schnorr.Signature, er
 	return signature, nil
 }
 
-func VerifySignature(signature *schnorr.Signature, data []byte, publicKey *btcec.PublicKey) error {
+func VerifySignature(signature *schnorr.Signature, data []byte, publicKey *secp256k1.PublicKey) error {
 	result := signature.Verify(data, publicKey)
 	if !result {
 		return fmt.Errorf("data failed to verify")
 	}
 
 	return nil
+}
+
+func GeneratePrivateKey() (*secp256k1.PrivateKey, error) {
+	privateKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	return privateKey, nil
+}
+
+func SerializePrivateKey(privateKey *secp256k1.PrivateKey) (*string, error) {
+	privateKeyBytes := privateKey.Serialize()
+
+	bytesToBits, err := bech32.ConvertBits(privateKeyBytes, 8, 5, true)
+
+	if err != nil {
+		return nil, err
+	}
+
+	encodedKey, err := bech32.Encode("nsec", bytesToBits)
+	if err != nil {
+		return nil, err
+	}
+
+	return &encodedKey, nil
+}
+
+func SerializePublicKey(publicKey *secp256k1.PublicKey) (*string, error) {
+	publicKeyBytes := publicKey.SerializeCompressed()
+
+	bytesToBits, err := bech32.ConvertBits(publicKeyBytes, 8, 5, true)
+
+	if err != nil {
+		return nil, err
+	}
+
+	encodedKey, err := bech32.Encode("npub", bytesToBits)
+	if err != nil {
+		return nil, err
+	}
+
+	return &encodedKey, nil
 }

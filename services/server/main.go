@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
-	"strings"
 	"sync"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/filter"
@@ -19,6 +17,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
 	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/proxy"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
@@ -67,9 +66,9 @@ func main() {
 	wg := new(sync.WaitGroup)
 
 	// Private key
-	key := strings.TrimPrefix(viper.GetString("key"), "nsec")
+	key := viper.GetString("key")
 
-	decodedKey, err := hex.DecodeString(key)
+	decodedKey, err := signing.DecodeKey(key)
 	if err != nil {
 		log.Fatal(err)
 	}
