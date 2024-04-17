@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,9 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/proxy"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/fsnotify/fsnotify"
+	"github.com/ipfs/go-cid"
 	"github.com/spf13/viper"
 
 	"github.com/libp2p/go-libp2p"
@@ -45,6 +48,9 @@ func init() {
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
+	viper.SetDefault("query_cache", map[string]string{
+		"hkind:2": "ItemName",
+	})
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -81,7 +87,8 @@ func main() {
 	// Create and initialize database
 	store := &stores_graviton.GravitonStore{}
 
-	store.InitStore()
+	queryCache := viper.GetStringMapString("query_cache")
+	store.InitStore(queryCache)
 
 	// Libp2p Host
 	listenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", viper.GetString("port"))
@@ -132,18 +139,33 @@ func main() {
 
 	// Stream Handlers
 	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
-		// Check keys or potential future permissions here
-
 		return true
 	})
 
 	handlers.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
-		// Check keys or potential future permissions here
+		decodedSignature, err := hex.DecodeString(*signature)
+		if err != nil {
+			return false
+		}
 
-		return true
-	}, func(dag *merkle_dag.Dag, pubKey *string) {
-		// Don't need to do anything here right now
-	})
+		parsedSignature, err := schnorr.ParseSignature(decodedSignature)
+		if err != nil {
+			return false
+		}
+
+		cid, err := cid.Parse(rootLeaf.Hash)
+		if err != nil {
+			return false
+		}
+
+		publicKey, err := signing.DeserializePublicKey(*pubKey)
+		if err != nil {
+			return false
+		}
+
+		err = signing.VerifyCIDSignature(parsedSignature, cid, publicKey)
+		return err == nil
+	}, func(dag *merkle_dag.Dag, pubKey *string) {})
 
 	// Register Our Nostr Stream Handlers
 	nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
