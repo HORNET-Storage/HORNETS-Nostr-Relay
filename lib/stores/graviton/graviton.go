@@ -14,6 +14,8 @@ import (
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	jsoniter "github.com/json-iterator/go"
+
+	types "github.com/HORNET-Storage/hornet-storage/lib"
 )
 
 type GravitonStore struct {
@@ -47,9 +49,9 @@ func (store *GravitonStore) InitStore(args ...interface{}) error {
 	return nil
 }
 
-func (store *GravitonStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) error {
-	if leaf.ContentHash != nil && leaf.Content == nil {
-		return fmt.Errorf("Leaf has content hash but no content")
+func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) error {
+	if leafData.Leaf.ContentHash != nil && leafData.Leaf.Content == nil {
+		return fmt.Errorf("leaf has content hash but no content")
 	}
 
 	snapshot, err := store.Database.LoadSnapshot(0)
@@ -59,43 +61,43 @@ func (store *GravitonStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) err
 
 	var contentTree *graviton.Tree = nil
 
-	if leaf.Content != nil {
+	if leafData.Leaf.Content != nil {
 		contentTree, err = snapshot.GetTree("content")
 		if err != nil {
 			return err
 		}
 
-		err = contentTree.Put(leaf.ContentHash, leaf.Content)
+		err = contentTree.Put(leafData.Leaf.ContentHash, leafData.Leaf.Content)
 		if err != nil {
 			return err
 		}
 
-		leaf.Content = nil
+		leafData.Leaf.Content = nil
 	}
 
 	var rootLeaf *merkle_dag.DagLeaf
 
-	if leaf.Hash == root {
-		rootLeaf = leaf
+	if leafData.Leaf.Hash == root {
+		rootLeaf = &leafData.Leaf
 	} else {
 		_rootLeaf, err := store.RetrieveLeaf(root, root, false)
 		if err != nil {
 			return err
 		}
 
-		rootLeaf = _rootLeaf
+		rootLeaf = &_rootLeaf.Leaf
 	}
 
 	bucket := GetBucket(rootLeaf)
 
 	fmt.Printf("Adding to bucket: %s\n", bucket)
 
-	cborData, err := cbor.Marshal(leaf)
+	cborData, err := cbor.Marshal(leafData)
 	if err != nil {
 		return err
 	}
 
-	key := leaf.Hash // merkle_dag.GetHash(leaf.Hash)
+	key := leafData.Leaf.Hash // merkle_dag.GetHash(leaf.Hash)
 
 	log.Printf("Adding key to block database: %s\n", key)
 
@@ -113,7 +115,7 @@ func (store *GravitonStore) StoreLeaf(root string, leaf *merkle_dag.DagLeaf) err
 
 	trees = append(trees, tree)
 
-	if rootLeaf.Hash == leaf.Hash {
+	if rootLeaf.Hash == leafData.Leaf.Hash {
 		indexTree, err := snapshot.GetTree("root_index")
 		if err != nil {
 			return err
@@ -178,7 +180,7 @@ func (store *GravitonStore) retrieveBucket(root string) (string, error) {
 	return string(bytes), nil
 }
 
-func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeContent bool) (*merkle_dag.DagLeaf, error) {
+func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error) {
 	key := []byte(hash) // merkle_dag.GetHash(hash)
 
 	snapshot, err := store.Database.LoadSnapshot(0)
@@ -202,34 +204,34 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 		return nil, err
 	}
 
-	var leaf *merkle_dag.DagLeaf = &merkle_dag.DagLeaf{}
+	var data *types.DagLeafData = &types.DagLeafData{}
 
-	err = cbor.Unmarshal(bytes, leaf)
+	err = cbor.Unmarshal(bytes, data)
 	if err != nil {
 		return nil, err
 	}
 
-	if includeContent && leaf.ContentHash != nil {
+	if includeContent && data.Leaf.ContentHash != nil {
 		fmt.Println("Fetching  leaf content")
 
-		content, err := store.RetrieveLeafContent(leaf.ContentHash)
+		content, err := store.RetrieveLeafContent(data.Leaf.ContentHash)
 		if err != nil {
 			return nil, err
 		}
 
-		leaf.Content = content
+		data.Leaf.Content = content
 	}
 
 	fmt.Println("Leaf found")
 
-	return leaf, nil
+	return data, nil
 }
 
-func (store *GravitonStore) BuildDagFromStore(root string, includeContent bool) (*merkle_dag.Dag, error) {
+func (store *GravitonStore) BuildDagFromStore(root string, includeContent bool) (*types.DagData, error) {
 	return stores.BuildDagFromStore(store, root, includeContent)
 }
 
-func (store *GravitonStore) StoreDag(dag *merkle_dag.Dag) error {
+func (store *GravitonStore) StoreDag(dag *types.DagData) error {
 	return stores.StoreDag(store, dag)
 }
 

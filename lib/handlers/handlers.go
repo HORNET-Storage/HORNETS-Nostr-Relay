@@ -19,6 +19,8 @@ import (
 
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
+	types "github.com/HORNET-Storage/hornet-storage/lib"
+
 	"github.com/libp2p/go-libp2p/core/host"
 )
 
@@ -57,7 +59,13 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		err = store.StoreLeaf(message.Root, &message.Leaf)
+		rootData := &types.DagLeafData{
+			PublicKey: message.PublicKey,
+			Signature: message.Signature,
+			Leaf:      message.Leaf,
+		}
+
+		err = store.StoreLeaf(message.Root, rootData)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to verify root leaf", err)
 
@@ -98,13 +106,15 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 				break
 			}
 
-			parent, err := store.RetrieveLeaf(message.Root, message.Parent, false)
+			parentData, err := store.RetrieveLeaf(message.Root, message.Parent, false)
 			if err != nil || !result {
 				WriteErrorToStream(stream, "Failed to find parent leaf", err)
 
 				stream.Close()
 				break
 			}
+
+			parent := parentData.Leaf
 
 			if message.Branch != nil {
 				err = parent.VerifyBranch(message.Branch)
@@ -116,7 +126,11 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 				}
 			}
 
-			err = store.StoreLeaf(message.Root, &message.Leaf)
+			data := &types.DagLeafData{
+				Leaf: message.Leaf,
+			}
+
+			err = store.StoreLeaf(message.Root, data)
 			if err != nil {
 				WriteErrorToStream(stream, "Failed to add leaf to block database", err)
 
@@ -139,7 +153,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		log.Printf("Building and verifying dag for %d leaves\n", leafCount)
 
-		dag, err := store.BuildDagFromStore(message.Root, true)
+		dagData, err := store.BuildDagFromStore(message.Root, true)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to build dag from provided leaves: %e", err)
 
@@ -147,7 +161,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		err = dag.Verify()
+		err = dagData.Dag.Verify()
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to verify dag: %e", err)
 
@@ -157,7 +171,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		log.Println("Upload finished")
 
-		handleRecievedDag(dag, &message.PublicKey)
+		handleRecievedDag(&dagData.Dag, &message.PublicKey)
 
 		stream.Close()
 	}
@@ -178,13 +192,15 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		}
 
 		// Ensure the node is storing the root leaf
-		rootLeaf, err := store.RetrieveLeaf(message.Root, message.Root, true)
+		rootData, err := store.RetrieveLeaf(message.Root, message.Root, true)
 		if err != nil {
 			WriteErrorToStream(stream, "Node does not have root leaf", nil)
 
 			stream.Close()
 			return
 		}
+
+		rootLeaf := rootData.Leaf
 
 		err = rootLeaf.VerifyRootLeaf()
 		if err != nil {
@@ -204,7 +220,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			return
 		}
 
-		if !canDownloadDag(rootLeaf, &message.PublicKey, &message.Signature) {
+		if !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
 			WriteErrorToStream(stream, "Not allowed to download this", nil)
 
 			stream.Close()
@@ -214,13 +230,15 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		log.Printf("Download requested for: %s\n", message.Root)
 
 		// Entire dag
-		dag, err := store.BuildDagFromStore(message.Root, true)
+		dagData, err := store.BuildDagFromStore(message.Root, true)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to build dag from root %e", err)
 
 			stream.Close()
 			return
 		}
+
+		dag := dagData.Dag
 
 		count := len(dag.Leafs)
 
@@ -241,7 +259,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					message := lib.UploadMessage{
 						Root:  dag.Root,
 						Count: count,
-						Leaf:  *rootLeaf,
+						Leaf:  rootLeaf,
 					}
 
 					if err := enc.Encode(&message); err != nil {
@@ -330,7 +348,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					message := lib.UploadMessage{
 						Root:  dag.Root,
 						Count: count,
-						Leaf:  *rootLeaf,
+						Leaf:  rootLeaf,
 					}
 
 					if err := enc.Encode(&message); err != nil {
