@@ -1,6 +1,7 @@
 package signing
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil/bech32"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/ipfs/go-cid"
 )
 
 func DecodeKey(serializedKey string) ([]byte, error) {
@@ -66,10 +68,32 @@ func SignData(data []byte, privateKey *btcec.PrivateKey) (*schnorr.Signature, er
 	return signature, nil
 }
 
+func SignCID(cid cid.Cid, privateKey *btcec.PrivateKey) (*schnorr.Signature, error) {
+	hashed := sha256.Sum256(cid.Bytes())
+
+	signature, err := SignData(hashed[:], privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return signature, nil
+}
+
 func VerifySignature(signature *schnorr.Signature, data []byte, publicKey *secp256k1.PublicKey) error {
 	result := signature.Verify(data, publicKey)
 	if !result {
 		return fmt.Errorf("data failed to verify")
+	}
+
+	return nil
+}
+
+func VerifyCIDSignature(signature *schnorr.Signature, cid cid.Cid, publicKey *secp256k1.PublicKey) error {
+	hashed := sha256.Sum256(cid.Bytes())
+
+	err := VerifySignature(signature, hashed[:], publicKey)
+	if err != nil {
+		return err
 	}
 
 	return nil

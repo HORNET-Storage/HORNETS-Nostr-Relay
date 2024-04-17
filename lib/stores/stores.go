@@ -12,6 +12,7 @@ type Store interface {
 	InitStore(args ...interface{}) error
 	StoreLeaf(root string, leafData *types.DagLeafData) error
 	RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error)
+	QueryDag(filter map[string]string) ([]string, error)
 	StoreDag(dag *types.DagData) error
 	BuildDagFromStore(root string, includeContent bool) (*types.DagData, error)
 	RetrieveLeafContent(contentHash []byte) ([]byte, error)

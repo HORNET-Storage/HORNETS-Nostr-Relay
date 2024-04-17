@@ -45,6 +45,10 @@ type DownloadFilter struct {
 	IncludeContent bool // IncludeContent from LeafLabelRange always overrides this
 }
 
+type QueryMessage struct {
+	QueryFilter map[string]string
+}
+
 type BlockData struct {
 	Leaf   merkle_dag.DagLeaf
 	Branch merkle_dag.ClassicTreeBranch
@@ -56,4 +60,12 @@ type ResponseMessage struct {
 
 type ErrorMessage struct {
 	Message string
+}
+
+type CacheMetaData struct {
+	LastAccessed string
+}
+
+type CacheData struct {
+	Keys []string
 }
