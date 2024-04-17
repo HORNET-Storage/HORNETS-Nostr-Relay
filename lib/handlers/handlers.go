@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib"
-
 	"github.com/fxamacker/cbor/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 
@@ -256,7 +254,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						leaf.Content = nil
 					}
 
-					message := lib.UploadMessage{
+					message := types.UploadMessage{
 						Root:  dag.Root,
 						Count: count,
 						Leaf:  rootLeaf,
@@ -306,7 +304,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 							}
 						}
 
-						message := lib.UploadMessage{
+						message := types.UploadMessage{
 							Root:   dag.Root,
 							Count:  count,
 							Leaf:   *leaf,
@@ -345,7 +343,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						return err
 					}
 
-					message := lib.UploadMessage{
+					message := types.UploadMessage{
 						Root:  dag.Root,
 						Count: count,
 						Leaf:  rootLeaf,
@@ -384,7 +382,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						}
 					}
 
-					message := lib.UploadMessage{
+					message := types.UploadMessage{
 						Root:   dag.Root,
 						Count:  count,
 						Leaf:   *leaf,
@@ -425,7 +423,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 	return downloadStreamHandler
 }
 
-func CheckFilter(leaf *merkle_dag.DagLeaf, filter *lib.DownloadFilter) (bool, error) {
+func CheckFilter(leaf *merkle_dag.DagLeaf, filter *types.DownloadFilter) (bool, error) {
 	label := merkle_dag.GetLabel(leaf.Hash)
 
 	if slices.Contains(filter.Leaves, label) {
@@ -460,7 +458,7 @@ func WriteErrorToStream(stream network.Stream, message string, err error) error 
 
 	log.Println(message)
 
-	data := lib.ErrorMessage{
+	data := types.ErrorMessage{
 		Message: fmt.Sprintf(message, err),
 	}
 
@@ -474,7 +472,7 @@ func WriteErrorToStream(stream network.Stream, message string, err error) error 
 func WriteResponseToStream(stream network.Stream, response bool) error {
 	streamEncoder := cbor.NewEncoder(stream)
 
-	message := lib.ResponseMessage{
+	message := types.ResponseMessage{
 		Ok: response,
 	}
 
@@ -488,7 +486,7 @@ func WriteResponseToStream(stream network.Stream, response bool) error {
 func WaitForResponse(stream network.Stream) bool {
 	streamDecoder := cbor.NewDecoder(stream)
 
-	var response lib.ResponseMessage
+	var response types.ResponseMessage
 
 	timeout := time.NewTimer(5 * time.Second)
 
@@ -511,10 +509,10 @@ wait:
 	return response.Ok
 }
 
-func WaitForUploadMessage(stream network.Stream) (bool, *lib.UploadMessage) {
+func WaitForUploadMessage(stream network.Stream) (bool, *types.UploadMessage) {
 	streamDecoder := cbor.NewDecoder(stream)
 
-	var message lib.UploadMessage
+	var message types.UploadMessage
 
 	timeout := time.NewTimer(5 * time.Second)
 
@@ -543,10 +541,10 @@ wait:
 	return true, &message
 }
 
-func WaitForDownloadMessage(stream network.Stream) (bool, *lib.DownloadMessage) {
+func WaitForDownloadMessage(stream network.Stream) (bool, *types.DownloadMessage) {
 	streamDecoder := cbor.NewDecoder(stream)
 
-	var message lib.DownloadMessage
+	var message types.DownloadMessage
 
 	timeout := time.NewTimer(5 * time.Second)
 
