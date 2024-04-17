@@ -4,6 +4,18 @@ import (
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
+type DagLeafData struct {
+	PublicKey string
+	Signature string
+	Leaf      merkle_dag.DagLeaf
+}
+
+type DagData struct {
+	PublicKey string
+	Signature string
+	Dag       merkle_dag.Dag
+}
+
 type UploadMessage struct {
 	Root      string
 	Count     int
