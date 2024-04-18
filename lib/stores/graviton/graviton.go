@@ -307,24 +307,28 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 
 	var events []*nostr.Event
 
-	ss, _ := store.Database.LoadSnapshot(0)
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, err
+	}
 
 	for kind := range nostr_handlers.GetHandlers() {
 		if strings.HasPrefix(kind, "kind") {
 			bucket := strings.ReplaceAll(kind, "/", ":")
 
-			tree, _ := ss.GetTree(bucket)
+			tree, err := snapshot.GetTree(bucket)
+			if err == nil {
+				c := tree.Cursor()
 
-			c := tree.Cursor()
+				for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+					var event nostr.Event
+					if err := jsoniter.Unmarshal(v, &event); err != nil {
+						continue
+					}
 
-			for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
-				var event nostr.Event
-				if err := jsoniter.Unmarshal(v, &event); err != nil {
-					continue
-				}
-
-				if filter.Matches(&event) {
-					events = append(events, &event)
+					if filter.Matches(&event) {
+						events = append(events, &event)
+					}
 				}
 			}
 		}
@@ -399,12 +403,13 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 		if strings.HasPrefix(kind, "kind") {
 			bucket := strings.ReplaceAll(kind, "/", ":")
 
-			tree, _ := snapshot.GetTree(bucket)
-
-			err := tree.Delete([]byte(eventID))
+			tree, err := snapshot.GetTree(bucket)
 			if err == nil {
-				graviton.Commit(tree)
-				log.Println("Deleted event", eventID)
+				err := tree.Delete([]byte(eventID))
+				if err == nil {
+					graviton.Commit(tree)
+					log.Println("Deleted event", eventID)
+				}
 			}
 		}
 	}
