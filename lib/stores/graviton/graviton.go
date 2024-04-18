@@ -17,6 +17,8 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+
+	nostr_handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
 type GravitonStore struct {
@@ -307,19 +309,23 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 
 	ss, _ := store.Database.LoadSnapshot(0)
 
-	for _, kind := range filter.Kinds {
-		tree, _ := ss.GetTree(fmt.Sprintf("kind:%d", kind))
+	for kind := range nostr_handlers.GetHandlers() {
+		if strings.HasPrefix(kind, "kind") {
+			bucket := strings.ReplaceAll(kind, "/", ":")
 
-		c := tree.Cursor()
+			tree, _ := ss.GetTree(bucket)
 
-		for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
-			var event nostr.Event
-			if err := jsoniter.Unmarshal(v, &event); err != nil {
-				continue
-			}
+			c := tree.Cursor()
 
-			if filter.Matches(&event) {
-				events = append(events, &event)
+			for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+				var event nostr.Event
+				if err := jsoniter.Unmarshal(v, &event); err != nil {
+					continue
+				}
+
+				if filter.Matches(&event) {
+					events = append(events, &event)
+				}
 			}
 		}
 	}
