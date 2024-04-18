@@ -390,17 +390,24 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 }
 
 func (store *GravitonStore) DeleteEvent(eventID string) error {
-	ss, _ := store.Database.LoadSnapshot(0)
-	tree, _ := ss.GetTree("events")
-
-	err := tree.Delete([]byte(eventID))
+	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return err
-	} else {
-		log.Println("Deleted event", eventID)
 	}
 
-	graviton.Commit(tree)
+	for kind := range nostr_handlers.GetHandlers() {
+		if strings.HasPrefix(kind, "kind") {
+			bucket := strings.ReplaceAll(kind, "/", ":")
+
+			tree, _ := snapshot.GetTree(bucket)
+
+			err := tree.Delete([]byte(eventID))
+			if err == nil {
+				graviton.Commit(tree)
+				log.Println("Deleted event", eventID)
+			}
+		}
+	}
 
 	return nil
 }
