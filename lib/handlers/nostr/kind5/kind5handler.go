@@ -58,6 +58,8 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 					continue
 				}
 
+				log.Println("Found Public key:", pubKey)
+
 				// Validate that the deletion request and the event have the same public key
 				if pubKey == event.PubKey {
 					if err := store.DeleteEvent(eventID); err != nil {
@@ -87,6 +89,10 @@ func extractPubKeyFromEventID(store stores.Store, eventID string) (string, error
 
 	if err != nil {
 		return "", err
+	}
+
+	if len(events) == 0 {
+		return "", fmt.Errorf("no events found for ID: %s", eventID)
 	}
 
 	event := events[0]

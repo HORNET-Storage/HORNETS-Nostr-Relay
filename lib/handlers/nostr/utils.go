@@ -3,6 +3,7 @@ package nostr
 import (
 	"fmt"
 	"log"
+
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -45,9 +46,15 @@ func Responder(stream network.Stream, messageType string, params ...interface{})
 func BuildResponse(messageType string, params ...interface{}) []byte {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+	// Extract and flatten values from params before appending to the message
+	extractedParams := extractInterfaceValues(params...)
+
 	var message []interface{}
 	message = append(message, messageType)
-	message = append(message, params...)
+	// Append the extracted parameters individually to ensure a flat structure
+	message = append(message, extractedParams...)
+
+	log.Println("Checking how message looks.", message)
 
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
@@ -55,7 +62,24 @@ func BuildResponse(messageType string, params ...interface{}) []byte {
 		return nil
 	}
 
-	return jsonMessage
+	// Append a newline character to the JSON message to act as a delimiter
+	jsonMessageWithDelimiter := append(jsonMessage, '\n')
+
+	return jsonMessageWithDelimiter
+}
+
+func extractInterfaceValues(data ...interface{}) []interface{} {
+	var extracted []interface{}
+	for _, v := range data {
+		switch element := v.(type) {
+		case []interface{}:
+			// Recursively flatten nested slices
+			extracted = append(extracted, extractInterfaceValues(element...)...)
+		default:
+			extracted = append(extracted, element)
+		}
+	}
+	return extracted
 }
 
 func CloseStream(stream network.Stream) {
