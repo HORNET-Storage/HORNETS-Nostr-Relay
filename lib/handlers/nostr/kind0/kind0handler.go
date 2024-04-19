@@ -1,6 +1,7 @@
 package kind0
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -47,6 +48,28 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			log.Println(errMsg)
 			write("OK", event.ID, false, errMsg)
 			return
+		}
+
+		// Retrieve existing kind 0 events for the pubkey
+		filter := nostr.Filter{
+			Authors: []string{event.PubKey},
+			Kinds:   []int{0},
+		}
+		existingEvents, err := store.QueryEvents(filter)
+		if err != nil {
+			log.Printf("Error querying existing kind 0 events: %v", err)
+			write("NOTICE", fmt.Sprintf("Error querying existing events: %v", err))
+			return
+		}
+
+		// Delete existing kind 0 events if any
+		if len(existingEvents) > 0 {
+			for _, oldEvent := range existingEvents {
+				if err := store.DeleteEvent(oldEvent.ID); err != nil {
+					log.Printf("Error deleting old kind 0 event %s: %v", oldEvent.ID, err)
+					write("NOTICE", "Error deleting old kind 0 event %s: %v", oldEvent.ID, err)
+				}
+			}
 		}
 
 		// Store the event

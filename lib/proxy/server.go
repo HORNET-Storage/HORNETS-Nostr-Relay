@@ -45,7 +45,7 @@ func getRelayInfo() nip11RelayInfo {
 		Description:   viper.GetString("RelayDescription"),
 		Pubkey:        viper.GetString("RelayPubkey"),
 		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 25},
+		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57},
 		Software:      viper.GetString("RelaySoftware"),
 		Version:       viper.GetString("RelayVersion"),
 	}
@@ -74,6 +74,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 
 	rawMessage := nostr.ParseMessage(message)
 	log.Println("Received type:", rawMessage.Label())
+	log.Println("Received message:", string(rawMessage.String()))
 
 	// Your switch case for handling different types of messages
 	// Ensure you handle context creation and cancellation correctly
@@ -99,11 +100,15 @@ func processWebSocketMessage(c *websocket.Conn) error {
 				response := lib_nostr.BuildResponse(messageType, params)
 
 				if len(response) > 0 {
-					c.WriteMessage(websocket.TextMessage, response)
+					handleIncomingMessage(c, response)
 				}
 			}
 
-			handler(read, write)
+			if verifyNote(&env.Event) {
+				handler(read, write)
+			} else {
+				write("OK", env.ID, false, "Invalid note")
+			}
 		}
 	case *nostr.ReqEnvelope:
 		handler := lib_nostr.GetHandler("filter")
@@ -127,7 +132,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 				response := lib_nostr.BuildResponse(messageType, params)
 
 				if len(response) > 0 {
-					c.WriteMessage(websocket.TextMessage, response)
+					handleIncomingMessage(c, response)
 				}
 			}
 
@@ -139,8 +144,8 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		if err != nil {
 			fmt.Println("Error:", err)
 			// Send a NOTICE message in case of unmarshalling error
-			errMsg, _ := json.Marshal([]string{"NOTICE", "Error unmarshalling CLOSE request: " + err.Error()})
-			if writeErr := c.WriteMessage(websocket.TextMessage, errMsg); writeErr != nil {
+			errMsg := "Error unmarshalling CLOSE request: " + err.Error()
+			if writeErr := sendWebSocketMessage(c, nostr.NoticeEnvelope(errMsg)); writeErr != nil {
 				fmt.Println("Error sending NOTICE message:", writeErr)
 			}
 			return err
@@ -148,25 +153,47 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		subscriptionID := closeEvent[1]
 		log.Println("Received CLOSE message:", subscriptionID)
 
-		// Prepare the CLOSED message in advance, confirming the subscription has been ended
-		var responseMsg []byte
-		if _, ok := listeners.Load(c); ok {
-			// Assume removeListenerId will be called
-			responseMsg, _ = json.Marshal([]string{"CLOSED", subscriptionID, "Subscription closed successfully."})
-		} else {
-			// If the subscription ID is not found or can't be closed
-			responseMsg, _ = json.Marshal([]string{"CLOSED", subscriptionID, "Error: Subscription ID not found or could not be closed."})
-		}
-
+		// Assume removeListenerId will be called
+		responseMsg := nostr.ClosedEnvelope{SubscriptionID: subscriptionID, Reason: "Subscription closed successfully."}
 		// Attempt to remove the listener for the given subscription ID
 		if removeListenerId(c, subscriptionID) {
 			// Log current subscriptions for debugging
 			logCurrentSubscriptions()
 		}
 
+		log.Println("Response message:", responseMsg)
 		// Send the prepared CLOSED or error message
-		if writeErr := c.WriteMessage(websocket.TextMessage, responseMsg); writeErr != nil {
-			fmt.Println("Error sending response message:", writeErr)
+		if err := sendWebSocketMessage(c, responseMsg); err != nil {
+			log.Printf("Error sending 'CLOSED' envelope over WebSocket: %v", err)
+		}
+
+	case *nostr.CountEnvelope:
+		handler := lib_nostr.GetHandler("count")
+
+		if handler != nil {
+			_, cancelFunc := context.WithCancel(context.Background())
+
+			setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
+			logCurrentSubscriptions()
+
+			read := func() ([]byte, error) {
+				bytes, err := json.Marshal(env)
+				if err != nil {
+					return nil, err
+				}
+
+				return bytes, nil
+			}
+
+			write := func(messageType string, params ...interface{}) {
+				response := lib_nostr.BuildResponse(messageType, params)
+
+				if len(response) > 0 {
+					handleIncomingMessage(c, response)
+				}
+			}
+
+			handler(read, write)
 		}
 
 	default:

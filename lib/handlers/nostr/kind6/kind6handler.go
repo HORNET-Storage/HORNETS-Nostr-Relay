@@ -45,10 +45,10 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		}
 
 		// Validate 'e' tag for reposted event ID and optionally 'p' tag for public key
-		repostedEventID, repostedEventFound := getTagValue(event.Tags, "e")
+		repostedEventID, repostedEventFound := getTagValue(event.Tags, "e", "p")
 
 		if !repostedEventFound {
-			log.Println("Reposted event ID not found in 'e' tag.")
+			log.Println("Reposted event ID not found in 'e' or 'p' tag.")
 			return
 		}
 
@@ -78,10 +78,15 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	return handler
 }
 
-// getTagValue searches for a tag by its key ('e' or 'p') and returns its value and a boolean indicating if it was found.
-func getTagValue(tags nostr.Tags, key string) (string, bool) {
+// getTagValue searches for a tag by its keys ('e' or 'p') and returns the first found value and a boolean indicating if it was found.
+func getTagValue(tags nostr.Tags, keys ...string) (string, bool) {
+	keySet := make(map[string]bool)
+	for _, key := range keys {
+		keySet[key] = true
+	}
+
 	for _, tag := range tags {
-		if tag[0] == key && len(tag) > 1 {
+		if _, ok := keySet[tag[0]]; ok && len(tag) > 1 {
 			return tag[1], true
 		}
 	}

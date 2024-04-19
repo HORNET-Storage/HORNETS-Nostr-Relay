@@ -5,6 +5,7 @@ import (
 	"log"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/deroproject/graviton"
@@ -399,20 +400,27 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 		return err
 	}
 
-	for kind := range nostr_handlers.GetHandlers() {
-		if strings.HasPrefix(kind, "kind") {
-			bucket := strings.ReplaceAll(kind, "/", ":")
-
-			tree, err := snapshot.GetTree(bucket)
-			if err == nil {
-				err := tree.Delete([]byte(eventID))
-				if err == nil {
-					graviton.Commit(tree)
-					log.Println("Deleted event", eventID)
-				}
-			}
-		}
+	event, err := store.QueryEvents(nostr.Filter{IDs: []string{eventID}})
+	if err != nil {
+		return err
 	}
+
+	// event kind number is an integer
+	kindInt, _ := strconv.ParseInt(fmt.Sprintf("%d", event[0].Kind), 10, 64)
+
+	bucket := fmt.Sprintf("kind:%d", kindInt)
+
+	tree, err := snapshot.GetTree(bucket)
+	if err == nil {
+		err := tree.Delete([]byte(eventID))
+		if err != nil {
+			return err
+		} else {
+			log.Println("Deleted event", eventID)
+		}
+
+	}
+	graviton.Commit(tree)
 
 	return nil
 }
