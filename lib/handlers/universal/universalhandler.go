@@ -25,11 +25,13 @@ func BuildUniversalHandler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		// Unmarshal the received data into a Nostr event
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		log.Printf("Default handling for event of kind %d: %s", event.Kind, event.Content)
 
@@ -38,6 +40,17 @@ func BuildUniversalHandler(store stores.Store) func(read lib_nostr.KindReader, w
 			// If the timestamp is invalid, respond with an error message and return early
 			log.Println(errMsg)
 			write("OK", event.ID, false, errMsg)
+			return
+		}
+
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 

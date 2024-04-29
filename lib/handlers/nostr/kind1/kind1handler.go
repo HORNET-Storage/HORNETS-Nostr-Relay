@@ -26,11 +26,13 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		}
 
 		// Unmarshal the received data into a Nostr event
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		// Check if the event is of kind 1
 		if event.Kind != 1 {

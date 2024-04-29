@@ -88,7 +88,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 			notifyListeners(&env.Event)
 
 			read := func() ([]byte, error) {
-				bytes, err := json.Marshal(env.Event)
+				bytes, err := json.Marshal(env)
 				if err != nil {
 					return nil, err
 				}

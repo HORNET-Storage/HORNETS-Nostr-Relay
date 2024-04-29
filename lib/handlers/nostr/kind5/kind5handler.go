@@ -24,11 +24,14 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
-			write("NOTICE", "Error unmarshaling deletion event.")
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
+			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		// Event Time checker
 		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())

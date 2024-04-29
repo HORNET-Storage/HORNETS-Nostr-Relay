@@ -2,28 +2,25 @@ package signing
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil/bech32"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/ipfs/go-cid"
 )
 
 func DecodeKey(serializedKey string) ([]byte, error) {
-	_, bytesToBits, err := bech32.Decode(serializedKey)
+	fmt.Println(TrimPrivateKey(TrimPublicKey(serializedKey)))
+
+	bytes, err := hex.DecodeString(TrimPrivateKey(TrimPublicKey(serializedKey)))
 	if err != nil {
 		return nil, err
 	}
 
-	privateKeyBytes, err := bech32.ConvertBits(bytesToBits, 5, 8, false)
-	if err != nil {
-		return nil, err
-	}
-
-	return privateKeyBytes, nil
+	return bytes, nil
 }
 
 func DeserializePrivateKey(serializedKey string) (*secp256k1.PrivateKey, *secp256k1.PublicKey, error) {
@@ -43,7 +40,7 @@ func DeserializePublicKey(serializedKey string) (*secp256k1.PublicKey, error) {
 		return nil, err
 	}
 
-	publicKey, err := btcec.ParsePubKey(publicKeyBytes)
+	publicKey, err := schnorr.ParsePubKey(publicKeyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -52,11 +49,11 @@ func DeserializePublicKey(serializedKey string) (*secp256k1.PublicKey, error) {
 }
 
 func TrimPrivateKey(privateKey string) string {
-	return strings.Trim(privateKey, "nsec")
+	return strings.TrimPrefix(privateKey, "nsec1")
 }
 
 func TrimPublicKey(publicKey string) string {
-	return strings.Trim(publicKey, "npub")
+	return strings.TrimPrefix(publicKey, "npub1")
 }
 
 func SignData(data []byte, privateKey *btcec.PrivateKey) (*schnorr.Signature, error) {
@@ -111,33 +108,15 @@ func GeneratePrivateKey() (*secp256k1.PrivateKey, error) {
 func SerializePrivateKey(privateKey *secp256k1.PrivateKey) (*string, error) {
 	privateKeyBytes := privateKey.Serialize()
 
-	bytesToBits, err := bech32.ConvertBits(privateKeyBytes, 8, 5, true)
-
-	if err != nil {
-		return nil, err
-	}
-
-	encodedKey, err := bech32.Encode("nsec", bytesToBits)
-	if err != nil {
-		return nil, err
-	}
+	encodedKey := hex.EncodeToString(privateKeyBytes)
 
 	return &encodedKey, nil
 }
 
 func SerializePublicKey(publicKey *secp256k1.PublicKey) (*string, error) {
-	publicKeyBytes := publicKey.SerializeCompressed()
+	publicKeyBytes := schnorr.SerializePubKey(publicKey)
 
-	bytesToBits, err := bech32.ConvertBits(publicKeyBytes, 8, 5, true)
-
-	if err != nil {
-		return nil, err
-	}
-
-	encodedKey, err := bech32.Encode("npub", bytesToBits)
-	if err != nil {
-		return nil, err
-	}
+	encodedKey := hex.EncodeToString(publicKeyBytes)
 
 	return &encodedKey, nil
 }
