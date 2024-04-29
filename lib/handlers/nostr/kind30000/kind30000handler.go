@@ -24,11 +24,14 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		if event.Kind != 30000 {
 			write("NOTICE", fmt.Sprintf("Received non-follow-sets event (kind %d) on follow-sets handler, ignoring.", event.Kind))

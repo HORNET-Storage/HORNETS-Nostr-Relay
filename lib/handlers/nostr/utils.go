@@ -6,6 +6,7 @@ import (
 
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/libp2p/go-libp2p/core/network"
 )
@@ -66,6 +67,26 @@ func BuildResponse(messageType string, params ...interface{}) []byte {
 	jsonMessageWithDelimiter := append(jsonMessage, '\n')
 
 	return jsonMessageWithDelimiter
+}
+
+func BuildCborResponse(messageType string, params ...interface{}) []byte {
+	// Extract and flatten values from params before appending to the message
+	extractedParams := extractInterfaceValues(params...)
+
+	var message []interface{}
+	message = append(message, messageType)
+	// Append the extracted parameters individually to ensure a flat structure
+	message = append(message, extractedParams...)
+
+	log.Println("Checking how message looks.", message)
+
+	cborMessage, err := cbor.Marshal(message)
+	if err != nil {
+		log.Printf("Error marshaling response message: %s\n", err)
+		return nil
+	}
+
+	return cborMessage
 }
 
 func extractInterfaceValues(data ...interface{}) []interface{} {

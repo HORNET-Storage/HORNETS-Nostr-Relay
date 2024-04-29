@@ -22,12 +22,14 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		var event nostr.Event
-		err = json.Unmarshal(data, &event)
-		if err != nil {
-			log.Printf("Error unmarshaling event: %v", err)
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
+			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		// Validate event kind for repost (kind 6 or kind 16 for generic repost)
 		if event.Kind != 6 && event.Kind != 16 {
