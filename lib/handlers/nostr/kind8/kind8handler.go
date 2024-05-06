@@ -25,12 +25,14 @@ func BuildKind8Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		// Unmarshal the received data into a Nostr event.
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		// Validate that the event kind is for badge awards (kind 8).
 		if event.Kind != 8 {

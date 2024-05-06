@@ -22,12 +22,14 @@ func BuildKind9372Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		var event nostr.Event
-		err = json.Unmarshal(data, &event)
-		if err != nil {
-			log.Printf("Error unmarshaling event: %v", err)
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
+			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		// Validate event kind for repost (kind 9372 for Nestr repost)
 		if event.Kind != 9372 {

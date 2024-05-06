@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"sync"
 
@@ -158,21 +158,28 @@ func main() {
 	handlers.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		decodedSignature, err := hex.DecodeString(*signature)
 		if err != nil {
+			fmt.Println("2")
 			return false
 		}
 
 		parsedSignature, err := schnorr.ParseSignature(decodedSignature)
 		if err != nil {
+			fmt.Println("3")
 			return false
 		}
 
 		cid, err := cid.Parse(rootLeaf.Hash)
 		if err != nil {
+			fmt.Println("4")
 			return false
 		}
 
+		fmt.Println(*pubKey)
+
 		publicKey, err := signing.DeserializePublicKey(*pubKey)
 		if err != nil {
+			fmt.Printf("err: %vzn", err)
+			fmt.Println("5")
 			return false
 		}
 
@@ -205,10 +212,20 @@ func main() {
 	nostr.RegisterHandler("relaycount", relaycount.BuildRelayCountsHandler(store))
 
 	// Register a libp2p handler for every stream handler
-	for kind, handler := range nostr.GetHandlers() {
+	for kind := range nostr.GetHandlers() {
+		handler := nostr.GetHandler(kind)
+
 		wrapper := func(stream network.Stream) {
 			read := func() ([]byte, error) {
-				return io.ReadAll(stream)
+				decoder := json.NewDecoder(stream)
+
+				var rawMessage json.RawMessage
+				err := decoder.Decode(&rawMessage)
+				if err != nil {
+					return nil, err
+				}
+
+				return rawMessage, nil
 			}
 
 			write := func(messageType string, params ...interface{}) {
@@ -216,6 +233,10 @@ func main() {
 
 				if len(response) > 0 {
 					stream.Write(response)
+				}
+
+				if err == nil {
+					fmt.Printf("Response written to stream: %s", string(response))
 				}
 			}
 
