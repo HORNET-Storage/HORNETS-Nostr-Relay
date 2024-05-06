@@ -41,3 +41,11 @@ type Listener struct {
 type EventMessage struct {
 	Event nostr.Event // Adapted for the specific event structure you're using
 }
+
+type RelaySettings struct {
+	Mode     string   `json:"mode"`
+	Kinds    []string `json:"kinds"`
+	Photos   []string `json:"photos"`
+	Videos   []string `json:"videos"`
+	GitNestr []string `json:"gitNestr"`
+}

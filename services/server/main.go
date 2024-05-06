@@ -27,6 +27,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9372"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9802"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/relaycount"
 	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/proxy"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
@@ -191,6 +193,7 @@ func main() {
 	nostr.RegisterHandler("kind/9735", kind9735.BuildKind9735Handler(store))
 	nostr.RegisterHandler("kind/9372", kind9372.BuildKind9372Handler(store))
 	nostr.RegisterHandler("kind/9373", kind9373.BuildKind9373Handler(store))
+	nostr.RegisterHandler("kind/9802", kind9802.BuildKind9802Handler(store))
 	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 	nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
 	nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
@@ -199,6 +202,7 @@ func main() {
 	nostr.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
 	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
+	nostr.RegisterHandler("relaycount", relaycount.BuildRelayCountsHandler(store))
 
 	// Register a libp2p handler for every stream handler
 	for kind, handler := range nostr.GetHandlers() {
