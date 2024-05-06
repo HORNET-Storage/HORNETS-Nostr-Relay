@@ -26,7 +26,8 @@ func StartServer() error {
 		handleWebSocketConnections(c) // Pass the host to the connection handler
 	}))
 
-	return app.Listen(":9900")
+	port := fmt.Sprintf(":%s", viper.GetString("web_port"))
+	return app.Listen(port)
 }
 
 // Middleware function to respond with relay information on GET requests
