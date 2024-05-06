@@ -21,5 +21,6 @@ web/node_modules
 leaves
 content
 gravitondb
+hornet-storage
 
 config.json
