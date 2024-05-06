@@ -84,6 +84,19 @@ func main() {
 
 	// Private key
 	key := viper.GetString("key")
+	if key == "" {
+		priv, err := signing.GeneratePrivateKey()
+		if err != nil {
+			log.Fatal("No private key provided and unable to make one from scratch. Exiting.")
+		}
+		serialized, err := signing.SerializePrivateKey(priv)
+		if err != nil {
+			log.Fatal("Unable to serialize private key. Exiting.")
+		}
+		log.Println("Generated private key: ", *serialized)
+		log.Println("Please copy this key into your config.json file if you want to re-use it")
+		key = *serialized
+	}
 
 	decodedKey, err := signing.DecodeKey(key)
 	if err != nil {
