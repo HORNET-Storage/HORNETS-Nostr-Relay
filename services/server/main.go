@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/count"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/filter"
@@ -40,6 +42,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 
 	//"github.com/libp2p/go-libp2p/p2p/security/noise"
 	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
@@ -58,10 +63,10 @@ func init() {
 	viper.SetDefault("key", "")
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
-	viper.SetDefault("port", "9000")
 	viper.SetDefault("query_cache", map[string]string{
 		"hkind:2": "ItemName",
 	})
+	viper.SetDefault("service_tag", "hornet-storage-service")
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -81,6 +86,7 @@ func init() {
 
 func main() {
 	wg := new(sync.WaitGroup)
+	ctx := context.Background()
 
 	// Private key
 	key := viper.GetString("key")
@@ -89,13 +95,19 @@ func main() {
 		if err != nil {
 			log.Fatal("No private key provided and unable to make one from scratch. Exiting.")
 		}
-		serialized, err := signing.SerializePrivateKey(priv)
+		pub := priv.PubKey()
+		serializedPriv, err := signing.SerializePrivateKey(priv)
 		if err != nil {
 			log.Fatal("Unable to serialize private key. Exiting.")
 		}
-		log.Println("Generated private key: ", *serialized)
-		log.Println("Please copy this key into your config.json file if you want to re-use it")
-		key = *serialized
+		serializedPub, err := signing.SerializePublicKeyBech32(pub)
+		if err != nil {
+			log.Fatal("Unable to serialize public key. Exiting.")
+		}
+
+		log.Println("Generated public/private key pair: ", *serializedPub, "/", *serializedPriv)
+		log.Println("Please copy the private key into your config.json file if you want to re-use it")
+		key = *serializedPriv
 	}
 
 	decodedKey, err := signing.DecodeKey(key)
@@ -114,8 +126,9 @@ func main() {
 	queryCache := viper.GetStringMapString("query_cache")
 	store.InitStore(queryCache)
 
-	// Libp2p Host
-	listenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", viper.GetString("port"))
+	// Libp2p Host (0 => random port)
+	listenAddress := "/ip4/127.0.0.1/udp/0/quic-v1"
+	log.Printf("Starting server on %s\n", listenAddress)
 
 	host, err := libp2p.New(
 		libp2p.Identity(privateKey),
@@ -156,9 +169,8 @@ func main() {
 
 		//libp2p.EnableNATService(),
 	)
-
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Error starting server: #{err}")
 	}
 
 	// Stream Handlers
@@ -267,7 +279,7 @@ func main() {
 			err := web.StartServer()
 
 			if err != nil {
-				fmt.Println("Fatal error occured in web server")
+				fmt.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
@@ -284,11 +296,23 @@ func main() {
 			err := proxy.StartServer()
 
 			if err != nil {
-				fmt.Println("Fatal error occured in web server")
+				fmt.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
 		}()
+	}
+
+	// Local Network Discovery Service
+	_ = mdns.NewMdnsService(host, viper.GetString("serviceTag"), &discoveryHandler{h: host, ctx: ctx})
+
+	// Wait a bit for discovery to happen
+	time.Sleep(10 * time.Second)
+
+	// Print out the peers each host knows about
+	fmt.Println("Host 1 peers:")
+	for _, p := range host.Peerstore().Peers() {
+		fmt.Println(p)
 	}
 
 	defer host.Close()
@@ -296,4 +320,16 @@ func main() {
 	fmt.Printf("Host started with id: %s\n", host.ID())
 
 	wg.Wait()
+}
+
+type discoveryHandler struct {
+	h host.Host
+	ctx context.Context
+}
+
+func (d *discoveryHandler) HandlePeerFound(pi peer.AddrInfo) {
+	fmt.Printf("Discovered %s\n", pi.ID)
+	if err := d.h.Connect(d.ctx, pi); err != nil {
+		fmt.Printf("Error connecting to peer %s: %s\n", pi.ID, err)
+	}
 }
