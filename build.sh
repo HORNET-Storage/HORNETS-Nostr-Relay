@@ -9,11 +9,7 @@ npm install
 # Change back to the parent directory
 cd ../..
 
-# Change directory to services/server
-cd services/server
-
-# Build the Go binary
-go build -o ../../hornet-storage
+./build_server.sh
 
 # Optional: Print a message before exiting
 echo "Build process completed."
