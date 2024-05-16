@@ -1,6 +1,8 @@
 package lib
 
 import (
+	"time"
+
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
@@ -68,4 +70,58 @@ type CacheMetaData struct {
 
 type CacheData struct {
 	Keys []string
+}
+
+type Kind struct {
+	ID         uint `gorm:"primaryKey"`
+	KindNumber int
+	EventID    string
+	Timestamp  time.Time `gorm:"autoCreateTime"`
+}
+
+type Photo struct {
+	ID        uint   `gorm:"primaryKey"`
+	Hash      string `gorm:"uniqueIndex"`
+	LeafCount int
+	KindName  string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+}
+
+type Video struct {
+	ID        uint   `gorm:"primaryKey"`
+	Hash      string `gorm:"uniqueIndex"`
+	LeafCount int
+	KindName  string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+}
+
+type GitNestr struct {
+	ID        uint `gorm:"primaryKey"`
+	GitType   string
+	EventID   string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+}
+
+type RelaySettings struct {
+	Mode     string   `json:"mode"`
+	Kinds    []string `json:"kinds"`
+	Photos   []string `json:"photos"`
+	Videos   []string `json:"videos"`
+	GitNestr []string `json:"gitNestr"`
+}
+
+type TimeSeriesData struct {
+	Month           string `json:"month"`
+	Profiles        int    `json:"profiles"`
+	LightningAddr   int    `json:"lightning_addr"`
+	DHTKey          int    `json:"dht_key"`
+	LightningAndDHT int    `json:"lightning_and_dht"`
+}
+
+type UserProfile struct {
+	ID            uint      `gorm:"primaryKey"`
+	NpubKey       string    `gorm:"uniqueIndex"`
+	LightningAddr bool      `gorm:"default:false"`
+	DHTKey        bool      `gorm:"default:false"`
+	Timestamp     time.Time `gorm:"autoCreateTime"`
 }

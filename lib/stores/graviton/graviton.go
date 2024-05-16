@@ -8,9 +8,13 @@ import (
 	"strconv"
 	"strings"
 
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
 	"github.com/deroproject/graviton"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
@@ -22,9 +26,24 @@ import (
 	nostr_handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
-type GravitonStore struct {
-	Database *graviton.Store
+func InitGorm() (*gorm.DB, error) {
+	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
 
+	// Auto migrate the schema
+	err = db.AutoMigrate(&types.Kind{}, &types.Photo{}, &types.Video{}, &types.GitNestr{}, &types.UserProfile{})
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+type GravitonStore struct {
+	Database    *graviton.Store
+	GormDB      *gorm.DB
 	CacheConfig map[string]string
 }
 
@@ -56,6 +75,12 @@ func (store *GravitonStore) InitStore(args ...interface{}) error {
 		if cacheConfig, ok := arg.(map[string]string); ok {
 			store.CacheConfig = cacheConfig
 		}
+	}
+
+	// Initialize Gorm DB
+	store.GormDB, err = InitGorm()
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -169,7 +194,6 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		}
 
 		indexTree.Put([]byte(root), []byte(bucket))
-
 		trees = append(trees, indexTree)
 
 		if strings.HasPrefix(leafData.PublicKey, "npub") {
@@ -192,6 +216,35 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 				}
 			}
 		}
+
+		// Store photo or video based on file extension if it's a root leaf
+		itemName := rootLeaf.ItemName
+		leafCount := rootLeaf.LeafCount
+		hash := rootLeaf.Hash
+
+		// Determine kind name (extension)
+		kindName := GetKindFromItemName(itemName)
+
+		var relaySettings types.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+			log.Fatalf("Error unmarshaling relay settings: %v", err)
+		}
+
+		if contains(relaySettings.Photos, strings.ToLower(kindName)) {
+			photo := types.Photo{
+				Hash:      hash,
+				LeafCount: leafCount,
+				KindName:  kindName,
+			}
+			store.GormDB.Create(&photo)
+		} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
+			video := types.Video{
+				Hash:      hash,
+				LeafCount: leafCount,
+				KindName:  kindName,
+			}
+			store.GormDB.Create(&video)
+		}
 	}
 
 	if contentTree != nil {
@@ -204,6 +257,11 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 	}
 
 	return nil
+}
+
+func GetKindFromItemName(itemName string) string {
+	parts := strings.Split(itemName, ".")
+	return parts[len(parts)-1]
 }
 
 func (store *GravitonStore) RetrieveLeafContent(contentHash []byte) ([]byte, error) {
@@ -391,6 +449,9 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 		return err
 	}
 
+	// Store event in Gorm SQLite database
+	store.storeInGorm(event)
+
 	return nil
 }
 
@@ -421,6 +482,9 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 
 	}
 	graviton.Commit(tree)
+
+	// Delete event from Gorm SQLite database
+	store.GormDB.Delete(&types.Kind{}, "event_id = ?", eventID)
 
 	return nil
 }
@@ -500,4 +564,124 @@ func GetBucket(leaf *merkle_dag.DagLeaf) string {
 			return "file"
 		}
 	}
+}
+
+func (store *GravitonStore) CountFileLeavesByType() (map[string]int, error) {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, err
+	}
+
+	treeNames := []string{"content"} // Adjust based on actual storage details.
+
+	fileTypeCounts := make(map[string]int)
+
+	for _, treeName := range treeNames {
+		tree, err := snapshot.GetTree(treeName)
+		if err != nil {
+			continue // Skip if the tree is not found
+		}
+
+		c := tree.Cursor()
+
+		for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+			var leaf *merkle_dag.DagLeaf
+			err := cbor.Unmarshal(v, &leaf)
+			if err != nil {
+				continue // Skip on deserialization error
+			}
+
+			if leaf.Type == merkle_dag.FileLeafType { // Assuming FileLeafType is the correct constant
+				// Extract file extension dynamically
+				splitName := strings.Split(leaf.ItemName, ".")
+				if len(splitName) > 1 {
+					extension := strings.ToLower(splitName[len(splitName)-1])
+					fileTypeCounts[extension]++
+				}
+			}
+		}
+	}
+
+	return fileTypeCounts, nil
+}
+
+// New SQL Function.
+func (store *GravitonStore) storeInGorm(event *nostr.Event) {
+	kindStr := fmt.Sprintf("kind%d", event.Kind)
+
+	var relaySettings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		log.Fatalf("Error unmarshaling relay settings: %v", err)
+	}
+
+	if event.Kind == 0 {
+		// Handle user profile creation or update
+		var contentData map[string]interface{}
+		if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
+			log.Printf("Error unmarshaling event content: %v", err)
+			return
+		}
+
+		npubKey := event.PubKey
+		lightningAddr := false
+		dhtKey := false
+
+		if nip05, ok := contentData["nip05"].(string); ok && nip05 != "" {
+			lightningAddr = true
+		}
+
+		if dht, ok := contentData["dht-key"].(string); ok && dht != "" {
+			dhtKey = true
+		}
+
+		err := upsertUserProfile(store.GormDB, npubKey, lightningAddr, dhtKey)
+		if err != nil {
+			log.Printf("Error upserting user profile: %v", err)
+		}
+	}
+
+	if contains(relaySettings.Kinds, kindStr) {
+		kind := types.Kind{
+			KindNumber: event.Kind,
+			EventID:    event.ID,
+		}
+		store.GormDB.Create(&kind)
+		return
+	}
+
+	// Add cases for photos, videos, and gitNestr
+	// Assuming you have some way of identifying photos, videos, and gitNestr events
+	fmt.Printf("Unhandled kind: %d\n", event.Kind)
+}
+
+func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool) error {
+	var userProfile types.UserProfile
+	result := db.Where("npub_key = ?", npubKey).First(&userProfile)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			// Create new user profile
+			userProfile = types.UserProfile{
+				NpubKey:       npubKey,
+				LightningAddr: lightningAddr,
+				DHTKey:        dhtKey,
+			}
+			return db.Create(&userProfile).Error
+		}
+		return result.Error
+	}
+
+	// Update existing user profile
+	userProfile.LightningAddr = lightningAddr
+	userProfile.DHTKey = dhtKey
+	return db.Save(&userProfile).Error
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
 }

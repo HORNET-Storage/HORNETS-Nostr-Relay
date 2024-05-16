@@ -22,12 +22,14 @@ func BuildKind9802Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		var event nostr.Event
-		err = json.Unmarshal(data, &event)
-		if err != nil {
-			log.Printf("Error unmarshaling event: %v", err)
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
+			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		if event.Kind != 9802 {
 			log.Printf("Received event of kind %d in highlight handler, ignoring.", event.Kind)

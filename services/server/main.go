@@ -28,7 +28,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9802"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/relaycount"
 	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/proxy"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
@@ -61,6 +60,7 @@ func init() {
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
+	viper.SetDefault("relay_stats_db", "relay_stats.db")
 	viper.SetDefault("query_cache", map[string]string{
 		"hkind:2": "ItemName",
 	})
@@ -209,7 +209,6 @@ func main() {
 	nostr.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
 	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
-	nostr.RegisterHandler("relaycount", relaycount.BuildRelayCountsHandler(store))
 
 	// Register a libp2p handler for every stream handler
 	for kind := range nostr.GetHandlers() {
@@ -285,6 +284,7 @@ func main() {
 	defer host.Close()
 
 	fmt.Printf("Host started with id: %s\n", host.ID())
+	fmt.Printf("Host started with address: %s\n", host.Addrs())
 
 	wg.Wait()
 }
