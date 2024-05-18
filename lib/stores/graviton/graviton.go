@@ -24,25 +24,8 @@ import (
 	nostr_handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
-// // InitGorm initializes the GORM DB (This will handle the SQLite DB for Relay Stats)
-// func InitGorm() (*gorm.DB, error) {
-// 	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// Auto migrate the schema
-// 	err = db.AutoMigrate(&types.Kind{}, &types.Photo{}, &types.Video{}, &types.GitNestr{}, &types.UserProfile{})
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	return db, nil
-// }
-
 type GravitonStore struct {
-	Database *graviton.Store
-	// GormDB      *gorm.DB
+	Database    *graviton.Store
 	CacheConfig map[string]string
 }
 
@@ -75,12 +58,6 @@ func (store *GravitonStore) InitStore(args ...interface{}) error {
 			store.CacheConfig = cacheConfig
 		}
 	}
-
-	// Initialize Gorm DB
-	// store.GormDB, err = InitGorm()
-	// if err != nil {
-	// 	return err
-	// }
 
 	return nil
 }
