@@ -1,15 +1,13 @@
 package graviton
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
-
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 
 	"github.com/deroproject/graviton"
 	"github.com/fxamacker/cbor/v2"
@@ -26,24 +24,25 @@ import (
 	nostr_handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
-func InitGorm() (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
+// // InitGorm initializes the GORM DB (This will handle the SQLite DB for Relay Stats)
+// func InitGorm() (*gorm.DB, error) {
+// 	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	// Auto migrate the schema
-	err = db.AutoMigrate(&types.Kind{}, &types.Photo{}, &types.Video{}, &types.GitNestr{}, &types.UserProfile{})
-	if err != nil {
-		return nil, err
-	}
+// 	// Auto migrate the schema
+// 	err = db.AutoMigrate(&types.Kind{}, &types.Photo{}, &types.Video{}, &types.GitNestr{}, &types.UserProfile{})
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	return db, nil
-}
+// 	return db, nil
+// }
 
 type GravitonStore struct {
-	Database    *graviton.Store
-	GormDB      *gorm.DB
+	Database *graviton.Store
+	// GormDB      *gorm.DB
 	CacheConfig map[string]string
 }
 
@@ -78,10 +77,10 @@ func (store *GravitonStore) InitStore(args ...interface{}) error {
 	}
 
 	// Initialize Gorm DB
-	store.GormDB, err = InitGorm()
-	if err != nil {
-		return err
-	}
+	// store.GormDB, err = InitGorm()
+	// if err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -132,6 +131,8 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 	}
 
 	var contentTree *graviton.Tree = nil
+
+	leafContentSize := len(hex.EncodeToString(leafData.Leaf.Content))
 
 	if leafData.Leaf.Content != nil {
 		contentTree, err = snapshot.GetTree("content")
@@ -222,12 +223,30 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		leafCount := rootLeaf.LeafCount
 		hash := rootLeaf.Hash
 
+		log.Println("Leaf: ", rootLeaf)
+		log.Println("Rootleaf Content size", leafContentSize)
+
 		// Determine kind name (extension)
 		kindName := GetKindFromItemName(itemName)
+
+		ChunkSize := 2048 * 1024
 
 		var relaySettings types.RelaySettings
 		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
 			log.Fatalf("Error unmarshaling relay settings: %v", err)
+		}
+
+		var sizeMB float64
+		if leafCount > 0 {
+			sizeMB = float64(leafCount*ChunkSize) / (1024 * 1024) // Convert to MB
+		} else {
+			sizeBytes := leafContentSize
+			sizeMB = float64(sizeBytes) / (1024 * 1024) // Convert to MB
+		}
+
+		gormDB, err := InitGorm()
+		if err != nil {
+			return err
 		}
 
 		if contains(relaySettings.Photos, strings.ToLower(kindName)) {
@@ -235,15 +254,17 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 				Hash:      hash,
 				LeafCount: leafCount,
 				KindName:  kindName,
+				Size:      sizeMB,
 			}
-			store.GormDB.Create(&photo)
+			gormDB.Create(&photo)
 		} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
 			video := types.Video{
 				Hash:      hash,
 				LeafCount: leafCount,
 				KindName:  kindName,
+				Size:      sizeMB,
 			}
-			store.GormDB.Create(&video)
+			gormDB.Create(&video)
 		}
 	}
 
@@ -450,7 +471,7 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 	}
 
 	// Store event in Gorm SQLite database
-	store.storeInGorm(event)
+	storeInGorm(event)
 
 	return nil
 }
@@ -483,8 +504,13 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 	}
 	graviton.Commit(tree)
 
+	gormDB, err := InitGorm()
+	if err != nil {
+		return err
+	}
+
 	// Delete event from Gorm SQLite database
-	store.GormDB.Delete(&types.Kind{}, "event_id = ?", eventID)
+	gormDB.Delete(&types.Kind{}, "event_id = ?", eventID)
 
 	return nil
 }
@@ -603,85 +629,4 @@ func (store *GravitonStore) CountFileLeavesByType() (map[string]int, error) {
 	}
 
 	return fileTypeCounts, nil
-}
-
-// New SQL Function.
-func (store *GravitonStore) storeInGorm(event *nostr.Event) {
-	kindStr := fmt.Sprintf("kind%d", event.Kind)
-
-	var relaySettings types.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-		log.Fatalf("Error unmarshaling relay settings: %v", err)
-	}
-
-	if event.Kind == 0 {
-		// Handle user profile creation or update
-		var contentData map[string]interface{}
-		if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
-			log.Printf("Error unmarshaling event content: %v", err)
-			return
-		}
-
-		npubKey := event.PubKey
-		lightningAddr := false
-		dhtKey := false
-
-		if nip05, ok := contentData["nip05"].(string); ok && nip05 != "" {
-			lightningAddr = true
-		}
-
-		if dht, ok := contentData["dht-key"].(string); ok && dht != "" {
-			dhtKey = true
-		}
-
-		err := upsertUserProfile(store.GormDB, npubKey, lightningAddr, dhtKey)
-		if err != nil {
-			log.Printf("Error upserting user profile: %v", err)
-		}
-	}
-
-	if contains(relaySettings.Kinds, kindStr) {
-		kind := types.Kind{
-			KindNumber: event.Kind,
-			EventID:    event.ID,
-		}
-		store.GormDB.Create(&kind)
-		return
-	}
-
-	// Add cases for photos, videos, and gitNestr
-	// Assuming you have some way of identifying photos, videos, and gitNestr events
-	fmt.Printf("Unhandled kind: %d\n", event.Kind)
-}
-
-func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool) error {
-	var userProfile types.UserProfile
-	result := db.Where("npub_key = ?", npubKey).First(&userProfile)
-
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			// Create new user profile
-			userProfile = types.UserProfile{
-				NpubKey:       npubKey,
-				LightningAddr: lightningAddr,
-				DHTKey:        dhtKey,
-			}
-			return db.Create(&userProfile).Error
-		}
-		return result.Error
-	}
-
-	// Update existing user profile
-	userProfile.LightningAddr = lightningAddr
-	userProfile.DHTKey = dhtKey
-	return db.Save(&userProfile).Error
-}
-
-func contains(slice []string, item string) bool {
-	for _, v := range slice {
-		if v == item {
-			return true
-		}
-	}
-	return false
 }

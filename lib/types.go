@@ -77,6 +77,7 @@ type Kind struct {
 	KindNumber int
 	EventID    string
 	Timestamp  time.Time `gorm:"autoCreateTime"`
+	Size       float64   `gorm:"default:0"` // Size in MB
 }
 
 type Photo struct {
@@ -85,6 +86,7 @@ type Photo struct {
 	LeafCount int
 	KindName  string
 	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
 }
 
 type Video struct {
@@ -93,6 +95,7 @@ type Video struct {
 	LeafCount int
 	KindName  string
 	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
 }
 
 type GitNestr struct {
@@ -100,6 +103,7 @@ type GitNestr struct {
 	GitType   string
 	EventID   string
 	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
 }
 
 type RelaySettings struct {
@@ -124,4 +128,15 @@ type UserProfile struct {
 	LightningAddr bool      `gorm:"default:false"`
 	DHTKey        bool      `gorm:"default:false"`
 	Timestamp     time.Time `gorm:"autoCreateTime"`
+}
+
+type ActivityData struct {
+	Month   string  `json:"month"`
+	TotalGB float64 `json:"total_gb"`
+}
+
+type BarChartData struct {
+	Month   string  `json:"month"`
+	NotesGB float64 `json:"notes_gb"`
+	MediaGB float64 `json:"media_gb"`
 }
