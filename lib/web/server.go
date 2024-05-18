@@ -13,6 +13,13 @@ func StartServer() error {
 		AllowHeaders: "Origin, Content-Type, Accept",
 	}))
 
+	// Public routes
+	app.Post("/login", handleLogin)
+	app.Post("/signup", handleSignUp)
+
+	// Protected routes
+	app.Use(jwtMiddleware)
+
 	// Dedicated routes for each handler
 	app.Post("/relaycount", handleRelayCount)
 	app.Post("/relay-settings", handleRelaySettings)

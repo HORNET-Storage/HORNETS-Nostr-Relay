@@ -144,3 +144,25 @@ type BarChartData struct {
 	NotesGB float64 `json:"notes_gb"`
 	MediaGB float64 `json:"media_gb"`
 }
+
+type User struct {
+	ID        uint `gorm:"primaryKey"`
+	FirstName string
+	LastName  string
+	Email     string    `gorm:"uniqueIndex"`
+	Password  string    // Store hashed passwords
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type SignUpRequest struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+}

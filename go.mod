@@ -127,6 +127,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
 	github.com/gofiber/fiber v1.14.6
 	github.com/gofiber/fiber/v2 v2.51.0
+	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/google/uuid v1.4.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/ipfs/go-cid v0.4.1
