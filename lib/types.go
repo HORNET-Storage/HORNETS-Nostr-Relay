@@ -107,11 +107,15 @@ type GitNestr struct {
 }
 
 type RelaySettings struct {
-	Mode     string   `json:"mode"`
-	Kinds    []string `json:"kinds"`
-	Photos   []string `json:"photos"`
-	Videos   []string `json:"videos"`
-	GitNestr []string `json:"gitNestr"`
+	Mode             string   `json:"mode"`
+	Kinds            []string `json:"kinds"`
+	Photos           []string `json:"photos"`
+	Videos           []string `json:"videos"`
+	GitNestr         []string `json:"gitNestr"`
+	IsKindsActive    bool     `json:"isKindsActive"`
+	IsPhotosActive   bool     `json:"isPhotosActive"`
+	IsVideosActive   bool     `json:"isVideosActive"`
+	IsGitNestrActive bool     `json:"isGitNestrActive"`
 }
 
 type TimeSeriesData struct {
