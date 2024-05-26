@@ -1,8 +1,6 @@
 module github.com/HORNET-Storage/hornet-storage
 
-go 1.21
-
-toolchain go1.22.1
+go 1.22.1
 
 require (
 	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240415174732-f5bae33e2252
@@ -44,6 +42,7 @@ require (
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect
+	github.com/illuzen/go-negentropy v0.0.0-20240505133407-a298222fce41 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect

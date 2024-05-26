@@ -57,7 +57,7 @@ import (
 	//stores_bbolt "github.com/HORNET-Storage/hornet-storage/lib/stores/bbolt"
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	negentropy "gitlab.com/negentropy/go"
+	//negentropy "github.com/illuzen/go-negentropy"
 )
 
 func init() {
