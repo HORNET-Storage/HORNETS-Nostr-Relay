@@ -2,12 +2,14 @@ package test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
 	"testing"
 	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/web"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
@@ -28,7 +30,11 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
 	"github.com/nbd-wtf/go-nostr"
+
+	"github.com/libp2p/go-libp2p/core/host"
 )
+
+const DiscoveryServiceTag = "mdns-discovery"
 
 
 // GenerateRandomEvent generates a random Nostr event using go-nostr
@@ -106,23 +112,9 @@ func selectRandomItems(arr []int, n int) []int {
 	return selected
 }
 
-func TestEventGenerationStorageRetrieval(t *testing.T) {
+func setupStore() *stores_graviton.GravitonStore {
 	store := &stores_graviton.GravitonStore{}
 	store.InitStore()
-	numEvents := 1000
-	log.Println("Testing event storage and retrieval.")
-
-	log.Printf("Generating %d random events and storing in graviton\n", numEvents)
-	for i := 0; i < numEvents; i++ {
-		event := GenerateRandomEvent()
-		//log.Println(event)
-
-		err := store.StoreEvent(event)
-		if err != nil {
-			t.Fatalf("Error storing event: %v", err)
-
-		}
-	}
 
 	handlers.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
 	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
@@ -143,6 +135,25 @@ func TestEventGenerationStorageRetrieval(t *testing.T) {
 	handlers.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
 	handlers.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
 
+	return store
+}
+
+func TestEventGenerationStorageRetrieval(t *testing.T) {
+	log.Println("Testing event storage and retrieval.")
+	store := setupStore()
+	numEvents := 1000
+
+	log.Printf("Generating %d random events and storing in graviton\n", numEvents)
+	for i := 0; i < numEvents; i++ {
+		event := GenerateRandomEvent()
+		//log.Println(event)
+
+		err := store.StoreEvent(event)
+		if err != nil {
+			t.Fatalf("Error storing event: %v", err)
+
+		}
+	}
 
 	filter := nostr.Filter{}
 	events, err := store.QueryEvents(filter)
@@ -157,7 +168,38 @@ func TestEventGenerationStorageRetrieval(t *testing.T) {
 			t.Fatalf("Unable to check signature. Exiting. %v", err)
 		}
 	}
-
 	log.Println("All signatures valid.")
-
 }
+
+func TestHostConnections(t *testing.T) {
+	log.Println("Testing host connections.")
+	//store := setupStore()
+	numHosts := 10
+
+	hosts := []host.Host{}
+
+	for i := 0; i < numHosts; i++ {
+		host := web.GetHost("")
+		defer host.Close()
+		if err := web.SetupMDNS(host, DiscoveryServiceTag); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Host %s addresses:\n", host.ID())
+		for _, addr := range host.Addrs() {
+			fmt.Printf("%s/p2p/%s\n", addr, host.ID().Pretty())
+		}
+		hosts = append(hosts, host)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	for _, host := range hosts {
+		if len(host.Network().Peers()) != numHosts - 1 {
+			t.Fatalf("Host %s has %d peers, expected %d", host.ID(), host.Peerstore().Peers().Len(), numHosts - 1)
+		}
+	}
+}
+
+
+
+
