@@ -13,7 +13,7 @@ require (
 	github.com/gofiber/contrib/websocket v1.3.0
 	github.com/json-iterator/go v1.1.12
 	github.com/libp2p/go-libp2p v0.30.0
-	github.com/nbd-wtf/go-nostr v0.30.0
+	github.com/nbd-wtf/go-nostr v0.31.4
 	github.com/puzpuzpuz/xsync/v3 v3.0.2
 	github.com/spf13/viper v1.18.2
 	go.etcd.io/bbolt v1.3.8
