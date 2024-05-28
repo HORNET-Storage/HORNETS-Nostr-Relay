@@ -26,12 +26,14 @@ func BuildKind10000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		// Unmarshal the received data into a Nostr event.
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		if event.Kind != 10000 {
 			write("NOTICE", fmt.Sprintf("Received non-mute-list event (kind %d) on mute-list handler, ignoring.", event.Kind))

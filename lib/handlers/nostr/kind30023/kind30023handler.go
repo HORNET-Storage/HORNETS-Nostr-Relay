@@ -23,12 +23,14 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		// Unmarshal the received data into a Nostr event.
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		log.Println("Working with nip-23 handler.", event.Kind)
 

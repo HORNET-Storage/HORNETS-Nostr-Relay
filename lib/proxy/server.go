@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -26,7 +28,28 @@ func StartServer() error {
 		handleWebSocketConnections(c) // Pass the host to the connection handler
 	}))
 
-	return app.Listen(":9900")
+	web_port := viper.GetString("web_port")
+	p, err := strconv.Atoi(web_port)
+	if err != nil {
+		log.Fatal("Error parsing port #{web_port}: #{err}")
+	}
+
+	// find a free port
+	for {
+		port := fmt.Sprintf(":%d", p)
+		err := app.Listen(port)
+		if err != nil {
+			log.Printf("Error starting web-server: %v\n", err)
+			if strings.Contains(err.Error(), "address already in use") {
+				p += 1
+			} else {
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return err
 }
 
 // Middleware function to respond with relay information on GET requests
@@ -88,7 +111,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 			notifyListeners(&env.Event)
 
 			read := func() ([]byte, error) {
-				bytes, err := json.Marshal(env.Event)
+				bytes, err := json.Marshal(env)
 				if err != nil {
 					return nil, err
 				}

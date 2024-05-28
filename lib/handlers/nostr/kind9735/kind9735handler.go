@@ -27,12 +27,14 @@ func BuildKind9735Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		// Unmarshal the received data into a Nostr event.
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
+
+		event := env.Event
 
 		// Check if the event is of kind 9735.
 		if event.Kind != 9735 {
