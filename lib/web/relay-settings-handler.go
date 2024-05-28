@@ -10,8 +10,6 @@ import (
 )
 
 func handleRelaySettings(c *fiber.Ctx) error {
-	// Refresh wallet to get updated balance
-	go refreshSparrow()
 	log.Println("Relay settings request received")
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	var data map[string]interface{}

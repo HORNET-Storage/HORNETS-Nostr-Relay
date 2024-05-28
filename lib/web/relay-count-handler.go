@@ -11,8 +11,6 @@ import (
 )
 
 func handleRelayCount(c *fiber.Ctx) error {
-	// Refresh wallet to get updated balance
-	go refreshSparrow()
 	log.Println("Relay count request received")
 	// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 

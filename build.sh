@@ -4,7 +4,7 @@
 cd web/panel
 
 # Install npm dependencies
-npm install
+yarn install
 
 # Change back to the parent directory
 cd ../..
