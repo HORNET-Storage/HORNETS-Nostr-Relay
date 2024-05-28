@@ -13,19 +13,17 @@ func StartServer() error {
 		AllowHeaders: "Origin, Content-Type, Accept",
 	}))
 
-	// Public routes
-	app.Post("/login", handleLogin)
-	app.Post("/signup", handleSignUp)
-
-	// Protected routes
-	app.Use(jwtMiddleware)
-
 	// Dedicated routes for each handler
 	app.Post("/relaycount", handleRelayCount)
 	app.Post("/relay-settings", handleRelaySettings)
 	app.Post("/timeseries", handleTimeSeries)
 	app.Post("/activitydata", handleActivityData)
 	app.Post("/barchartdata", handleBarChartData)
+	app.Post("/balance", handleBalance) // Add the new route here
+	app.Post("/transactions", handleTransactions)
+	app.Post("/updateRate", handleBitcoinRate)
+	app.Get("/balance/usd", handleBalanceInUSD)
+	app.Get("/transactions/latest", handleLatestTransactions)
 
 	return app.Listen(":5000")
 }

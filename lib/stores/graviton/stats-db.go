@@ -29,7 +29,17 @@ func InitGorm() (*gorm.DB, error) {
 		}
 
 		// Auto migrate the schema
-		err = instance.AutoMigrate(&types.Kind{}, &types.Photo{}, &types.Video{}, &types.GitNestr{}, &types.UserProfile{}, &types.User{})
+		err = instance.AutoMigrate(
+			&types.Kind{},
+			&types.Photo{},
+			&types.Video{},
+			&types.GitNestr{},
+			&types.UserProfile{},
+			&types.User{},
+			&types.WalletBalance{},
+			&types.WalletTransactions{},
+			&types.BitcoinRate{},
+		)
 		if err != nil {
 			log.Fatalf("Failed to migrate database schema: %v", err)
 		}

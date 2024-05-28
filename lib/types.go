@@ -106,6 +106,26 @@ type GitNestr struct {
 	Size      float64   `gorm:"default:0"` // Size in MB
 }
 
+type WalletBalance struct {
+	ID        uint      `gorm:"primaryKey"`
+	Balance   string    `gorm:"not null"`
+	Timestamp time.Time `gorm:"autoCreateTime"`
+}
+
+type WalletTransactions struct {
+	ID      uint      `gorm:"primaryKey"`
+	Address string    `gorm:"not null"`
+	Date    time.Time `gorm:"not null"` // Date and time formatted like "2024-05-23 19:17:22"
+	Output  string    `gorm:"not null"` // Output as a string
+	Value   string    `gorm:"not null"` // Value as a float
+}
+
+type BitcoinRate struct {
+	ID        uint      `gorm:"primaryKey"`
+	Rate      float64   `gorm:"not null"`
+	Timestamp time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
+}
+
 type RelaySettings struct {
 	Mode             string   `json:"mode"`
 	Kinds            []string `json:"kinds"`
