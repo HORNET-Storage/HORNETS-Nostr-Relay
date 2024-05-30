@@ -24,6 +24,7 @@ func StartServer() error {
 	app.Post("/updateRate", handleBitcoinRate)
 	app.Get("/balance/usd", handleBalanceInUSD)
 	app.Get("/transactions/latest", handleLatestTransactions)
+	app.Get("/bitcoin-rates/last-30-days", handleBitcoinRatesForLast30Days)
 
 	return app.Listen(":5000")
 }

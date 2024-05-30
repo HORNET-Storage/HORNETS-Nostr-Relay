@@ -1,11 +1,15 @@
 package web
 
 import (
+	"fmt"
 	"log"
+	"net/http"
+	"strconv"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 func handleLatestTransactions(c *fiber.Ctx) error {
@@ -25,6 +29,34 @@ func handleLatestTransactions(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database query error",
 		})
+	}
+
+	// Get the latest Bitcoin rate
+	var bitcoinRate types.BitcoinRate
+	result = db.Order("timestamp desc").First(&bitcoinRate)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{
+				"error": "No Bitcoin rate found",
+			})
+		}
+		log.Printf("Error querying Bitcoin rate: %v", result.Error)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Database query error",
+		})
+	}
+
+	// Process each transaction to convert the value to USD
+	for i, transaction := range transactions {
+		satoshis, err := strconv.ParseInt(transaction.Value, 10, 64)
+		if err != nil {
+			log.Printf("Error converting value to int64: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Conversion error",
+			})
+		}
+		transactions[i].Value = fmt.Sprintf("%.2f", satoshiToUSD(bitcoinRate.Rate, satoshis))
 	}
 
 	// Respond with the transactions

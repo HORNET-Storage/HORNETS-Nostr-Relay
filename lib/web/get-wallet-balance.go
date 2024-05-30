@@ -37,7 +37,7 @@ func handleBalanceInUSD(c *fiber.Ctx) error {
 
 	// Get the latest Bitcoin rate
 	var bitcoinRate types.BitcoinRate
-	result = db.First(&bitcoinRate)
+	result = db.Order("timestamp desc").First(&bitcoinRate)
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {

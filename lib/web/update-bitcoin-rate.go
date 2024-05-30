@@ -48,8 +48,8 @@ func handleBitcoinRate(c *fiber.Ctx) error {
 	}
 
 	// Query the latest Bitcoin rate
-	var bitcoinRate types.BitcoinRate
-	result := db.First(&bitcoinRate)
+	var latestBitcoinRate types.BitcoinRate
+	result := db.Order("timestamp desc").First(&latestBitcoinRate)
 
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
 		log.Printf("Error querying bitcoin rate: %v", result.Error)
@@ -58,36 +58,23 @@ func handleBitcoinRate(c *fiber.Ctx) error {
 		})
 	}
 
-	if result.Error == nil && bitcoinRate.Rate == rate {
-		// If the rate is the same, no update needed
+	if result.Error == nil && latestBitcoinRate.Rate == rate {
+		// If the rate is the same as the latest entry, no update needed
 		return c.JSON(fiber.Map{
 			"message": "Rate is the same as the latest entry, no update needed",
 		})
 	}
 
-	// Update or create the Bitcoin rate
-	if result.Error == gorm.ErrRecordNotFound {
-		// Create a new rate entry
-		newRate := types.BitcoinRate{
-			Rate:      rate,
-			Timestamp: time.Now(),
-		}
-		if err := db.Create(&newRate).Error; err != nil {
-			log.Printf("Error saving new rate: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Database save error",
-			})
-		}
-	} else {
-		// Update the existing rate
-		bitcoinRate.Rate = rate
-		bitcoinRate.Timestamp = time.Now()
-		if err := db.Save(&bitcoinRate).Error; err != nil {
-			log.Printf("Error updating rate: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Database update error",
-			})
-		}
+	// Add the new rate
+	newRate := types.BitcoinRate{
+		Rate:      rate,
+		Timestamp: time.Now(),
+	}
+	if err := db.Create(&newRate).Error; err != nil {
+		log.Printf("Error saving new rate: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Database save error",
+		})
 	}
 
 	// Respond with the received data
