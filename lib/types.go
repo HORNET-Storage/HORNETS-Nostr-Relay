@@ -120,6 +120,12 @@ type WalletTransactions struct {
 	Value   string    `gorm:"not null"` // Value as a float
 }
 
+type WalletAddress struct {
+	ID      uint   `gorm:"primaryKey"`
+	Index   string `gorm:"not null"`
+	Address string `gorm:"not null;unique"`
+}
+
 type BitcoinRate struct {
 	ID        uint      `gorm:"primaryKey"`
 	Rate      float64   `gorm:"not null"`

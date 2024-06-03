@@ -64,6 +64,7 @@ func handleBalanceInUSD(c *fiber.Ctx) error {
 
 	// Respond with the USD balance
 	return c.JSON(fiber.Map{
-		"balance_usd": usdBalance,
+		"balance_usd":    usdBalance,
+		"latest_balance": satoshis,
 	})
 }
