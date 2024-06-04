@@ -1,8 +1,6 @@
 module github.com/HORNET-Storage/hornet-storage
 
-go 1.21
-
-toolchain go1.22.1
+go 1.22.1
 
 require (
 	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240415174732-f5bae33e2252
@@ -13,7 +11,7 @@ require (
 	github.com/gofiber/contrib/websocket v1.3.0
 	github.com/json-iterator/go v1.1.12
 	github.com/libp2p/go-libp2p v0.30.0
-	github.com/nbd-wtf/go-nostr v0.30.0
+	github.com/nbd-wtf/go-nostr v0.31.4
 	github.com/puzpuzpuz/xsync/v3 v3.0.2
 	github.com/spf13/viper v1.18.2
 	go.etcd.io/bbolt v1.3.8
@@ -44,6 +42,7 @@ require (
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/huin/goupnp v1.2.0 // indirect
+	github.com/illuzen/go-negentropy v0.0.0-20240505133407-a298222fce41 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
@@ -58,6 +57,7 @@ require (
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/libp2p/go-reuseport v0.4.0 // indirect
 	github.com/libp2p/go-yamux/v4 v4.0.1 // indirect
+	github.com/libp2p/zeroconf/v2 v2.2.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
