@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/count"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/filter"
@@ -36,14 +38,11 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/spf13/viper"
 
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	//"github.com/libp2p/go-libp2p/p2p/security/noise"
 	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers"
 
@@ -52,16 +51,17 @@ import (
 	//stores_bbolt "github.com/HORNET-Storage/hornet-storage/lib/stores/bbolt"
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	//negentropy "github.com/illuzen/go-negentropy"
 )
 
 func init() {
 	viper.SetDefault("key", "")
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
-	viper.SetDefault("port", "9000")
 	viper.SetDefault("query_cache", map[string]string{
 		"hkind:2": "ItemName",
 	})
+	viper.SetDefault("service_tag", "hornet-storage-service")
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -81,74 +81,18 @@ func init() {
 
 func main() {
 	wg := new(sync.WaitGroup)
+	ctx := context.Background()
 
 	// Private key
 	key := viper.GetString("key")
 
-	decodedKey, err := signing.DecodeKey(key)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	privateKey, err := crypto.UnmarshalSecp256k1PrivateKey(decodedKey)
-	if err != nil {
-		log.Fatal(err)
-	}
+	host := web.GetHost(key)
 
 	// Create and initialize database
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
 	store.InitStore(queryCache)
-
-	// Libp2p Host
-	listenAddressQuic := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", viper.GetString("port"))
-	listenAddressWebTransport := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", viper.GetString("port"))
-
-	host, err := libp2p.New(
-		libp2p.Identity(privateKey),
-		// Multiple listen addresses
-		libp2p.ListenAddrStrings(
-			listenAddressQuic,
-			listenAddressWebTransport,
-		),
-		// support TLS connections
-		//libp2p.Security(libp2ptls.ID, libp2ptls.New),
-		// support noise connections
-		//libp2p.Security(noise.ID, noise.New),
-
-		//libp2p.Transport(customQUICConstructor),
-		// support any other default transports (TCP)
-		//libp2p.DefaultTransports,
-		libp2p.Transport(libp2pquic.NewTransport),
-		//libp2p.Transport(transport),
-		// Let's prevent our peer from having too many
-		// connections by attaching a connection manager.
-
-		//libp2p.ConnectionManager(connmgr),
-		// Attempt to open ports using uPNP for NATed hosts.
-
-		//libp2p.NATPortMap(),
-		// Let this host use the DHT to find other hosts
-
-		//libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
-		//	idht, err = dht.New(ctx, h)
-		//	return idht, err
-		//}),
-
-		// If you want to help other peers to figure out if they are behind
-		// NATs, you can launch the server-side of AutoNAT too (AutoRelay
-		// already runs the client)
-		//
-		// This service is highly rate-limited and should not cause any
-		// performance issues.
-
-		//libp2p.EnableNATService(),
-	)
-
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Stream Handlers
 	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
@@ -209,6 +153,7 @@ func main() {
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
 	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
 
+	err := error(nil)
 	// Register a libp2p handler for every stream handler
 	for kind := range nostr.GetHandlers() {
 		handler := nostr.GetHandler(kind)
@@ -256,7 +201,7 @@ func main() {
 			err := web.StartServer()
 
 			if err != nil {
-				fmt.Println("Fatal error occured in web server")
+				fmt.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
@@ -273,16 +218,27 @@ func main() {
 			err := proxy.StartServer()
 
 			if err != nil {
-				fmt.Println("Fatal error occured in web server")
+				fmt.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
 		}()
 	}
 
-	defer host.Close()
+	if err := setupMDNS(host, viper.GetString("serviceTag"), ctx); err != nil {
+		log.Fatal(err)
+	}
 
-	fmt.Printf("Host started with id: %s\n", host.ID())
+	// Wait a bit for discovery to happen
+	time.Sleep(20 * time.Second)
+
+	// Print out the peers each host knows about
+	fmt.Println("Host 1 peers:")
+	for _, p := range host.Peerstore().Peers() {
+		fmt.Println(p)
+	}
+
+	defer host.Close()
 
 	wg.Wait()
 }
