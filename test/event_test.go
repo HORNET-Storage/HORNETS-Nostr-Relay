@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"time"
 	"testing"
+	"time"
+
 	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	"github.com/HORNET-Storage/hornet-storage/lib/web"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
@@ -29,13 +26,16 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9372"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
+	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"github.com/HORNET-Storage/hornet-storage/lib/web"
 	"github.com/nbd-wtf/go-nostr"
 
 	"github.com/libp2p/go-libp2p/core/host"
 )
 
 const DiscoveryServiceTag = "mdns-discovery"
-
 
 // GenerateRandomEvent generates a random Nostr event using go-nostr
 func GenerateRandomEvent() *nostr.Event {
@@ -186,7 +186,7 @@ func TestHostConnections(t *testing.T) {
 		}
 		fmt.Printf("Host %s addresses:\n", host.ID())
 		for _, addr := range host.Addrs() {
-			fmt.Printf("%s/p2p/%s\n", addr, host.ID().Pretty())
+			fmt.Printf("%s/p2p/%s\n", addr, host.ID())
 		}
 		hosts = append(hosts, host)
 	}
@@ -194,12 +194,8 @@ func TestHostConnections(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	for _, host := range hosts {
-		if len(host.Network().Peers()) != numHosts - 1 {
-			t.Fatalf("Host %s has %d peers, expected %d", host.ID(), host.Peerstore().Peers().Len(), numHosts - 1)
+		if len(host.Network().Peers()) != numHosts-1 {
+			t.Fatalf("Host %s has %d peers, expected %d", host.ID(), host.Peerstore().Peers().Len(), numHosts-1)
 		}
 	}
 }
-
-
-
-
