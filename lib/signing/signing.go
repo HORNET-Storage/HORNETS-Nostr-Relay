@@ -116,7 +116,7 @@ func GeneratePrivateKey() (*secp256k1.PrivateKey, error) {
 	return privateKey, nil
 }
 
-func SerializePrivateKey(privateKey *secp256k1.PrivateKey) (*string, error) {
+func SerializePrivateKeyBech32(privateKey *secp256k1.PrivateKey) (*string, error) {
 	privateKeyBytes := privateKey.Serialize()
 
 	bytes, err := bech32.ConvertBits(privateKeyBytes, 8, 5, true)
@@ -148,7 +148,7 @@ func SerializePublicKeyBech32(publicKey *secp256k1.PublicKey) (*string, error) {
 	return &encodedKey, nil
 }
 
-func SerializePrivateKeyBech32(privateKey *secp256k1.PrivateKey) (*string, error) {
+func SerializePrivateKey(privateKey *secp256k1.PrivateKey) (*string, error) {
 	privateKeyBytes := privateKey.Serialize()
 
 	encodedKey := hex.EncodeToString(privateKeyBytes)

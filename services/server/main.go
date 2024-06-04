@@ -102,13 +102,15 @@ func main() {
 	store.InitStore(queryCache)
 
 	// Libp2p Host
-	listenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", viper.GetString("port"))
+	listenAddressQuic := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", viper.GetString("port"))
+	listenAddressWebTransport := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", viper.GetString("port"))
 
 	host, err := libp2p.New(
 		libp2p.Identity(privateKey),
 		// Multiple listen addresses
 		libp2p.ListenAddrStrings(
-			listenAddress,
+			listenAddressQuic,
+			listenAddressWebTransport,
 		),
 		// support TLS connections
 		//libp2p.Security(libp2ptls.ID, libp2ptls.New),
