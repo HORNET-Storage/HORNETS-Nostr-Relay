@@ -86,7 +86,7 @@ func main() {
 	// Private key
 	key := viper.GetString("key")
 
-	host := web.GetHost(key)
+	host := web.GetHostOnPort(key, viper.GetString("port"))
 
 	// Create and initialize database
 	store := &stores_graviton.GravitonStore{}
