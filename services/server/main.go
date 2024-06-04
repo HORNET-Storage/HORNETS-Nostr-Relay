@@ -58,6 +58,7 @@ func init() {
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
+	viper.SetDefault("web_port", "9001")
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
 	viper.SetDefault("query_cache", map[string]string{
 		"hkind:2": "ItemName",

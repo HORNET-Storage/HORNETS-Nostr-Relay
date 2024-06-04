@@ -203,7 +203,7 @@ type Notifee struct {
 
 // HandlePeerFound is called when new peer is found
 func (n *Notifee) HandlePeerFound(pi peer.AddrInfo) {
-	fmt.Printf("Host %s found peer: %s\n", n.h.ID(), pi.ID.Pretty())
+	fmt.Printf("Host %s found peer: %s\n", n.h.ID(), pi.ID)
 
 	// Create a context with a timeout for the connection
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -212,7 +212,7 @@ func (n *Notifee) HandlePeerFound(pi peer.AddrInfo) {
 	if err := n.h.Connect(ctx, pi); err != nil {
 		fmt.Printf("Failed to connect to peer: %s\n", err)
 	} else {
-		fmt.Printf("Host %s connected to peer: %s\n", n.h.ID(), pi.ID.Pretty())
+		fmt.Printf("Host %s connected to peer: %s\n", n.h.ID(), pi.ID)
 	}
 }
 
