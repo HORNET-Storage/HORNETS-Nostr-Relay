@@ -1,6 +1,7 @@
 package graviton
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"github.com/deroproject/graviton"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
@@ -23,8 +25,7 @@ import (
 )
 
 type GravitonStore struct {
-	Database *graviton.Store
-
+	Database    *graviton.Store
 	CacheConfig map[string]string
 }
 
@@ -108,6 +109,8 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 
 	var contentTree *graviton.Tree = nil
 
+	leafContentSize := len(hex.EncodeToString(leafData.Leaf.Content))
+
 	if leafData.Leaf.Content != nil {
 		contentTree, err = snapshot.GetTree("content")
 		if err != nil {
@@ -169,7 +172,6 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		}
 
 		indexTree.Put([]byte(root), []byte(bucket))
-
 		trees = append(trees, indexTree)
 
 		if strings.HasPrefix(leafData.PublicKey, "npub") {
@@ -192,6 +194,55 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 				}
 			}
 		}
+
+		// Store photo or video based on file extension if it's a root leaf
+		itemName := rootLeaf.ItemName
+		leafCount := rootLeaf.LeafCount
+		hash := rootLeaf.Hash
+
+		log.Println("Leaf: ", rootLeaf)
+		log.Println("Rootleaf Content size", leafContentSize)
+
+		// Determine kind name (extension)
+		kindName := GetKindFromItemName(itemName)
+
+		ChunkSize := 2048 * 1024
+
+		var relaySettings types.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+			log.Fatalf("Error unmarshaling relay settings: %v", err)
+		}
+
+		var sizeMB float64
+		if leafCount > 0 {
+			sizeMB = float64(leafCount*ChunkSize) / (1024 * 1024) // Convert to MB
+		} else {
+			sizeBytes := leafContentSize
+			sizeMB = float64(sizeBytes) / (1024 * 1024) // Convert to MB
+		}
+
+		gormDB, err := InitGorm()
+		if err != nil {
+			return err
+		}
+
+		if contains(relaySettings.Photos, strings.ToLower(kindName)) {
+			photo := types.Photo{
+				Hash:      hash,
+				LeafCount: leafCount,
+				KindName:  kindName,
+				Size:      sizeMB,
+			}
+			gormDB.Create(&photo)
+		} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
+			video := types.Video{
+				Hash:      hash,
+				LeafCount: leafCount,
+				KindName:  kindName,
+				Size:      sizeMB,
+			}
+			gormDB.Create(&video)
+		}
 	}
 
 	if contentTree != nil {
@@ -204,6 +255,11 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 	}
 
 	return nil
+}
+
+func GetKindFromItemName(itemName string) string {
+	parts := strings.Split(itemName, ".")
+	return parts[len(parts)-1]
 }
 
 func (store *GravitonStore) RetrieveLeafContent(contentHash []byte) ([]byte, error) {
@@ -391,6 +447,9 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 		return err
 	}
 
+	// Store event in Gorm SQLite database
+	storeInGorm(event)
+
 	return nil
 }
 
@@ -421,6 +480,14 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 
 	}
 	graviton.Commit(tree)
+
+	gormDB, err := InitGorm()
+	if err != nil {
+		return err
+	}
+
+	// Delete event from Gorm SQLite database
+	gormDB.Delete(&types.Kind{}, "event_id = ?", eventID)
 
 	return nil
 }
@@ -500,4 +567,43 @@ func GetBucket(leaf *merkle_dag.DagLeaf) string {
 			return "file"
 		}
 	}
+}
+
+func (store *GravitonStore) CountFileLeavesByType() (map[string]int, error) {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, err
+	}
+
+	treeNames := []string{"content"} // Adjust based on actual storage details.
+
+	fileTypeCounts := make(map[string]int)
+
+	for _, treeName := range treeNames {
+		tree, err := snapshot.GetTree(treeName)
+		if err != nil {
+			continue // Skip if the tree is not found
+		}
+
+		c := tree.Cursor()
+
+		for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+			var leaf *merkle_dag.DagLeaf
+			err := cbor.Unmarshal(v, &leaf)
+			if err != nil {
+				continue // Skip on deserialization error
+			}
+
+			if leaf.Type == merkle_dag.FileLeafType { // Assuming FileLeafType is the correct constant
+				// Extract file extension dynamically
+				splitName := strings.Split(leaf.ItemName, ".")
+				if len(splitName) > 1 {
+					extension := strings.ToLower(splitName[len(splitName)-1])
+					fileTypeCounts[extension]++
+				}
+			}
+		}
+	}
+
+	return fileTypeCounts, nil
 }

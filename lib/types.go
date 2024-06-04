@@ -1,6 +1,8 @@
 package lib
 
 import (
+	"time"
+
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
@@ -68,4 +70,120 @@ type CacheMetaData struct {
 
 type CacheData struct {
 	Keys []string
+}
+
+type Kind struct {
+	ID         uint `gorm:"primaryKey"`
+	KindNumber int
+	EventID    string
+	Timestamp  time.Time `gorm:"autoCreateTime"`
+	Size       float64   `gorm:"default:0"` // Size in MB
+}
+
+type Photo struct {
+	ID        uint   `gorm:"primaryKey"`
+	Hash      string `gorm:"uniqueIndex"`
+	LeafCount int
+	KindName  string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
+}
+
+type Video struct {
+	ID        uint   `gorm:"primaryKey"`
+	Hash      string `gorm:"uniqueIndex"`
+	LeafCount int
+	KindName  string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
+}
+
+type GitNestr struct {
+	ID        uint `gorm:"primaryKey"`
+	GitType   string
+	EventID   string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
+}
+
+type WalletBalance struct {
+	ID        uint      `gorm:"primaryKey"`
+	Balance   string    `gorm:"not null"`
+	Timestamp time.Time `gorm:"autoCreateTime"`
+}
+
+type WalletTransactions struct {
+	ID      uint      `gorm:"primaryKey"`
+	Address string    `gorm:"not null"`
+	Date    time.Time `gorm:"not null"` // Date and time formatted like "2024-05-23 19:17:22"
+	Output  string    `gorm:"not null"` // Output as a string
+	Value   string    `gorm:"not null"` // Value as a float
+}
+
+type BitcoinRate struct {
+	ID        uint      `gorm:"primaryKey"`
+	Rate      float64   `gorm:"not null"`
+	Timestamp time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
+}
+
+type RelaySettings struct {
+	Mode             string   `json:"mode"`
+	Protocol         string   `json:"protocol"` // Added protocol
+	Kinds            []string `json:"kinds"`
+	Photos           []string `json:"photos"`
+	Videos           []string `json:"videos"`
+	GitNestr         []string `json:"gitNestr"`
+	IsKindsActive    bool     `json:"isKindsActive"`
+	IsPhotosActive   bool     `json:"isPhotosActive"`
+	IsVideosActive   bool     `json:"isVideosActive"`
+	IsGitNestrActive bool     `json:"isGitNestrActive"`
+}
+
+type TimeSeriesData struct {
+	Month           string `json:"month"`
+	Profiles        int    `json:"profiles"`
+	LightningAddr   int    `json:"lightning_addr"`
+	DHTKey          int    `json:"dht_key"`
+	LightningAndDHT int    `json:"lightning_and_dht"`
+}
+
+type UserProfile struct {
+	ID            uint      `gorm:"primaryKey"`
+	NpubKey       string    `gorm:"uniqueIndex"`
+	LightningAddr bool      `gorm:"default:false"`
+	DHTKey        bool      `gorm:"default:false"`
+	Timestamp     time.Time `gorm:"autoCreateTime"`
+}
+
+type ActivityData struct {
+	Month   string  `json:"month"`
+	TotalGB float64 `json:"total_gb"`
+}
+
+type BarChartData struct {
+	Month   string  `json:"month"`
+	NotesGB float64 `json:"notes_gb"`
+	MediaGB float64 `json:"media_gb"`
+}
+
+type User struct {
+	ID        uint `gorm:"primaryKey"`
+	FirstName string
+	LastName  string
+	Email     string    `gorm:"uniqueIndex"`
+	Password  string    // Store hashed passwords
+	CreatedAt time.Time `gorm:"autoCreateTime"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type SignUpRequest struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Email     string `json:"email"`
+	Password  string `json:"password"`
 }

@@ -2,11 +2,12 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
+
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -19,6 +20,8 @@ import (
 
 func StartServer() error {
 	app := fiber.New()
+
+	// initConfig()
 
 	// Middleware for handling relay information requests
 	app.Use(handleRelayInfoRequests)
@@ -87,6 +90,7 @@ func handleWebSocketConnections(c *websocket.Conn) { // Replace HostType with th
 }
 
 func processWebSocketMessage(c *websocket.Conn) error {
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	_, message, err := c.ReadMessage()
 	if err != nil {
 		return fmt.Errorf("read error: %w", err)
