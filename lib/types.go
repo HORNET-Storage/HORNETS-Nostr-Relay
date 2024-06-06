@@ -3,6 +3,8 @@ package lib
 import (
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
+
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
@@ -178,8 +180,19 @@ type User struct {
 	LastName  string
 	Email     string    `gorm:"uniqueIndex"`
 	Password  string    // Store hashed passwords
+	Npub      string    `gorm:"uniqueIndex"` // Add this field
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+}
+
+type UserChallenge struct {
+	ID        uint   `gorm:"primaryKey"`
+	UserID    uint   `gorm:"index"`
+	Npub      string `gorm:"index"`
+	Challenge string `gorm:"uniqueIndex"`
+	Hash      string
+	Expired   bool      `gorm:"default:false"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
 
 type LoginRequest struct {
@@ -192,4 +205,17 @@ type SignUpRequest struct {
 	LastName  string `json:"lastName"`
 	Email     string `json:"email"`
 	Password  string `json:"password"`
+}
+
+// LoginPayload represents the structure of the login request payload
+type LoginPayload struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// JWTClaims represents the structure of the JWT claims
+type JWTClaims struct {
+	UserID uint   `json:"user_id"`
+	Email  string `json:"email"`
+	jwt.RegisteredClaims
 }

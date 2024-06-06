@@ -27,6 +27,9 @@ func StartServer() error {
 	app.Get("/bitcoin-rates/last-30-days", handleBitcoinRatesForLast30Days)
 	app.Post("/addresses", handleAddresses)
 	app.Get("/addresses", getAddresses)
+	app.Post("/signup", handleSignUp)
+	app.Post("/login", handleLogin) // Add the new login route
+	app.Post("/verify", handleVerify)
 
 	return app.Listen(":5000")
 }
