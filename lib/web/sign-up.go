@@ -13,11 +13,8 @@ import (
 func handleSignUp(c *fiber.Ctx) error {
 	log.Println("Sign-up request received")
 	var signUpPayload struct {
-		FirstName string `json:"firstName"`
-		LastName  string `json:"lastName"`
-		Email     string `json:"email"`
-		Password  string `json:"password"`
-		Npub      string `json:"npub"`
+		Npub     string `json:"npub"`
+		Password string `json:"password"`
 	}
 
 	if err := c.BodyParser(&signUpPayload); err != nil {
@@ -39,11 +36,8 @@ func handleSignUp(c *fiber.Ctx) error {
 	}
 
 	user := types.User{
-		FirstName: signUpPayload.FirstName,
-		LastName:  signUpPayload.LastName,
-		Email:     signUpPayload.Email,
-		Password:  string(hashedPassword),
-		Npub:      signUpPayload.Npub,
+		Password: string(hashedPassword),
+		Npub:     signUpPayload.Npub,
 	}
 
 	if err := db.Create(&user).Error; err != nil {

@@ -175,15 +175,23 @@ type BarChartData struct {
 }
 
 type User struct {
-	ID        uint `gorm:"primaryKey"`
-	FirstName string
-	LastName  string
-	Email     string    `gorm:"uniqueIndex"`
+	ID        uint      `gorm:"primaryKey"`
 	Password  string    // Store hashed passwords
 	Npub      string    `gorm:"uniqueIndex"` // Add this field
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
+
+// type User struct {
+// 	ID        uint `gorm:"primaryKey"`
+// 	FirstName string
+// 	LastName  string
+// 	Email     string    `gorm:"uniqueIndex"`
+// 	Password  string    // Store hashed passwords
+// 	Npub      string    `gorm:"uniqueIndex"` // Add this field
+// 	CreatedAt time.Time `gorm:"autoCreateTime"`
+// 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+// }
 
 type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
@@ -209,7 +217,7 @@ type SignUpRequest struct {
 
 // LoginPayload represents the structure of the login request payload
 type LoginPayload struct {
-	Email    string `json:"email"`
+	Npub     string `json:"npub"`
 	Password string `json:"password"`
 }
 
