@@ -30,6 +30,7 @@ func StartServer() error {
 	app.Post("/signup", handleSignUp)
 	app.Post("/login", handleLogin) // Add the new login route
 	app.Post("/verify", handleVerify)
+	app.Get("/user-exist", userExist)
 
 	return app.Listen(":5000")
 }
