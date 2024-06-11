@@ -17,6 +17,8 @@ func handleRelaySettings(c *fiber.Ctx) error {
 		return c.Status(400).SendString(err.Error())
 	}
 
+	log.Println("Received data:", data)
+
 	relaySettingsData, ok := data["relay_settings"]
 	if !ok {
 		log.Println("Relay settings data not provided")

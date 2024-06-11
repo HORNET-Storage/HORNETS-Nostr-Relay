@@ -137,6 +137,7 @@ type BitcoinRate struct {
 type RelaySettings struct {
 	Mode             string   `json:"mode"`
 	Protocol         string   `json:"protocol"` // Added protocol
+	Chunked          string   `json:"chunked"`
 	Kinds            []string `json:"kinds"`
 	Photos           []string `json:"photos"`
 	Videos           []string `json:"videos"`
