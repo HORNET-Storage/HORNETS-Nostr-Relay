@@ -30,6 +30,10 @@ func AddUploadHandler(libp2phost host.Host, store stores.Store, canUploadDag fun
 	libp2phost.SetStreamHandler("/upload/1.0.0", BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag))
 }
 
+func AddQueryHandler(libp2phost host.Host, store stores.Store) {
+	libp2phost.SetStreamHandler("/query/1.0.0", BuildQueryStreamHandler(store))
+}
+
 func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string)) func(stream network.Stream) {
 	uploadStreamHandler := func(stream network.Stream) {
 		result, message := WaitForUploadMessage(stream)
@@ -423,6 +427,45 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 	return downloadStreamHandler
 }
 
+func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
+	queryStreamHandler := func(stream network.Stream) {
+		enc := cbor.NewEncoder(stream)
+
+		result, message := WaitForQueryMessage(stream)
+		if !result {
+			WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
+
+			stream.Close()
+			return
+		}
+
+		hashes, err := store.QueryDag(message.QueryFilter)
+		if err != nil {
+			WriteErrorToStream(stream, "Failed to query database", nil)
+
+			stream.Close()
+			return
+		}
+
+		fmt.Printf("Found %d hashes\n", len(hashes))
+
+		response := types.QueryResponse{
+			Hashes: hashes,
+		}
+
+		if err := enc.Encode(&response); err != nil {
+			WriteErrorToStream(stream, "Failed to encode response", nil)
+
+			stream.Close()
+			return
+		}
+
+		stream.Close()
+	}
+
+	return queryStreamHandler
+}
+
 func CheckFilter(leaf *merkle_dag.DagLeaf, filter *types.DownloadFilter) (bool, error) {
 	label := merkle_dag.GetLabel(leaf.Hash)
 
@@ -545,6 +588,38 @@ func WaitForDownloadMessage(stream network.Stream) (bool, *types.DownloadMessage
 	streamDecoder := cbor.NewDecoder(stream)
 
 	var message types.DownloadMessage
+
+	timeout := time.NewTimer(5 * time.Second)
+
+wait:
+	for {
+		select {
+		case <-timeout.C:
+			return false, nil
+		default:
+			err := streamDecoder.Decode(&message)
+
+			if err != nil {
+				log.Printf("Error reading from stream: %e", err)
+			}
+
+			if err == io.EOF {
+				return false, nil
+			}
+
+			if err == nil {
+				break wait
+			}
+		}
+	}
+
+	return true, &message
+}
+
+func WaitForQueryMessage(stream network.Stream) (bool, *types.QueryMessage) {
+	streamDecoder := cbor.NewDecoder(stream)
+
+	var message types.QueryMessage
 
 	timeout := time.NewTimer(5 * time.Second)
 

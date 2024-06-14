@@ -51,6 +51,10 @@ type QueryMessage struct {
 	QueryFilter map[string]string
 }
 
+type QueryResponse struct {
+	Hashes []string
+}
+
 type BlockData struct {
 	Leaf   merkle_dag.DagLeaf
 	Branch merkle_dag.ClassicTreeBranch

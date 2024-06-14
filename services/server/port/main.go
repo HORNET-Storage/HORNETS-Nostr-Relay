@@ -131,6 +131,8 @@ func main() {
 		return err == nil
 	}, func(dag *merkle_dag.Dag, pubKey *string) {})
 
+	handlers.AddQueryHandler(host, store)
+
 	// Register Our Nostr Stream Handlers
 	nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
 	nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
