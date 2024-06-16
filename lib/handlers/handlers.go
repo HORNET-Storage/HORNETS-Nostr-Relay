@@ -229,10 +229,17 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			return
 		}
 
-		log.Printf("Download requested for: %s\n", message.Root)
+		log.Printf("Download requested for: %s ", message.Root)
 
-		// Entire dag
-		dagData, err := store.BuildDagFromStore(message.Root, true)
+		includeContent := true
+
+		if message.Filter != nil {
+			log.Print("with filter\n")
+
+			includeContent = message.Filter.IncludeContent
+		}
+
+		dagData, err := store.BuildDagFromStore(message.Root, includeContent)
 		if err != nil {
 			WriteErrorToStream(stream, "Failed to build dag from root %e", err)
 
@@ -255,7 +262,9 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					}
 
 					if !message.Filter.IncludeContent {
-						leaf.Content = nil
+						rootLeaf.Content = nil
+
+						rootLeaf.Links = make(map[string]string)
 					}
 
 					message := types.UploadMessage{
@@ -268,14 +277,20 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						return err
 					}
 
-					log.Println("Uploaded root leaf")
-
 					if result := WaitForResponse(stream); !result {
 						return err
 					}
-
-					log.Println("Response received")
 				} else {
+					if !message.Filter.IncludeContent {
+						if leaf.Type == merkle_dag.ChunkLeafType {
+							log.Println("Skipping file chunk")
+							return nil
+						} else if leaf.Type == merkle_dag.FileLeafType {
+							log.Println("Removing links from file")
+							leaf.Links = make(map[string]string)
+						}
+					}
+
 					valid, err := CheckFilter(leaf, message.Filter)
 
 					if err != nil && valid {
@@ -320,13 +335,9 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 							return err
 						}
 
-						log.Println("Uploaded next leaf")
-
 						if result = WaitForResponse(stream); !result {
 							return err
 						}
-
-						log.Println("Response recieved")
 					}
 				}
 
@@ -357,13 +368,9 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						return err
 					}
 
-					log.Println("Uploaded root leaf")
-
 					if result := WaitForResponse(stream); !result {
 						return err
 					}
-
-					log.Println("Response received")
 				} else {
 					err := leaf.VerifyLeaf()
 					if err != nil {
@@ -397,21 +404,16 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					if err := streamEncoder.Encode(&message); err != nil {
 						return err
 					}
-
-					log.Println("Uploaded next leaf")
-
 					if result = WaitForResponse(stream); !result {
 						return fmt.Errorf("did not recieve a valid response")
 					}
-
-					log.Println("Response recieved")
 				}
 
 				return nil
 			})
 
 			if err != nil {
-				WriteErrorToStream(stream, "Failed to download dag %e", err)
+				WriteErrorToStream(stream, "Failed to download dag", err)
 
 				stream.Close()
 				return
@@ -447,7 +449,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 			return
 		}
 
-		fmt.Printf("Found %d hashes\n", len(hashes))
+		fmt.Printf("Query Found %d hashes\n", len(hashes))
 
 		response := types.QueryResponse{
 			Hashes: hashes,
@@ -468,6 +470,10 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 
 func CheckFilter(leaf *merkle_dag.DagLeaf, filter *types.DownloadFilter) (bool, error) {
 	label := merkle_dag.GetLabel(leaf.Hash)
+
+	if len(filter.Leaves) <= 0 && len(filter.LeafRanges) <= 0 {
+		return true, nil
+	}
 
 	if slices.Contains(filter.Leaves, label) {
 		return true, nil
@@ -499,7 +505,11 @@ func CheckFilter(leaf *merkle_dag.DagLeaf, filter *types.DownloadFilter) (bool, 
 func WriteErrorToStream(stream network.Stream, message string, err error) error {
 	enc := cbor.NewEncoder(stream)
 
-	log.Println(message)
+	if err != nil {
+		log.Printf("%s: %v\n", message, err)
+	} else {
+		log.Println(message)
+	}
 
 	data := types.ErrorMessage{
 		Message: fmt.Sprintf(message, err),

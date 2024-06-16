@@ -43,6 +43,16 @@ func BuildDagFromStore(store Store, root string, includeContent bool) (*types.Da
 			return err
 		}
 
+		if !includeContent {
+			if leaf.Type == merkle_dag.FileLeafType {
+				leaf.Links = make(map[string]string)
+
+				builder.AddLeaf(&leaf, nil)
+
+				return nil
+			}
+		}
+
 		builder.AddLeaf(&leaf, nil)
 
 		for _, childHash := range leaf.Links {

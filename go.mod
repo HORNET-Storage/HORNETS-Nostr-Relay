@@ -3,7 +3,7 @@ module github.com/HORNET-Storage/hornet-storage
 go 1.22.1
 
 require (
-	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240502030739-b86e6578c6c1
+	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/fsnotify/fsnotify v1.7.0
