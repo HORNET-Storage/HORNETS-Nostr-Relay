@@ -71,13 +71,12 @@ func (store *GravitonStore) QueryDag(filter map[string]string) ([]string, error)
 	}
 
 	for bucket, key := range filter {
-		if strings.HasPrefix(bucket, "npub") {
+		if strings.HasPrefix(bucket, "npub1") {
 			userTree, err := snapshot.GetTree(bucket)
 			if err == nil {
 				value, err := userTree.Get([]byte(key))
 				if err == nil {
 					var cacheData *types.CacheData = &types.CacheData{}
-
 					err = cbor.Unmarshal(value, cacheData)
 					if err == nil {
 						keys = append(keys, cacheData.Keys...)
@@ -91,7 +90,11 @@ func (store *GravitonStore) QueryDag(filter map[string]string) ([]string, error)
 				if err == nil {
 					value, err := cacheTree.Get([]byte(key))
 					if err == nil {
-						keys = append(keys, string(value))
+						var cacheData *types.CacheData = &types.CacheData{}
+						err = cbor.Unmarshal(value, cacheData)
+						if err == nil {
+							keys = append(keys, cacheData.Keys...)
+						}
 					}
 				}
 			}
@@ -144,7 +147,7 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 
 	bucket := GetBucket(rootLeaf)
 
-	fmt.Printf("Adding to bucket: %s\n", bucket)
+	//fmt.Printf("Adding to bucket: %s\n", bucket)
 
 	cborData, err := cbor.Marshal(leafData)
 	if err != nil {
@@ -153,7 +156,7 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 
 	key := leafData.Leaf.Hash // merkle_dag.GetHash(leaf.Hash)
 
-	log.Printf("Adding key to block database: %s\n", key)
+	//log.Printf("Adding key to block database: %s\n", key)
 
 	tree, err := snapshot.GetTree(bucket)
 	if err != nil {
@@ -181,8 +184,8 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		if leafData.PublicKey != "" {
 			pubKey := leafData.PublicKey
 
-			if !strings.HasPrefix(leafData.PublicKey, "npub") {
-				pubKey = "npub" + pubKey
+			if !strings.HasPrefix(leafData.PublicKey, "npub1") {
+				pubKey = "npub1" + pubKey
 			}
 
 			_trees, err := store.cacheKey(pubKey, bucket, root)
@@ -219,8 +222,8 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		leafCount := rootLeaf.LeafCount
 		hash := rootLeaf.Hash
 
-		log.Println("Leaf: ", rootLeaf)
-		log.Println("Rootleaf Content size", leafContentSize)
+		//log.Println("Leaf: ", rootLeaf)
+		//log.Println("Rootleaf Content size", leafContentSize)
 
 		// Determine kind name (extension)
 		kindName := GetKindFromItemName(itemName)
@@ -341,7 +344,7 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 		return nil, err
 	}
 
-	log.Printf("Searching for leaf with key: %s\nFrom bucket: %s", key, bucket)
+	//log.Printf("Searching for leaf with key: %s\nFrom bucket: %s", key, bucket)
 	bytes, err := tree.Get(key)
 	if err != nil {
 		return nil, err
@@ -355,7 +358,7 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 	}
 
 	if includeContent && data.Leaf.ContentHash != nil {
-		fmt.Println("Fetching  leaf content")
+		//fmt.Println("Fetching  leaf content")
 
 		content, err := store.RetrieveLeafContent(data.Leaf.ContentHash)
 		if err != nil {
@@ -365,7 +368,7 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 		data.Leaf.Content = content
 	}
 
-	fmt.Println("Leaf found")
+	//fmt.Println("Leaf found")
 
 	return data, nil
 }
@@ -534,9 +537,9 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 
 				serializedData, err := cbor.Marshal(cacheData)
 				if err == nil {
-					fmt.Println("CACHE UPDATED: [" + bucket + "]" + key + ": " + root)
+					//fmt.Println("CACHE UPDATED: [" + bucket + "]" + key + ": " + root)
 
-					userTree.Put([]byte(bucket), serializedData)
+					userTree.Put([]byte(key), serializedData)
 				}
 			} else {
 				cacheData := &types.CacheData{
@@ -545,9 +548,9 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 
 				serializedData, err := cbor.Marshal(cacheData)
 				if err == nil {
-					fmt.Println("CACHE UPDATED: [" + bucket + "]" + key + ": " + root)
+					//fmt.Println("CACHE UPDATED: [" + bucket + "]" + key + ": " + root)
 
-					userTree.Put([]byte(bucket), serializedData)
+					userTree.Put([]byte(key), serializedData)
 				}
 			}
 
@@ -571,7 +574,7 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 
 				serializedData, err := cbor.Marshal(cacheData)
 				if err == nil {
-					fmt.Println("CACHE UPDATED: [" + cacheBucket + "]" + key + ": " + root)
+					//fmt.Println("CACHE UPDATED: [" + cacheBucket + "]" + key + ": " + root)
 
 					cacheTree.Put([]byte(key), serializedData)
 				}
@@ -582,15 +585,11 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 
 				serializedData, err := cbor.Marshal(cacheData)
 				if err == nil {
-					fmt.Println("CACHE UPDATED: [" + bucket + "]" + bucket + ": " + root)
+					//fmt.Println("CACHE UPDATED: [" + cacheBucket + "]" + key + ": " + root)
 
 					cacheTree.Put([]byte(key), serializedData)
 				}
 			}
-
-			cacheTree.Put([]byte(key), []byte(root))
-
-			fmt.Println("CACHE UPDATED: [" + cacheBucket + "]" + key + ": " + root)
 
 			trees = append(trees, cacheTree)
 		}

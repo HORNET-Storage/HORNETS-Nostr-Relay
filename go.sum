@@ -12,6 +12,8 @@ github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240415174732-f5bae33e2252 
 github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240415174732-f5bae33e2252/go.mod h1:MsGOIAMgWJjofvEd/f2s7U8rsN11cliY1vexfpPExeM=
 github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240502030739-b86e6578c6c1 h1:ebQ4jyiT9ZvR0Bs+wyo24RlOc3FT3ym5+ezvIhE7tEE=
 github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240502030739-b86e6578c6c1/go.mod h1:MsGOIAMgWJjofvEd/f2s7U8rsN11cliY1vexfpPExeM=
+github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36 h1:bNFcI0dOyOlhLxI8pmbLgNdXviEA9j+MQqw215E4hDs=
+github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36/go.mod h1:MsGOIAMgWJjofvEd/f2s7U8rsN11cliY1vexfpPExeM=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
 github.com/andybalholm/brotli v1.0.0/go.mod h1:loMXtMfwqflxFJPmdbJO0a3KNoPuLBgiu3qAvBg8x/Y=
 github.com/andybalholm/brotli v1.0.5 h1:8uQZIdzKmjc/iuPu7O2ioW48L81FgatrcpfFmiq/cCs=
