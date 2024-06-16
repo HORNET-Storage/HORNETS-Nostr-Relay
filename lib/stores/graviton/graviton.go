@@ -531,15 +531,15 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 				var cacheData *types.CacheData = &types.CacheData{}
 
 				err = cbor.Unmarshal(value, cacheData)
-				if err == nil {
+				if err == nil && !contains(cacheData.Keys, root) {
 					cacheData.Keys = append(cacheData.Keys, root)
-				}
 
-				serializedData, err := cbor.Marshal(cacheData)
-				if err == nil {
-					//fmt.Println("CACHE UPDATED: [" + bucket + "]" + key + ": " + root)
+					serializedData, err := cbor.Marshal(cacheData)
+					if err == nil {
+						userTree.Put([]byte(key), serializedData)
 
-					userTree.Put([]byte(key), serializedData)
+						trees = append(trees, userTree)
+					}
 				}
 			} else {
 				cacheData := &types.CacheData{
@@ -548,35 +548,33 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 
 				serializedData, err := cbor.Marshal(cacheData)
 				if err == nil {
-					//fmt.Println("CACHE UPDATED: [" + bucket + "]" + key + ": " + root)
-
 					userTree.Put([]byte(key), serializedData)
+
+					trees = append(trees, userTree)
 				}
 			}
 
-			trees = append(trees, userTree)
 		}
 	} else if _, ok := store.CacheConfig[bucket]; ok {
 		cacheBucket := fmt.Sprintf("cache:%s", bucket)
 
 		cacheTree, err := snapshot.GetTree(cacheBucket)
 		if err == nil {
-
 			value, err := cacheTree.Get([]byte(key))
 
 			if err == nil && value != nil {
 				var cacheData *types.CacheData = &types.CacheData{}
 
 				err = cbor.Unmarshal(value, cacheData)
-				if err == nil {
+				if err == nil && !contains(cacheData.Keys, root) {
 					cacheData.Keys = append(cacheData.Keys, root)
-				}
 
-				serializedData, err := cbor.Marshal(cacheData)
-				if err == nil {
-					//fmt.Println("CACHE UPDATED: [" + cacheBucket + "]" + key + ": " + root)
+					serializedData, err := cbor.Marshal(cacheData)
+					if err == nil {
+						cacheTree.Put([]byte(key), serializedData)
 
-					cacheTree.Put([]byte(key), serializedData)
+						trees = append(trees, cacheTree)
+					}
 				}
 			} else {
 				cacheData := &types.CacheData{
@@ -585,13 +583,11 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 
 				serializedData, err := cbor.Marshal(cacheData)
 				if err == nil {
-					//fmt.Println("CACHE UPDATED: [" + cacheBucket + "]" + key + ": " + root)
-
 					cacheTree.Put([]byte(key), serializedData)
+
+					trees = append(trees, cacheTree)
 				}
 			}
-
-			trees = append(trees, cacheTree)
 		}
 	}
 
