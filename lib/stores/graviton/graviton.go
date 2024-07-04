@@ -224,10 +224,6 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		leafCount := rootLeaf.LeafCount
 		hash := rootLeaf.Hash
 
-		//log.Println("Leaf: ", rootLeaf)
-		//log.Println("Rootleaf Content size", leafContentSize)
-
-		// Determine kind name (extension)
 		kindName := GetKindFromItemName(itemName)
 
 		ChunkSize := 2048 * 1024
@@ -250,22 +246,91 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 			return err
 		}
 
-		if contains(relaySettings.Photos, strings.ToLower(kindName)) {
-			photo := types.Photo{
-				Hash:      hash,
-				LeafCount: leafCount,
-				KindName:  kindName,
-				Size:      sizeMB,
+		mode := relaySettings.Mode
+
+		// Process file according to the mode (smart or unlimited)
+		if mode == "smart" {
+			// In smart mode, check if the file type is blocked
+			if contains(append(append(relaySettings.Photos, relaySettings.Videos...), relaySettings.Audio...), strings.ToLower(kindName)) {
+				return fmt.Errorf("file type not permitted: %s", kindName)
 			}
-			gormDB.Create(&photo)
-		} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
-			video := types.Video{
-				Hash:      hash,
-				LeafCount: leafCount,
-				KindName:  kindName,
-				Size:      sizeMB,
+
+			// Save the file under the correct category if not blocked
+			if contains(relaySettings.Photos, strings.ToLower(kindName)) {
+				photo := types.Photo{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  kindName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&photo)
+			} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
+				video := types.Video{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  kindName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&video)
+			} else if contains(relaySettings.Audio, strings.ToLower(kindName)) {
+				audio := types.Audio{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  kindName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&audio)
+			} else {
+				// Save the file under Misc if it doesn't fall under any specific category
+				misc := types.Misc{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  itemName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&misc)
 			}
-			gormDB.Create(&video)
+		} else if mode == "unlimited" {
+			// In unlimited mode, check if the file type is blocked
+			if contains(append(append(relaySettings.Photos, relaySettings.Videos...), relaySettings.Audio...), strings.ToLower(kindName)) {
+				return fmt.Errorf("blocked file type: %s", kindName)
+			}
+
+			// Save the file under the correct category if not blocked
+			if contains(relaySettings.Photos, strings.ToLower(kindName)) {
+				photo := types.Photo{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  kindName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&photo)
+			} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
+				video := types.Video{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  kindName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&video)
+			} else if contains(relaySettings.Audio, strings.ToLower(kindName)) {
+				audio := types.Audio{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  kindName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&audio)
+			} else {
+				// Save the file under Misc if it doesn't fall under any specific category
+				misc := types.Misc{
+					Hash:      hash,
+					LeafCount: leafCount,
+					KindName:  itemName,
+					Size:      sizeMB,
+				}
+				gormDB.Create(&misc)
+			}
 		}
 	}
 

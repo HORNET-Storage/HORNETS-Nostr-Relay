@@ -3,7 +3,6 @@ package web
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"strconv"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -37,14 +36,14 @@ func handleLatestTransactions(c *fiber.Ctx) error {
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			return c.Status(http.StatusNotFound).JSON(fiber.Map{
-				"error": "No Bitcoin rate found",
+			log.Printf("No Bitcoin rate found, using default value")
+			bitcoinRate.Rate = 0.0 // Set default rate
+		} else {
+			log.Printf("Error querying Bitcoin rate: %v", result.Error)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Database query error",
 			})
 		}
-		log.Printf("Error querying Bitcoin rate: %v", result.Error)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Database query error",
-		})
 	}
 
 	// Process each transaction to convert the value to USD

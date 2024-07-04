@@ -31,8 +31,8 @@ func handleBarChartData(c *fiber.Ctx) error {
 	err = db.Raw(`
 		SELECT 
 			strftime('%Y-%m', timestamp) as month,
-			SUM(CASE WHEN kind_number IS NOT NULL THEN size ELSE 0 END) / 1024.0 as notes_gb,  -- Convert to GB
-			SUM(CASE WHEN kind_number IS NULL THEN size ELSE 0 END) / 1024.0 as media_gb  -- Convert to GB
+			ROUND(SUM(CASE WHEN kind_number IS NOT NULL THEN size ELSE 0 END) / 1024.0, 3) as notes_gb,  -- Convert to GB and round to 2 decimal places
+			ROUND(SUM(CASE WHEN kind_number IS NULL THEN size ELSE 0 END) / 1024.0, 3) as media_gb  -- Convert to GB and round to 2 decimal places
 		FROM (
 			SELECT timestamp, size, kind_number FROM kinds
 			UNION ALL
@@ -41,6 +41,8 @@ func handleBarChartData(c *fiber.Ctx) error {
 			SELECT timestamp, size, NULL as kind_number FROM videos
 			UNION ALL
 			SELECT timestamp, size, NULL as kind_number FROM git_nestrs
+			UNION ALL
+			SELECT timestamp, size, NULL as kind_number FROM audios
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -53,6 +55,62 @@ func handleBarChartData(c *fiber.Ctx) error {
 	log.Printf("Fetched data: %+v", data)
 	return c.JSON(data)
 }
+
+// package web
+
+// import (
+// 	"log"
+
+// 	types "github.com/HORNET-Storage/hornet-storage/lib"
+// 	"github.com/gofiber/fiber/v2"
+// 	"github.com/spf13/viper"
+// 	"gorm.io/driver/sqlite"
+// 	"gorm.io/gorm"
+// )
+
+// func handleBarChartData(c *fiber.Ctx) error {
+// 	log.Println("Bar chart data request received")
+
+// 	// Retrieve the database path from the config file using Viper
+// 	dbPath := viper.GetString("relay_stats_db")
+// 	if dbPath == "" {
+// 		log.Fatal("Database path not found in config")
+// 	}
+
+// 	// Initialize the Gorm database
+// 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+// 	if err != nil {
+// 		log.Printf("Failed to connect to the database: %v", err)
+// 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+// 	}
+
+// 	// Query to get the total GBs per month for notes and media
+// 	var data []types.BarChartData
+// 	err = db.Raw(`
+// 		SELECT
+// 			strftime('%Y-%m', timestamp) as month,
+// 			SUM(CASE WHEN kind_number IS NOT NULL THEN size ELSE 0 END) / 1024.0 as notes_gb,  -- Convert to GB
+// 			SUM(CASE WHEN kind_number IS NULL THEN size ELSE 0 END) / 1024.0 as media_gb  -- Convert to GB
+// 		FROM (
+// 			SELECT timestamp, size, kind_number FROM kinds
+// 			UNION ALL
+// 			SELECT timestamp, size, NULL as kind_number FROM photos
+// 			UNION ALL
+// 			SELECT timestamp, size, NULL as kind_number FROM videos
+// 			UNION ALL
+// 			SELECT timestamp, size, NULL as kind_number FROM git_nestrs
+// 		)
+// 		GROUP BY month
+// 	`).Scan(&data).Error
+
+// 	if err != nil {
+// 		log.Println("Error fetching bar chart data:", err)
+// 		return c.Status(500).SendString("Internal Server Error")
+// 	}
+
+// 	log.Printf("Fetched data: %+v", data)
+// 	return c.JSON(data)
+// }
 
 // package web
 

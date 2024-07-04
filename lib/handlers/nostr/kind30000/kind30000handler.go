@@ -18,6 +18,13 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 		log.Println("Handling follow sets (kind 30000) events.")
 
+		// Load and check relay settings
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return
+		}
+
 		data, err := read()
 		if err != nil {
 			write("NOTICE", "Error reading from stream.")
@@ -32,6 +39,15 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		event := env.Event
+
+		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
+
+		// Check if the event kind is allowed
+		if !blocked {
+			log.Printf("Kind %d not handled by this relay", event.Kind)
+			write("NOTICE", "This kind is not handled by the relay.")
+			return
+		}
 
 		if event.Kind != 30000 {
 			write("NOTICE", fmt.Sprintf("Received non-follow-sets event (kind %d) on follow-sets handler, ignoring.", event.Kind))
