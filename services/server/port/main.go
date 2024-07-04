@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/count"
@@ -63,6 +64,7 @@ func init() {
 		"hkind:2": "ItemName",
 	})
 	viper.SetDefault("service_tag", "hornet-storage-service")
+	viper.SetDefault("panel_web_endpoint", "http://localhost:5000")
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -134,29 +136,39 @@ func main() {
 	handlers.AddQueryHandler(host, store)
 
 	// Register Our Nostr Stream Handlers
-	nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
-	nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
-	nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
-	nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
-	nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
-	nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
-	nostr.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
-	nostr.RegisterHandler("kind/8", kind8.BuildKind8Handler(store))
-	nostr.RegisterHandler("kind/1984", kind1984.BuildKind1984Handler(store))
-	nostr.RegisterHandler("kind/9735", kind9735.BuildKind9735Handler(store))
-	nostr.RegisterHandler("kind/9372", kind9372.BuildKind9372Handler(store))
-	nostr.RegisterHandler("kind/9373", kind9373.BuildKind9373Handler(store))
-	nostr.RegisterHandler("kind/9802", kind9802.BuildKind9802Handler(store))
-	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
-	nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
-	nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
-	nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
-	nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
-	nostr.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
-	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
-	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
+	settings, err := nostr.LoadRelaySettings()
+	if err != nil {
+		log.Fatalf("Failed to load relay settings: %v", err)
+		return
+	}
 
-	err := error(nil)
+	// Register Our Nostr Stream Handlers
+	if settings.Mode == "unlimited" {
+		log.Println("Limited server mode")
+		nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
+	} else if settings.Mode == "smart" {
+		log.Println("Smart server mode")
+		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
+		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
+		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
+		nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
+		nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
+		nostr.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
+		nostr.RegisterHandler("kind/8", kind8.BuildKind8Handler(store))
+		nostr.RegisterHandler("kind/1984", kind1984.BuildKind1984Handler(store))
+		nostr.RegisterHandler("kind/9735", kind9735.BuildKind9735Handler(store))
+		nostr.RegisterHandler("kind/9372", kind9372.BuildKind9372Handler(store))
+		nostr.RegisterHandler("kind/9373", kind9373.BuildKind9373Handler(store))
+		nostr.RegisterHandler("kind/9802", kind9802.BuildKind9802Handler(store))
+		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
+		nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
+		nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
+		nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
+		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
+		nostr.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
+		nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
+		nostr.RegisterHandler("count", count.BuildCountsHandler(store))
+	}
 	// Register a libp2p handler for every stream handler
 	for kind := range nostr.GetHandlers() {
 		handler := nostr.GetHandler(kind)

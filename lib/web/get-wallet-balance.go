@@ -2,7 +2,6 @@ package web
 
 import (
 	"log"
-	"net/http"
 	"strconv"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -25,14 +24,14 @@ func handleBalanceInUSD(c *fiber.Ctx) error {
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			return c.Status(http.StatusNotFound).JSON(fiber.Map{
-				"error": "No wallet balance found",
+			log.Printf("No wallet balance found, using default value")
+			latestBalance.Balance = "0" // Set default balance
+		} else {
+			log.Printf("Error querying latest balance: %v", result.Error)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Database query error",
 			})
 		}
-		log.Printf("Error querying latest balance: %v", result.Error)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Database query error",
-		})
 	}
 
 	// Get the latest Bitcoin rate
@@ -41,14 +40,14 @@ func handleBalanceInUSD(c *fiber.Ctx) error {
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			return c.Status(http.StatusNotFound).JSON(fiber.Map{
-				"error": "No Bitcoin rate found",
+			log.Printf("No Bitcoin rate found, using default value")
+			bitcoinRate.Rate = 0.0 // Set default rate
+		} else {
+			log.Printf("Error querying Bitcoin rate: %v", result.Error)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Database query error",
 			})
 		}
-		log.Printf("Error querying Bitcoin rate: %v", result.Error)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Database query error",
-		})
 	}
 
 	// Convert the balance to USD
@@ -64,6 +63,7 @@ func handleBalanceInUSD(c *fiber.Ctx) error {
 
 	// Respond with the USD balance
 	return c.JSON(fiber.Map{
-		"balance_usd": usdBalance,
+		"balance_usd":    usdBalance,
+		"latest_balance": satoshis,
 	})
 }

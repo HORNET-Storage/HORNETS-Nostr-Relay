@@ -3,6 +3,8 @@ package lib
 import (
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
+
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
@@ -102,10 +104,28 @@ type Video struct {
 	Size      float64   `gorm:"default:0"` // Size in MB
 }
 
+type Audio struct {
+	ID        uint   `gorm:"primaryKey"`
+	Hash      string `gorm:"uniqueIndex"`
+	LeafCount int
+	KindName  string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
+}
+
 type GitNestr struct {
 	ID        uint `gorm:"primaryKey"`
 	GitType   string
 	EventID   string
+	Timestamp time.Time `gorm:"autoCreateTime"`
+	Size      float64   `gorm:"default:0"` // Size in MB
+}
+
+type Misc struct {
+	ID        uint   `gorm:"primaryKey"`
+	Hash      string `gorm:"uniqueIndex"`
+	LeafCount int
+	KindName  string
 	Timestamp time.Time `gorm:"autoCreateTime"`
 	Size      float64   `gorm:"default:0"` // Size in MB
 }
@@ -124,6 +144,12 @@ type WalletTransactions struct {
 	Value   string    `gorm:"not null"` // Value as a float
 }
 
+type WalletAddress struct {
+	ID      uint   `gorm:"primaryKey"`
+	Index   string `gorm:"not null"`
+	Address string `gorm:"not null;unique"`
+}
+
 type BitcoinRate struct {
 	ID        uint      `gorm:"primaryKey"`
 	Rate      float64   `gorm:"not null"`
@@ -132,15 +158,22 @@ type BitcoinRate struct {
 
 type RelaySettings struct {
 	Mode             string   `json:"mode"`
-	Protocol         string   `json:"protocol"` // Added protocol
+	Protocol         []string `json:"protocol"`
+	Chunked          []string `json:"chunked"`
+	Chunksize        string   `json:"chunksize"`
+	MaxFileSize      int      `json:"maxFileSize"`
+	MaxFileSizeUnit  string   `json:"maxFileSizeUnit"`
 	Kinds            []string `json:"kinds"`
+	DynamicKinds     []string `json:"dynamicKinds"`
 	Photos           []string `json:"photos"`
 	Videos           []string `json:"videos"`
 	GitNestr         []string `json:"gitNestr"`
+	Audio            []string `json:"audio"`
 	IsKindsActive    bool     `json:"isKindsActive"`
 	IsPhotosActive   bool     `json:"isPhotosActive"`
 	IsVideosActive   bool     `json:"isVideosActive"`
 	IsGitNestrActive bool     `json:"isGitNestrActive"`
+	IsAudioActive    bool     `json:"isAudioActive"`
 }
 
 type TimeSeriesData struct {
@@ -171,13 +204,32 @@ type BarChartData struct {
 }
 
 type User struct {
-	ID        uint `gorm:"primaryKey"`
-	FirstName string
-	LastName  string
-	Email     string    `gorm:"uniqueIndex"`
+	ID        uint      `gorm:"primaryKey"`
 	Password  string    // Store hashed passwords
+	Npub      string    `gorm:"uniqueIndex"` // Add this field
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+}
+
+// type User struct {
+// 	ID        uint `gorm:"primaryKey"`
+// 	FirstName string
+// 	LastName  string
+// 	Email     string    `gorm:"uniqueIndex"`
+// 	Password  string    // Store hashed passwords
+// 	Npub      string    `gorm:"uniqueIndex"` // Add this field
+// 	CreatedAt time.Time `gorm:"autoCreateTime"`
+// 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+// }
+
+type UserChallenge struct {
+	ID        uint   `gorm:"primaryKey"`
+	UserID    uint   `gorm:"index"`
+	Npub      string `gorm:"index"`
+	Challenge string `gorm:"uniqueIndex"`
+	Hash      string
+	Expired   bool      `gorm:"default:false"`
+	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
 
 type LoginRequest struct {
@@ -190,4 +242,17 @@ type SignUpRequest struct {
 	LastName  string `json:"lastName"`
 	Email     string `json:"email"`
 	Password  string `json:"password"`
+}
+
+// LoginPayload represents the structure of the login request payload
+type LoginPayload struct {
+	Npub     string `json:"npub"`
+	Password string `json:"password"`
+}
+
+// JWTClaims represents the structure of the JWT claims
+type JWTClaims struct {
+	UserID uint   `json:"user_id"`
+	Email  string `json:"email"`
+	jwt.RegisteredClaims
 }

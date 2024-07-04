@@ -16,6 +16,11 @@ func BuildUniversalHandler(store stores.Store) func(read lib_nostr.KindReader, w
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 		log.Println("Working with default event handler.")
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return
+		}
 
 		// Read data from the stream
 		data, err := read()
@@ -32,6 +37,15 @@ func BuildUniversalHandler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		event := env.Event
+
+		blocked := lib_nostr.IsKindBlocked(event.Kind, settings)
+
+		// Check if the event kind is allowed
+		if blocked {
+			log.Printf("Kind %d not handled by this relay", event.Kind)
+			write("NOTICE", "This kind is not handled by the relay.")
+			return
+		}
 
 		log.Printf("Default handling for event of kind %d: %s", event.Kind, event.Content)
 
