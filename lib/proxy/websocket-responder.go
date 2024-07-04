@@ -156,9 +156,17 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		if err := sendWebSocketMessage(ws, messageSlice); err != nil {
 			log.Printf("Error sending 'COUNT' envelope over WebSocket: %v", err)
 		}
+	case "AUTH":
+		log.Println("Dealing with 'AUTH' message...")
+		if len(messageSlice) < 2 {
+			log.Println("Expected data for 'AUTH' message type is missing.")
+			return
+		}
 
+		if err := sendWebSocketMessage(ws, messageSlice); err != nil {
+			log.Printf("Error sending 'COUNT' envelope over WebSocket: %v", err)
+		}
 	default:
-
 		log.Printf("Unhandled message type: %s", messageType)
 	}
 }
