@@ -18,6 +18,13 @@ func BuildKind8Handler(store stores.Store) func(read lib_nostr.KindReader, write
 
 		log.Println("Handling badge award event.")
 
+		// Load and check relay settings
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return
+		}
+
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -33,6 +40,15 @@ func BuildKind8Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		}
 
 		event := env.Event
+
+		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
+
+		// Check if the event kind is allowed
+		if !blocked {
+			log.Printf("Kind %d not handled by this relay", event.Kind)
+			write("NOTICE", "This kind is not handled by the relay.")
+			return
+		}
 
 		// Validate that the event kind is for badge awards (kind 8).
 		if event.Kind != 8 {

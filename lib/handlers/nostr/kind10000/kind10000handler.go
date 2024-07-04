@@ -19,6 +19,13 @@ func BuildKind10000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		log.Println("Handling mute list event.")
 
+		// Load and check relay settings
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return
+		}
+
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -34,6 +41,15 @@ func BuildKind10000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		event := env.Event
+
+		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
+
+		// Check if the event kind is allowed
+		if !blocked {
+			log.Printf("Kind %d not handled by this relay", event.Kind)
+			write("NOTICE", "This kind is not handled by the relay.")
+			return
+		}
 
 		if event.Kind != 10000 {
 			write("NOTICE", fmt.Sprintf("Received non-mute-list event (kind %d) on mute-list handler, ignoring.", event.Kind))

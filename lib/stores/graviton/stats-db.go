@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
@@ -34,11 +35,15 @@ func InitGorm() (*gorm.DB, error) {
 			&types.Photo{},
 			&types.Video{},
 			&types.GitNestr{},
+			&types.Misc{}, // Add the Misc type here
 			&types.UserProfile{},
 			&types.User{},
 			&types.WalletBalance{},
 			&types.WalletTransactions{},
 			&types.BitcoinRate{},
+			&types.WalletAddress{},
+			&types.UserChallenge{},
+			&types.Audio{},
 		)
 		if err != nil {
 			log.Fatalf("Failed to migrate database schema: %v", err)
@@ -81,7 +86,7 @@ func storeInGorm(event *nostr.Event) {
 			dhtKey = true
 		}
 
-		err := upsertUserProfile(gormDB, npubKey, lightningAddr, dhtKey)
+		err := upsertUserProfile(gormDB, npubKey, lightningAddr, dhtKey, time.Unix(int64(event.CreatedAt), 0))
 		if err != nil {
 			log.Printf("Error upserting user profile: %v", err)
 		}
@@ -110,7 +115,7 @@ func storeInGorm(event *nostr.Event) {
 	fmt.Printf("Unhandled kind: %d\n", event.Kind)
 }
 
-func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool) error {
+func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error {
 	var userProfile types.UserProfile
 	result := db.Where("npub_key = ?", npubKey).First(&userProfile)
 
@@ -121,6 +126,7 @@ func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool) 
 				NpubKey:       npubKey,
 				LightningAddr: lightningAddr,
 				DHTKey:        dhtKey,
+				Timestamp:     createdAt,
 			}
 			return db.Create(&userProfile).Error
 		}
@@ -130,6 +136,7 @@ func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool) 
 	// Update existing user profile
 	userProfile.LightningAddr = lightningAddr
 	userProfile.DHTKey = dhtKey
+	userProfile.Timestamp = createdAt
 	return db.Save(&userProfile).Error
 }
 

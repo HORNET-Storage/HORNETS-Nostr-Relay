@@ -16,6 +16,13 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+		// Load and check relay settings
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return
+		}
+
 		data, err := read()
 		if err != nil {
 			log.Printf("Error reading from stream: %v", err)
@@ -30,6 +37,15 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		}
 
 		event := env.Event
+
+		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
+
+		// Check if the event kind is allowed
+		if !blocked {
+			log.Printf("Kind %d not handled by this relay", event.Kind)
+			write("NOTICE", "This kind is not handled by the relay.")
+			return
+		}
 
 		// Validate event kind for repost (kind 6 or kind 16 for generic repost)
 		if event.Kind != 6 && event.Kind != 16 {

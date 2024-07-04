@@ -17,6 +17,8 @@ func handleRelaySettings(c *fiber.Ctx) error {
 		return c.Status(400).SendString(err.Error())
 	}
 
+	log.Println("Received data:", data)
+
 	relaySettingsData, ok := data["relay_settings"]
 	if !ok {
 		log.Println("Relay settings data not provided")
@@ -40,6 +42,7 @@ func handleRelaySettings(c *fiber.Ctx) error {
 	// Check boolean flags and set corresponding arrays to empty if false
 	if !relaySettings.IsKindsActive {
 		relaySettings.Kinds = []string{}
+		relaySettings.DynamicKinds = []string{}
 	}
 	if !relaySettings.IsPhotosActive {
 		relaySettings.Photos = []string{}
@@ -49,6 +52,12 @@ func handleRelaySettings(c *fiber.Ctx) error {
 	}
 	if !relaySettings.IsGitNestrActive {
 		relaySettings.GitNestr = []string{}
+	}
+	if !relaySettings.IsAudioActive {
+		relaySettings.Audio = []string{}
+	}
+	if relaySettings.Mode == "smart" {
+		relaySettings.DynamicKinds = []string{}
 	}
 
 	// Store in Viper
@@ -63,4 +72,31 @@ func handleRelaySettings(c *fiber.Ctx) error {
 	log.Println("Stored relay settings:", relaySettings)
 
 	return c.SendStatus(fiber.StatusOK)
+}
+
+func handleGetRelaySettings(c *fiber.Ctx) error {
+	log.Println("Get relay settings request received")
+
+	var relaySettings types.RelaySettings
+
+	// Fetch settings from Viper
+	err := viper.UnmarshalKey("relay_settings", &relaySettings)
+	if err != nil {
+		log.Printf("Error unmarshaling relay settings: %s", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
+	}
+
+	// Ensure Protocol and Chunked are arrays
+	if relaySettings.Protocol == nil {
+		relaySettings.Protocol = []string{}
+	}
+	if relaySettings.Chunked == nil {
+		relaySettings.Chunked = []string{}
+	}
+
+	log.Println("Fetched relay settings:", relaySettings)
+
+	return c.JSON(fiber.Map{
+		"relay_settings": relaySettings,
+	})
 }
