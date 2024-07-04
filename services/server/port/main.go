@@ -58,7 +58,6 @@ func init() {
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
-	viper.SetDefault("web_port", "9001")
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
 	viper.SetDefault("query_cache", map[string]string{
 		"hkind:2": "ItemName",
@@ -104,28 +103,21 @@ func main() {
 	handlers.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		decodedSignature, err := hex.DecodeString(*signature)
 		if err != nil {
-			fmt.Println("2")
 			return false
 		}
 
 		parsedSignature, err := schnorr.ParseSignature(decodedSignature)
 		if err != nil {
-			fmt.Println("3")
 			return false
 		}
 
 		cid, err := cid.Parse(rootLeaf.Hash)
 		if err != nil {
-			fmt.Println("4")
 			return false
 		}
 
-		fmt.Println(*pubKey)
-
 		publicKey, err := signing.DeserializePublicKey(*pubKey)
 		if err != nil {
-			fmt.Printf("err: %vzn", err)
-			fmt.Println("5")
 			return false
 		}
 
@@ -135,17 +127,11 @@ func main() {
 
 	handlers.AddQueryHandler(host, store)
 
-	// Register Our Nostr Stream Handlers
-	settings, err := nostr.LoadRelaySettings()
-	if err != nil {
-		log.Fatalf("Failed to load relay settings: %v", err)
-		return
-	}
-
-	// Register Our Nostr Stream Handlers
+  // Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
 		log.Println("Limited server mode")
 		nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
+    
 	} else if settings.Mode == "smart" {
 		log.Println("Smart server mode")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
@@ -166,9 +152,15 @@ func main() {
 		nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
 		nostr.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
-		nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
-		nostr.RegisterHandler("count", count.BuildCountsHandler(store))
 	}
+ 
+  nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
+	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
+  
+  // Auth event not supported for the libp2p connections yet
+  //nostr.RegisterHandler("auth", auth.BuildAuthHandler(store))
+
+	err := error(nil)
 	// Register a libp2p handler for every stream handler
 	for kind := range nostr.GetHandlers() {
 		handler := nostr.GetHandler(kind)
@@ -230,7 +222,7 @@ func main() {
 		fmt.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			err := proxy.StartServer()
+			err := proxy.StartServer(store)
 
 			if err != nil {
 				fmt.Println("Fatal error occurred in web server")
