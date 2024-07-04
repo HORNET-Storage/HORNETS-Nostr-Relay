@@ -143,7 +143,7 @@ func main() {
 	if settings.Mode == "unlimited" {
 		log.Println("Limited server mode")
 		nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
-    
+
 	} else if settings.Mode == "smart" {
 		log.Println("Smart server mode")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
@@ -165,14 +165,13 @@ func main() {
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
 		nostr.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
 	}
- 
-  nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
+
+	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
 	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
-  
-  // Auth event not supported for the libp2p connections yet
-  //nostr.RegisterHandler("auth", auth.BuildAuthHandler(store))
-  
-  err := error(nil)
+
+	// Auth event not supported for the libp2p connections yet
+	//nostr.RegisterHandler("auth", auth.BuildAuthHandler(store))
+
 	// Register a libp2p handler for every stream handler
 	for kind := range nostr.GetHandlers() {
 		handler := nostr.GetHandler(kind)
