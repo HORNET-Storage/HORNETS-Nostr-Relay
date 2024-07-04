@@ -16,6 +16,12 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return
+		}
+
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -31,6 +37,15 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		event := env.Event
+
+		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
+
+		// Check if the event kind is allowed
+		if !blocked {
+			log.Printf("Kind %d not handled by this relay", event.Kind)
+			write("NOTICE", "This kind is not handled by the relay.")
+			return
+		}
 
 		log.Println("Working with nip-23 handler.", event.Kind)
 
