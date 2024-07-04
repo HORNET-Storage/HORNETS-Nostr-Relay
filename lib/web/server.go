@@ -1,8 +1,13 @@
 package web
 
 import (
+	"fmt"
+	"log"
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/spf13/viper"
 )
 
 func StartServer() error {
@@ -37,5 +42,11 @@ func StartServer() error {
 	app.Get("/api/kinds", handleKindData)
 	app.Get("/api/kind-trend/:kindNumber", handleKindTrendData)
 
-	return app.Listen(":5000")
+	port := viper.GetString("port")
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		log.Fatal("Error parsing port #{port}: #{err}")
+	}
+
+	return app.Listen(fmt.Sprintf(":%d", p+2))
 }
