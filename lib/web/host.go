@@ -188,7 +188,7 @@ func GetHostOnPort(priv string, port string) host.Host {
 		//libp2p.EnableNATService(),
 	)
 	if err != nil {
-		log.Fatal("Error starting server: #{err}")
+		log.Fatal("Error starting server: ", err)
 	}
 
 	fmt.Printf("Host started with id: %s\n", host.ID())
