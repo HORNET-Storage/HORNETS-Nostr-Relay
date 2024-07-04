@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"strconv"
@@ -12,13 +14,16 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/blossom"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func StartServer() error {
+const challengeLength = 32
+
+func StartServer(store stores.Store) error {
 	app := fiber.New()
 
 	// initConfig()
@@ -31,15 +36,19 @@ func StartServer() error {
 		handleWebSocketConnections(c) // Pass the host to the connection handler
 	}))
 
-	web_port := viper.GetString("web_port")
-	p, err := strconv.Atoi(web_port)
-	if err != nil {
-		log.Fatal("Error parsing port #{web_port}: #{err}")
+	if viper.GetBool("blossom") {
+		server := blossom.NewServer(store)
+		server.SetupRoutes(app)
 	}
 
-	// find a free port
+	port := viper.GetString("port")
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		log.Fatal("Error parsing port #{port}: #{err}")
+	}
+
 	for {
-		port := fmt.Sprintf(":%d", p)
+		port := fmt.Sprintf(":%d", p+1)
 		err := app.Listen(port)
 		if err != nil {
 			log.Printf("Error starting web-server: %v\n", err)
@@ -96,15 +105,8 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		return fmt.Errorf("read error: %w", err)
 	}
 
-	log.Println("Logging subscriptions at entry point...")
-	logCurrentSubscriptions()
-
 	rawMessage := nostr.ParseMessage(message)
-	log.Println("Received type:", rawMessage.Label())
-	log.Println("Received message:", string(rawMessage.String()))
 
-	// Your switch case for handling different types of messages
-	// Ensure you handle context creation and cancellation correctly
 	switch env := rawMessage.(type) {
 	case *nostr.EventEnvelope:
 		log.Println("Received EVENT message:", env.Kind)
@@ -143,8 +145,20 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		if handler != nil {
 			_, cancelFunc := context.WithCancel(context.Background())
 
-			setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
-			logCurrentSubscriptions()
+			challenge, err := generateChallenge()
+			if err != nil {
+				log.Printf("Failed to generate challenge: %w", err)
+			}
+
+			setListener(env.SubscriptionID, c, env.Filters, challenge, cancelFunc)
+
+			if challenge != nil {
+				response := lib_nostr.BuildResponse("AUTH", challenge)
+
+				if len(response) > 0 {
+					handleIncomingMessage(c, response)
+				}
+			}
 
 			read := func() ([]byte, error) {
 				bytes, err := json.Marshal(env)
@@ -183,10 +197,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		// Assume removeListenerId will be called
 		responseMsg := nostr.ClosedEnvelope{SubscriptionID: subscriptionID, Reason: "Subscription closed successfully."}
 		// Attempt to remove the listener for the given subscription ID
-		if removeListenerId(c, subscriptionID) {
-			// Log current subscriptions for debugging
-			logCurrentSubscriptions()
-		}
+		removeListenerId(c, subscriptionID)
 
 		log.Println("Response message:", responseMsg)
 		// Send the prepared CLOSED or error message
@@ -200,8 +211,20 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		if handler != nil {
 			_, cancelFunc := context.WithCancel(context.Background())
 
-			setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
-			logCurrentSubscriptions()
+			challenge, err := generateChallenge()
+			if err != nil {
+				log.Printf("Failed to generate challenge: %w", err)
+			}
+
+			setListener(env.SubscriptionID, c, env.Filters, challenge, cancelFunc)
+
+			if challenge != nil {
+				response := lib_nostr.BuildResponse("AUTH", challenge)
+
+				if len(response) > 0 {
+					handleIncomingMessage(c, response)
+				}
+			}
 
 			read := func() ([]byte, error) {
 				bytes, err := json.Marshal(env)
@@ -222,7 +245,99 @@ func processWebSocketMessage(c *websocket.Conn) error {
 
 			handler(read, write)
 		}
+		/*
+			case *nostr.AuthEnvelope:
+				handler := lib_nostr.GetHandler("auth")
 
+				if handler != nil {
+					read := func() ([]byte, error) {
+						bytes, err := json.Marshal(env)
+						if err != nil {
+							return nil, err
+						}
+
+						return bytes, nil
+					}
+
+					write := func(messageType string, params ...interface{}) {
+						response := lib_nostr.BuildResponse(messageType, params)
+
+						if len(response) > 0 {
+							handleIncomingMessage(c, response)
+						}
+					}
+
+					handler(read, write)
+				}
+		*/
+	case *nostr.AuthEnvelope:
+		write := func(messageType string, params ...interface{}) {
+			response := lib_nostr.BuildResponse(messageType, params)
+
+			if len(response) > 0 {
+				handleIncomingMessage(c, response)
+			}
+		}
+
+		if env.Event.Kind != 22242 {
+			write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
+			return nil
+		}
+
+		isValid, errMsg := lib_nostr.TimeCheck(env.Event.CreatedAt.Time().Unix())
+		if !isValid {
+			write("OK", env.Event.ID, false, errMsg)
+			return nil
+		}
+
+		result, err := env.Event.CheckSignature()
+		if err != nil {
+			write("OK", env.Event.ID, false, "Error checking event signature")
+			return nil
+		}
+
+		if !result {
+			write("OK", env.Event.ID, false, "Error signature verification failed")
+			return nil
+		}
+
+		var hasRelayTag, hasChallengeTag bool
+		for _, tag := range env.Event.Tags {
+			if len(tag) >= 2 {
+				if tag[0] == "relay" {
+					hasRelayTag = true
+				} else if tag[0] == "challenge" {
+					hasChallengeTag = true
+
+					challenge, err := GetListenerChallenge(c)
+					if err != nil {
+						write("OK", env.Event.ID, false, "Error checking session")
+						return nil
+					}
+
+					tag := env.Event.Tags.GetFirst([]string{"challenge"})
+					eventChallenge := tag.Value()
+
+					if challenge == nil || *challenge != eventChallenge {
+						write("OK", env.Event.ID, false, "Error checking session")
+						return nil
+					}
+				}
+			}
+		}
+
+		if !hasRelayTag || !hasChallengeTag {
+			write("CLOSE", env.Event.ID, false, "Error event does not have required tags")
+			return nil
+		}
+
+		err = AuthenticateConnection(c)
+		if err != nil {
+			write("OK", env.Event.ID, false, "Error checking session")
+			return nil
+		}
+
+		write("OK", env.Event.ID, true, "")
 	default:
 		log.Println("Unknown message type:")
 	}
@@ -230,18 +345,15 @@ func processWebSocketMessage(c *websocket.Conn) error {
 	return nil
 }
 
-// LogCurrentSubscriptions logs current subscriptions for debugging purposes.
-func logCurrentSubscriptions() {
-	empty := true // Assume initially that there are no subscriptions
-	listeners.Range(func(ws *websocket.Conn, subs *xsync.MapOf[string, *Listener]) bool {
-		subs.Range(func(id string, listener *Listener) bool {
-			fmt.Printf("Subscription ID: %s, Filters: %+v\n", id, listener.filters)
-			empty = false // Found at least one subscription, so not empty
-			return true
-		})
-		return true
-	})
-	if empty {
-		fmt.Println("No active subscriptions.")
+func generateChallenge() (*string, error) {
+	bytes := make([]byte, challengeLength)
+
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate random bytes: %v", err)
 	}
+
+	challenge := hex.EncodeToString(bytes)
+
+	return &challenge, nil
 }

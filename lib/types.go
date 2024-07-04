@@ -191,3 +191,11 @@ type SignUpRequest struct {
 	Email     string `json:"email"`
 	Password  string `json:"password"`
 }
+
+type BlobDescriptor struct {
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
+	Type     string `json:"type,omitempty"`
+	Uploaded int64  `json:"uploaded"`
+}
