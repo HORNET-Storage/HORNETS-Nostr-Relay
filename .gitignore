@@ -17,7 +17,7 @@
 
 data
 
-web/node_modules
+web/
 leaves
 content
 gravitondb

@@ -3,10 +3,12 @@ package web
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/spf13/viper"
 )
 
@@ -45,8 +47,14 @@ func StartServer() error {
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
 	if err != nil {
-		log.Fatal("Error parsing port #{port}: #{err}")
+		log.Fatal("Error parsing port port")
 	}
+
+	app.Use("/", filesystem.New(filesystem.Config{
+		Root:   http.Dir("./web"),
+		Browse: false,
+		Index:  "index.html",
+	}))
 
 	return app.Listen(fmt.Sprintf(":%d", p+2))
 }
