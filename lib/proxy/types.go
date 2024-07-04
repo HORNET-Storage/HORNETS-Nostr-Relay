@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 type nip11RelayInfo struct {
@@ -33,9 +34,15 @@ type Event interface {
 	HandleEvent(c *websocket.Conn, ctx context.Context, host *host.Host) error // Adapt HostType accordingly
 }
 
-type Listener struct {
+type Subscription struct {
 	filters nostr.Filters
 	cancel  context.CancelFunc
+}
+
+type ListenerData struct {
+	authenticated bool
+	challenge     *string
+	subscriptions *xsync.MapOf[string, *Subscription]
 }
 
 type EventMessage struct {

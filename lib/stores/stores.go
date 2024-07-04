@@ -10,15 +10,25 @@ import (
 
 type Store interface {
 	InitStore(args ...interface{}) error
+
+	// Hornet Storage
 	StoreLeaf(root string, leafData *types.DagLeafData) error
 	RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error)
 	QueryDag(filter map[string]string) ([]string, error)
 	StoreDag(dag *types.DagData) error
 	BuildDagFromStore(root string, includeContent bool) (*types.DagData, error)
 	RetrieveLeafContent(contentHash []byte) ([]byte, error)
+
+	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
 	StoreEvent(event *nostr.Event) error
 	DeleteEvent(eventID string) error
+
+	// Blossom
+	StoreBlob(data []byte, contentType string, publicKey string) (*types.BlobDescriptor, error)
+	GetBlob(sha256 string) ([]byte, *string, error)
+	DeleteBlob(sha256 string) error
+	ListBlobs(pubkey string, since, until int64) ([]types.BlobDescriptor, error)
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {

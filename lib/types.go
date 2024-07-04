@@ -244,6 +244,14 @@ type SignUpRequest struct {
 	Password  string `json:"password"`
 }
 
+type BlobDescriptor struct {
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
+	Type     string `json:"type,omitempty"`
+	Uploaded int64  `json:"uploaded"`
+}
+
 // LoginPayload represents the structure of the login request payload
 type LoginPayload struct {
 	Npub     string `json:"npub"`
@@ -256,3 +264,4 @@ type JWTClaims struct {
 	Email  string `json:"email"`
 	jwt.RegisteredClaims
 }
+
