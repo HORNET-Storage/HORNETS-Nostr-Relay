@@ -39,7 +39,7 @@ The HORNET Storage Relay Web Panel allows users to configure which types of nost
 ### Getting Started
 Example bat files are included for building and running a hornet-storage relay under a development environment
 
-**DO NOT USES THESE FOR A PRODUCTION ENVIRONMENT**
+**DO NOT USE THESE FOR A PRODUCTION ENVIRONMENT**
 
 The best example of how to use hornet storage can be found in the services/main.go file as this implementation can be used with any libp2p instance, the important take from that is the following.
 
