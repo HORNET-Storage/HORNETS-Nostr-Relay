@@ -56,6 +56,17 @@ func BuildKind30009Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		log.Printf("Processing Badge Definition event: %s", event.Content)
 
 		// Perform validation of the Badge Definition event.

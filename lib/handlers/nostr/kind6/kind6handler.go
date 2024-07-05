@@ -62,6 +62,17 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Validate 'e' tag for reposted event ID and optionally 'p' tag for public key
 		repostedEventID, repostedEventFound := getTagValue(event.Tags, "e", "p")
 

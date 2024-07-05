@@ -68,6 +68,17 @@ func BuildKind9735Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Store the event in the provided storage system.
 		if err := store.StoreEvent(&event); err != nil {
 			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))

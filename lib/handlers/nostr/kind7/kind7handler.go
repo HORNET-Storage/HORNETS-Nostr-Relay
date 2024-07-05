@@ -56,6 +56,17 @@ func BuildKind7Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Validate the content of the reaction.
 		if !isValidReactionContent(event.Content) {
 			write("NOTICE", "Invalid reaction content.")

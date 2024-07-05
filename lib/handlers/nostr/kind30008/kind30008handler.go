@@ -57,6 +57,17 @@ func BuildKind30008Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Perform validation specific to Profile Badges events.
 		isValid, errMsg := validateProfileBadgesEvent(event)
 		if !isValid {
