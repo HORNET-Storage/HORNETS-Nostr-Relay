@@ -8,7 +8,7 @@ H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistan
 -	NIP-05 - DNS Identifier
 -	NIP-09 - Event Deleting
 -	NIP-11 - Relay Information Document
--	NIP-18 - Reposts Kind
+-	NIP-18 - Reposts
 -	NIP-23 - Long-form Articles
 -	NIP-25 - Custom Reactions
 -	NIP-50 - Search Capability
