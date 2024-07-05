@@ -173,7 +173,7 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 	trees = append(trees, tree)
 
 	if rootLeaf.Hash == leafData.Leaf.Hash {
-		indexTree, err := snapshot.GetTree("root_index")
+		indexTree, err := snapshot.GetTree("mbl")
 		if err != nil {
 			return err
 		}
@@ -456,7 +456,7 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 		return nil, err
 	}
 
-	masterBucketList, err := store.GetMasterBucketList()
+	masterBucketList, err := store.GetMasterBucketList("kinds")
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +536,7 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 		return err
 	}
 
-	masterBucketListTree, err := store.UpdateMasterBucketList(bucket)
+	masterBucketListTree, err := store.UpdateMasterBucketList("kinds", bucket)
 	if err != nil {
 		return err
 	}
@@ -556,7 +556,7 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 	return nil
 }
 
-func (store *GravitonStore) UpdateMasterBucketList(bucket string) (*graviton.Tree, error) {
+func (store *GravitonStore) UpdateMasterBucketList(key string, bucket string) (*graviton.Tree, error) {
 	snapshot, _ := store.Database.LoadSnapshot(0)
 
 	tree, err := snapshot.GetTree("mbl")
@@ -566,7 +566,7 @@ func (store *GravitonStore) UpdateMasterBucketList(bucket string) (*graviton.Tre
 
 	var masterBucketList []string
 
-	bytes, err := tree.Get([]byte("mbl"))
+	bytes, err := tree.Get([]byte(fmt.Sprintf("mbl_%s", key)))
 	if bytes == nil || err != nil {
 		masterBucketList = []string{}
 	} else {
@@ -586,7 +586,7 @@ func (store *GravitonStore) UpdateMasterBucketList(bucket string) (*graviton.Tre
 			return nil, err
 		}
 
-		err = tree.Put([]byte("mbl"), bytes)
+		err = tree.Put([]byte(fmt.Sprintf("mbl_%s", key)), bytes)
 		if err != nil {
 			return nil, err
 		}
@@ -595,7 +595,7 @@ func (store *GravitonStore) UpdateMasterBucketList(bucket string) (*graviton.Tre
 	return tree, nil
 }
 
-func (store *GravitonStore) GetMasterBucketList() ([]string, error) {
+func (store *GravitonStore) GetMasterBucketList(key string) ([]string, error) {
 	snapshot, _ := store.Database.LoadSnapshot(0)
 
 	tree, err := snapshot.GetTree("mbl")
@@ -605,7 +605,7 @@ func (store *GravitonStore) GetMasterBucketList() ([]string, error) {
 
 	var masterBucketList []string
 
-	bytes, err := tree.Get([]byte("mbl"))
+	bytes, err := tree.Get([]byte(fmt.Sprintf("mbl_%s", key)))
 	if bytes == nil || err != nil {
 		masterBucketList = []string{}
 	} else {
@@ -698,6 +698,17 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 			}
 
 		}
+
+		/*
+			masterBucketListTree, err := store.UpdateMasterBucketList("npubs", bucket)
+			if err != nil {
+				return trees, nil
+			}
+
+			if masterBucketListTree != nil {
+				trees = append(trees, masterBucketListTree)
+			}
+		*/
 	} else if _, ok := store.CacheConfig[bucket]; ok {
 		cacheBucket := fmt.Sprintf("cache:%s", bucket)
 
@@ -732,6 +743,17 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 				}
 			}
 		}
+
+		/*
+			masterBucketListTree, err := store.UpdateMasterBucketList("scionic", bucket)
+			if err != nil {
+				return trees, nil
+			}
+
+			if masterBucketListTree != nil {
+				trees = append(trees, masterBucketListTree)
+			}
+		*/
 	}
 
 	return trees, nil

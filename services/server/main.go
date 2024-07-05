@@ -195,10 +195,6 @@ func main() {
 				if len(response) > 0 {
 					stream.Write(response)
 				}
-
-				if err == nil {
-					fmt.Printf("Response written to stream: %s", string(response))
-				}
 			}
 
 			handler(read, write)
