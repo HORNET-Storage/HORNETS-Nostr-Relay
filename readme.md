@@ -1,5 +1,5 @@
 # H.O.R.N.E.T Storage: Multimedia Nostr Relay
-H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. The Multimedia Nostr Relay supports chunked file storage with Scionic Merkle Trees and Blossom in a modular way, allowing operators to configure what they want to store.
+H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. The Multimedia Nostr Relay supports chunked files with Scionic Merkle Trees and unchunked files with Blossom in a modular way, allowing operators to configure what they want to store.
 
 
 # Supported NIPs
