@@ -1,18 +1,10 @@
 #!/bin/bash
 
-# Change directory to web/panel
-cd web/panel
+# Change directory
+cd services/server/port
 
-# Install npm dependencies
-yarn install
+# Build the Go program
+go build -o ../../../hornet-storage
 
-# Change back to the parent directory
-cd ../..
-
-./build_server.sh
-
-# Optional: Print a message before exiting
-echo "Build process completed."
-
-# Optional: Pause (press Enter to continue)
-read -p "Press Enter to exit."
+# Pause equivalent (wait for user input)
+read -p "Press enter to continue"
