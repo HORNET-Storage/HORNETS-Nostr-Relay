@@ -22,8 +22,6 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-
-	nostr_handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
 type GravitonStore struct {
@@ -380,7 +378,7 @@ func (store *GravitonStore) retrieveBucket(root string) (string, error) {
 		return "", err
 	}
 
-	tree, err := snapshot.GetTree("root_index")
+	tree, err := snapshot.GetTree("mbl")
 	if err != nil {
 		return "", err
 	}
@@ -449,7 +447,7 @@ func (store *GravitonStore) StoreDag(dag *types.DagData) error {
 }
 
 func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
-	log.Println("Processing filter:", filter)
+	//log.Println("Processing filter:", filter)
 
 	var events []*nostr.Event
 
@@ -458,10 +456,13 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 		return nil, err
 	}
 
-	for kind := range nostr_handlers.GetHandlers() {
-		if strings.HasPrefix(kind, "kind") {
-			bucket := strings.ReplaceAll(kind, "/", ":")
+	masterBucketList, err := store.GetMasterBucketList()
+	if err != nil {
+		return nil, err
+	}
 
+	for _, bucket := range masterBucketList {
+		if strings.HasPrefix(bucket, "kind") {
 			tree, err := snapshot.GetTree(bucket)
 			if err == nil {
 				c := tree.Cursor()
@@ -487,7 +488,8 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 	if filter.Limit > 0 && len(events) > filter.Limit {
 		events = events[:filter.Limit]
 	}
-	log.Println("Found", len(events), "matching events")
+
+	//log.Println("Found", len(events), "matching events")
 
 	return events, nil
 }
@@ -529,7 +531,19 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 		}
 	}
 
-	tree.Put([]byte(event.ID), eventData)
+	err = tree.Put([]byte(event.ID), eventData)
+	if err != nil {
+		return err
+	}
+
+	masterBucketListTree, err := store.UpdateMasterBucketList(bucket)
+	if err != nil {
+		return err
+	}
+
+	if masterBucketListTree != nil {
+		trees = append(trees, masterBucketListTree)
+	}
 
 	_, err = graviton.Commit(trees...)
 	if err != nil {
@@ -540,6 +554,68 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 	storeInGorm(event)
 
 	return nil
+}
+
+func (store *GravitonStore) UpdateMasterBucketList(bucket string) (*graviton.Tree, error) {
+	snapshot, _ := store.Database.LoadSnapshot(0)
+
+	tree, err := snapshot.GetTree("mbl")
+	if err != nil {
+		return nil, err
+	}
+
+	var masterBucketList []string
+
+	bytes, err := tree.Get([]byte("mbl"))
+	if bytes == nil || err != nil {
+		masterBucketList = []string{}
+	} else {
+		err = cbor.Unmarshal(bytes, &masterBucketList)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if contains(masterBucketList, bucket) {
+		return nil, nil
+	} else {
+		masterBucketList = append(masterBucketList, bucket)
+
+		bytes, err = cbor.Marshal(masterBucketList)
+		if err != nil {
+			return nil, err
+		}
+
+		err = tree.Put([]byte("mbl"), bytes)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return tree, nil
+}
+
+func (store *GravitonStore) GetMasterBucketList() ([]string, error) {
+	snapshot, _ := store.Database.LoadSnapshot(0)
+
+	tree, err := snapshot.GetTree("mbl")
+	if err != nil {
+		return nil, err
+	}
+
+	var masterBucketList []string
+
+	bytes, err := tree.Get([]byte("mbl"))
+	if bytes == nil || err != nil {
+		masterBucketList = []string{}
+	} else {
+		err = cbor.Unmarshal(bytes, &masterBucketList)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return masterBucketList, nil
 }
 
 func (store *GravitonStore) DeleteEvent(eventID string) error {

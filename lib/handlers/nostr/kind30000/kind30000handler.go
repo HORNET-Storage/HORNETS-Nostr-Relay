@@ -54,6 +54,17 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		if errMsg := validateFollowSetTags(event.Tags); errMsg != "" {
 			write("NOTICE", errMsg)
 			return

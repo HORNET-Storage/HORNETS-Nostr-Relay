@@ -68,6 +68,17 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Store the event
 		if err := store.StoreEvent(&event); err != nil {
 			// Example: Sending an "OK" message with an error indication

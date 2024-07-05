@@ -56,6 +56,17 @@ func BuildKind10000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Retrieve existing kind 10000 events for the pubkey to determine if this is an update
 		filter := nostr.Filter{
 			Authors: []string{event.PubKey},

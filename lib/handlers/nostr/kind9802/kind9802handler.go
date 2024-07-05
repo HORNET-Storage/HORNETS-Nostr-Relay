@@ -60,6 +60,17 @@ func BuildKind9802Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
+		success, err := event.CheckSignature()
+		if err != nil {
+			write("OK", event.ID, false, "Failed to check signature")
+			return
+		}
+
+		if !success {
+			write("OK", event.ID, false, "Signature failed to verify")
+			return
+		}
+
 		// Check if at least one of the expected tags ('a', 'e', 'r', 'p', 'context') is present
 		if !hasExpectedTag(event.Tags, "a", "e", "r", "p", "context") {
 			log.Println("No expected tags found in the event.")
