@@ -946,7 +946,7 @@ func (store *GravitonStore) ListBlobs(pubkey string, since, until int64) ([]type
 }
 
 func GetBucket(leaf *merkle_dag.DagLeaf) string {
-	app, ok := leaf.AdditionalData["app"]
+	app, ok := leaf.AdditionalData["path"]
 	if ok {
 		return app
 	}
