@@ -33,7 +33,7 @@ H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistan
 - kind30008
 - kind30009
 
-### Toggling Nostr Apps/Services
+### Toggle Kind Numbers and File Extensions
 The HORNET Storage Relay Web Panel allows users to configure which types of nostr posts and file types they want to host.
 
 ### Getting Started
