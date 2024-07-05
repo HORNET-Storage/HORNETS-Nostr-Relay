@@ -1,14 +1,40 @@
 # H.O.R.N.E.T Storage: Multimedia Nostr Relay
-H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. The Multimedia Nostr Relay supports chunked file storage with Scionic Merkle Trees and is equipped with Libp2p to sync with other Multimedia Nostr Relays, free of centralized certificate authories.
+H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. The Multimedia Nostr Relay supports chunked file storage with Scionic Merkle Trees and Blossom in a modular way, allowing operators to configure what they want to store.
 
-### bbolt: Stateful Buckets
-bbolt provides support for bucketing, meaning content can be organized in an incredibly organized way. Bucketing is like a library. 📚 First, the librarian traverses the name of each book title (name of each bucket/database instance), then moves on to the pages (key-value pairs in that bucket) within the book. This traversal method is a lot quicker than skimming through every page in the library to find something specific. Nested databases (buckets) allow for this type of hierarchical data organization, so far more databases can be accessed concurrently, meaning traversal speeds may be faster even if bbolt doesn’t match-up to the raw speed of LMDB.
 
-### Libp2p: Transport and Networking
-H.O.R.N.E.T Storage utilizes libp2p for its transport layers and networking, eliminating dependence on the centralized web. This forms the basis for the Hornet browser extension, similar to the [IPFS companion](https://github.com/ipfs/ipfs-companion) browser extension.
+# Supported NIPs
+-	NIP-01: Basic Nostr Protocol
+-	NIP-02 - Follow List
+-	NIP-05 - DNS Identifier
+-	NIP-09 - Event Deleting
+-	NIP-11 - Relay Information Document
+-	NIP-18 - Reposts Kind
+-	NIP-23 - Long-form Articles
+-	NIP-25 - Custom Reactions
+-	NIP-50 - Search Capability
+-	NIP-51 - Custom Follow Lists
+-	NIP-57 - Zaps
+
+# Supported kinds
+- kind0
+- kind1
+- kind3
+- kind5
+- kind6
+- kind7
+- kind8
+- kind1984
+- kind9372
+- kind9373
+- kind9375
+- kind9802
+- kind10000
+- kind30000
+- kind30008
+- kind30009
 
 ### Toggling Nostr Apps/Services
-Data is tagged with a unique identifier indicating its type of application, such as "nostr note" for posts, "nostrtube" for a nostr YouTube video, "stemstr" for a stemstr music note, "git" for a git repository folder, et al. The web-based relay manager will allow relay operators to view data usage per application over periods of time, and it will also allow them to toggle which file types they want to host.
+The HORNET Storage Relay Web Panel allows users to configure which types of nostr posts and file types they want to host.
 
 ### Getting Started
 Example bat files are included for building and running a hornet-storage relay under a development environment
