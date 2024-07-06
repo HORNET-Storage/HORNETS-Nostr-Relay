@@ -4,7 +4,7 @@
 
 Unleashing the power of Nostr with a ***configurable all-in-one relay*** supporting unchunked files as Blossom Blobs, chunked files as Scionic Merkle Trees, and various social media features as Nostr kind numbers.
 
-### Toggle Kind Numbers and File Extensions
+### Choose Kind Numbers and File Extensions
 Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage Relay Panel](https://github.com/HORNET-Storage/hornet-storage-panel) with elegant GUI toggles, displayed alongside diagrams and graphs to visualize the amount of data hosted over time.
 
 ### Multi-OS Go Nostr Relay - Currently Supporting 15 NIPs:
