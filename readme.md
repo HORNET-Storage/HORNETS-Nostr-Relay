@@ -7,7 +7,7 @@ Unleashing the power of Nostr with a ***configurable all-in-one relay*** support
 ### Choose Kind Numbers and File Extensions
 Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage Relay Panel](https://github.com/HORNET-Storage/hornet-storage-panel) with elegant GUI toggles, displayed alongside diagrams and graphs to visualize the amount of data hosted over time.
 
-### Multi-OS Go Nostr Relay - Currently Supports 15 NIPs (Nostr Features):
+### Multi-OS Go Relay - Supports 15 NIPs (Nostr Features):
 **✅ - Implemented:** Features that are currently available and fully operational.  
 **⚠️ - In-Progress:** Features that are currently under development and not yet released.
 
