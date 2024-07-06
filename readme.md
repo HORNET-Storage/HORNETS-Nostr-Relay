@@ -19,10 +19,10 @@ Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage
 | NIP-09     | Delete Note                        | kind5 → Delete Request ✅                                         |
 | NIP-11     | Relay Info Document                | No Specific Kinds Listed ✅                                       |
 | NIP-18     | Reposts                            | kind6 → Repost of Only Kind1 Notes ✅<br>kind16 → Repost of All Other Kind Notes ✅ |
-| NIP-23     | Formatted Articles                 | kind30023 → Markdown Styled Post ✅ [Updatable]                |
+| NIP-23     | Formatted Articles                 | kind30023 → Markdown Styled Post ✅ [Replaceable]                |
 | NIP-25     | Reactions                          | kind7 → Like, Heart, or Custom Reaction ✅                        |
 | NIP-50     | Search Capability                  | No Specific Kinds Listed ✅                                       |
-| NIP-51     | Custom Lists                       | kind10000 → Mute List ✅<br>kind10001 → Pinned Notes ✅<br>kind29998 → Private Follow Lists ⚠️ [Encrypted]<br>kind29999 → Bookmarks ⚠️ [Encrypted]<br>kind30000 → Public Follow Lists ✅ [Unencrypted] |
+| NIP-51     | Custom Lists                       | kind10000 → Mute List ✅<br>kind10001 → Pinned Notes ✅<br>kind29998 → Private Follow Lists ⚠️ [Encrypted]<br>kind29999 → Private Bookmarks ⚠️ [Encrypted]<br>kind30000 → Public Follow Lists ✅ [Unencrypted] |
 | NIP-56     | Reporting                          | kind1984 → Report a User, Post, or Relay ✅                       |
 | NIP-57     | Lightning Zaps                     | kind9735 → Zap Receipt ✅                                         |
 | NIP-58     | Badges                             | kind8 → Badge Award ✅<br>kind30008 → Profile Badges ✅<br>kind30009 → Badge Definition ✅ |
