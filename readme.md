@@ -26,8 +26,8 @@ Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage
 | NIP-56     | Reporting                          | kind1984 → Report a User, Post, or Relay ✅                       |
 | NIP-57     | Lightning Zaps                     | kind9735 → Zap Receipt ✅                                         |
 | NIP-58     | Badges                             | kind8 → Badge Award ✅<br>kind30008 → Profile Badges ✅<br>kind30009 → Badge Definition ✅ |
-| NIP-84     | Highlights                         | kind9802 → Snippets of Short Posts or Formatted Articles ✅   |
-| NIP-116    | Event Paths                        | kind30079 → Unique Paths Instead of Unique Kind Numbers ⚠️ |
+| NIP-84     | Highlights                         | kind9802 → Snippets of Posts or Articles ✅   |
+| NIP-116    | Event Paths                        | kind30079 → Paths Instead of Kind Numbers ⚠️ |
 
 
 ## Disclaimer
