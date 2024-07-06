@@ -29,6 +29,5 @@ Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage
 | NIP-84     | Highlights                         | kind9802 → Snippets of Posts or Articles ✅                       |
 | NIP-116    | Event Paths                        | kind30079 → Paths Instead of Kind Numbers ⚠️                      |
 
-
 ## Disclaimer
 **WARNING**: Relay is still being developed and is not ready for production use yet. More details will be provided soon.
