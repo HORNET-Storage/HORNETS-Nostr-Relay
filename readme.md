@@ -1,6 +1,6 @@
 ![nostr Badge](https://img.shields.io/badge/nostr-8e30eb?style=flat) ![Go Badge](https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white) <img src="https://static.wixstatic.com/media/e9326a_3823e7e6a7e14488954bb312d11636da~mv2.png" height="20">
 
-# H.O.R.N.E.T Storage: Multimedia Nostr Relay 🐝
+# H.O.R.N.E.T.S Multimedia Nostr Relay 🐝
 
 Unleashing the power of Nostr with a ***configurable all-in-one relay*** supporting unchunked files as Blossom Blobs, chunked files as Scionic Merkle Trees, and various social media features as Nostr kind numbers.
 
