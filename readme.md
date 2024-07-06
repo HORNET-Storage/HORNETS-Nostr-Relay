@@ -1,42 +1,34 @@
-# H.O.R.N.E.T Storage: Multimedia Nostr Relay
-H.O.R.N.E.T.S stands for **Hash Organized Relay Network Enabling Tamper-resistant Storage**. The Multimedia Nostr Relay supports chunked files with Scionic Merkle Trees and unchunked files with Blossom in a modular way, allowing operators to configure what they want to store.
+![nostr Badge](https://img.shields.io/badge/nostr-8e30eb?style=flat) ![Go Badge](https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white) <img src="https://static.wixstatic.com/media/e9326a_3823e7e6a7e14488954bb312d11636da~mv2.png" height="20">
 
+# H.O.R.N.E.T Storage: Multimedia Nostr Relay 🐝
 
-# Supported NIPs
--	NIP-01: Basic Nostr Protocol
--	NIP-02 - Follow List
--	NIP-05 - DNS Identifier
--	NIP-09 - Event Deleting
--	NIP-11 - Relay Information Document
--	NIP-18 - Reposts
--	NIP-23 - Long-form Articles
--	NIP-25 - Custom Reactions
--	NIP-50 - Search Capability
--	NIP-51 - Custom Follow Lists
--	NIP-57 - Zaps
-
-# Supported kinds
-- kind0
-- kind1
-- kind3
-- kind5
-- kind6
-- kind7
-- kind8
-- kind1984
-- kind9372
-- kind9373
-- kind9375
-- kind9802
-- kind10000
-- kind30000
-- kind30008
-- kind30009
+Unleashing the power of Nostr with a ***configurable, all-in-one relay*** supporting unchunked files as Blossom Blobs, chunked files as Scionic Merkle Trees, and various social media features as Nostr kind numbers.
 
 ### Toggle Kind Numbers and File Extensions
-The HORNET Storage Relay Web Panel allows users to configure which types of nostr posts and file types they want to host.
+Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage Relay Panel](https://github.com/HORNET-Storage/hornet-storage-panel) with elegant GUI toggles, displayed alongside diagrams and graphs to visualize the amount of data hosted over time.
 
-**DO NOT USE THESE FOR A PRODUCTION ENVIRONMENT**
+## Multi-OS Go Nostr Relay Supporting 15 NIPs
+**✅ - Implemented:** Features that are currently available and fully operational.  
+**⚠️ - In-Progress:** Features that are currently under development and not yet released.
+
+| NIP Number | Description                        | Kind Numbers                                                      |
+|------------|------------------------------------|-------------------------------------------------------------------|
+| NIP-01     | Basic Nostr Protocol               | kind0 → User Metadata ✅<br>kind1 → Short Text Post ✅ [Immutable] |
+| NIP-02     | Follow List                        | kind3 → Following List ✅                                         |
+| NIP-05     | Mapping Nostr Public Keys to DNS          | No Specific Kinds Listed ✅                                       |
+| NIP-09     | Delete Note                        | kind5 → Delete Request ✅                                         |
+| NIP-11     | Relay Info Document                | No Specific Kinds Listed ✅                                       |
+| NIP-18     | Reposts                            | kind6 → Repost of Only Kind1 Notes ✅<br>kind16 → Repost of All Other Kind Notes ✅ |
+| NIP-23     | Formatted Articles                 | kind30023 → Markdown Styled Post ✅ [Updatable]                |
+| NIP-25     | Reactions                          | kind7 → Like, Heart, or Custom Reaction ✅                        |
+| NIP-50     | Search Capability                  | No Specific Kinds Listed ✅                                       |
+| NIP-51     | Custom Lists                       | kind10000 → Mute List ✅<br>kind10001 → Pinned Notes ✅<br>kind29998 → Private Follow Lists ⚠️ [Encrypted]<br>kind29999 → Bookmarks ⚠️ [Encrypted]<br>kind30000 → Public Follow Lists ✅ [Unencrypted] |
+| NIP-56     | Reporting                          | kind1984 → Report a User, Post, or Relay ✅                       |
+| NIP-57     | Lightning Zaps                     | kind9735 → Zap Receipt ✅                                         |
+| NIP-58     | Badges                             | kind8 → Badge Award ✅<br>kind30008 → Profile Badges ✅<br>kind30009 → Badge Definition ✅ |
+| NIP-84     | Highlights                         | kind9802 → Snippets of Short Posts or Formatted Articles ✅   |
+| NIP-116    | Event Paths                        | kind30079 → Unique Paths Instead of Unique Kind Numbers ⚠️ |
+
 
 ## Disclaimer
-⚠️ **Warning**: The Hornet relay is currently in its development phase. It is not yet stable and is not recommended for production use. Users are advised to exercise caution. More comprehensive information will be provided soon.
+**WARNING**: Relay is still being developed and is not ready for production use yet. More details will be provided soon.
