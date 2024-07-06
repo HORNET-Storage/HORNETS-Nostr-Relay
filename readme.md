@@ -13,16 +13,16 @@ Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage
 
 | NIP Number | Description                        | Kind Numbers                                                      |
 |------------|------------------------------------|-------------------------------------------------------------------|
-| NIP-01     | Basic Nostr Protocol               | kind0 → User Metadata ✅<br><br>kind1 → Short Text Post ✅ [Immutable] |
+| NIP-01     | Basic Nostr Protocol               | kind0 → User Metadata ✅<br><br>kind1 → Short Text Post [Immutable] ✅ |
 | NIP-02     | Follow List                        | kind3 → Following List ✅                                         |
 | NIP-05     | Mapping Nostr Public Keys to DNS   | No Specific Kinds Listed ✅                                       |
 | NIP-09     | Delete Note                        | kind5 → Delete Request ✅                                         |
 | NIP-11     | Relay Info Document                | No Specific Kinds Listed ✅                                       |
 | NIP-18     | Reposts                            | kind6 → Repost of Kind1 Notes ✅<br><br>kind16 → Repost of All Other Kind Notes ✅ |
-| NIP-23     | Formatted Articles                 | kind30023 → Markdown Post ✅ [Replaceable]                |
+| NIP-23     | Formatted Articles                 | kind30023 → Markdown Post [Replaceable] ✅                        |
 | NIP-25     | Reactions                          | kind7 → Like, Heart, or Custom Reaction ✅                        |
 | NIP-50     | Search Capability                  | No Specific Kinds Listed ✅                                       |
-| NIP-51     | Custom Lists                       | kind10000 → Mute List ✅<br><br>kind10001 → Pinned Notes ✅<br><br>kind29998 → Private Follow Lists ⚠️ [Encrypted]<br><br>kind29999 → Private Bookmarks ⚠️ [Encrypted]<br><br>kind30000 → Public Follow Lists ✅ [Unencrypted] |
+| NIP-51     | Custom Lists                       | kind10000 → Mute List ✅<br><br>kind10001 → Pinned Notes ✅<br><br>kind29998 → Private Follow Lists [Encrypted] ⚠️<br><br>kind29999 → Private Bookmarks [Encrypted] ⚠️<br><br>kind30000 → Public Follow Lists [Unencrypted] ✅ |
 | NIP-56     | Reporting                          | kind1984 → Report a User, Post, or Relay ✅                       |
 | NIP-57     | Lightning Zaps                     | kind9735 → Zap Receipt ✅                                         |
 | NIP-58     | Badges                             | kind8 → Badge Award ✅<br><br>kind30008 → Profile Badges ✅<br><br>kind30009 → Badge Definition ✅ |
