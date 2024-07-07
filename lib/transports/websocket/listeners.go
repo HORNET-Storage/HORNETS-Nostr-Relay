@@ -1,4 +1,4 @@
-package proxy
+package websocket
 
 import (
 	"context"
@@ -24,6 +24,8 @@ func setListener(id string, ws *websocket.Conn, filters nostr.Filters, challenge
 	conData.subscriptions.Store(id, &Subscription{filters: filters, cancel: cancel})
 	conData.challenge = challenge
 	conData.authenticated = false
+
+	listeners.Store(ws, conData)
 }
 
 // RemoveListenerId removes a listener by its ID and cancels its context.
@@ -65,7 +67,7 @@ func notifyListeners(event *nostr.Event) {
 }
 
 // LogCurrentSubscriptions logs current subscriptions for debugging purposes.
-func logCurrentSubscriptions() {
+func LogCurrentSubscriptions() {
 	empty := true // Assume initially that there are no subscriptions
 	listeners.Range(func(ws *websocket.Conn, conData ListenerData) bool {
 		conData.subscriptions.Range(func(id string, listener *Subscription) bool {

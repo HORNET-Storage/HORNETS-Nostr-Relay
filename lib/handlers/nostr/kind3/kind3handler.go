@@ -16,15 +16,6 @@ func BuildKind3Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Handling contact list event.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		data, err := read()
 		if err != nil {
 			write("NOTICE", "Error reading from stream.")
@@ -38,45 +29,15 @@ func BuildKind3Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Validate event kind
-		if event.Kind != 3 {
-			log.Printf("Received non-kind-3 event on kind-3 handler, ignoring.")
-			return
-		}
-
-		// Time validation can be similar to your deletion event handler
-		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())
-		if !isValid {
-			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 3)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Retrieve existing contact list events for the user
 		filter := nostr.Filter{
-			Authors: []string{event.PubKey},
+			Authors: []string{env.Event.PubKey},
 			Kinds:   []int{3},
 		}
 		existingEvents, err := store.QueryEvents(filter)
@@ -97,13 +58,13 @@ func BuildKind3Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		}
 
 		// Store the new event
-		if err := store.StoreEvent(&event); err != nil {
-			log.Printf("Error storing new contact list event: %v", err)
-			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "Contact list updated successfully")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 	return handler
 }

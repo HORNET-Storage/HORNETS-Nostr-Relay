@@ -1,4 +1,4 @@
-package proxy
+package websocket
 
 import (
 	"crypto/sha256"

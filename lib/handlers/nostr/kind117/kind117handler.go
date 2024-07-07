@@ -1,8 +1,6 @@
-package kind9735
+package kind117handler
 
 import (
-	"time"
-
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -11,27 +9,26 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
-// BuildKind9735Handler constructs and returns a handler function for kind 9735 (Zap Receipt) events.
-func BuildKind9735Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+func BuildKind117Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		// Read data from the stream.
+		// Read data from the stream
 		data, err := read()
 		if err != nil {
-			write("NOTICE", "Error reading from stream.")
+			write("NOTICE", "Error reading data from stream")
 			return
 		}
 
-		// Unmarshal the received data into a Nostr event
+		// Unmarshal the nostr envelope
 		var env nostr.EventEnvelope
 		if err := json.Unmarshal(data, &env); err != nil {
-			write("NOTICE", "Error unmarshaling event.")
+			write("NOTICE", "Failed to deserialize the event envelope")
 			return
 		}
 
 		// Check relay settings for allowed events whilst also verifying signatures and kind number
-		success := lib_nostr.ValidateEvent(write, env, 9735)
+		success := lib_nostr.ValidateEvent(write, env, 117)
 		if !success {
 			return
 		}
@@ -47,13 +44,4 @@ func BuildKind9735Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 	}
 
 	return handler
-}
-
-// timeCheck performs a basic check on the timestamp to ensure it's within an acceptable range.
-func timeCheck(timestamp int64) (bool, string) {
-	currentTime := time.Now().Unix()
-	if currentTime-timestamp > 3600 { // More than an hour old
-		return false, "Event timestamp is too old"
-	}
-	return true, ""
 }

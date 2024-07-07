@@ -7,9 +7,27 @@ import (
 	"log"
 	"sync"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/count"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/filter"
+	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
+
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/fsnotify/fsnotify"
+	"github.com/ipfs/go-cid"
+	"github.com/spf13/viper"
+
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/protocol"
+
+	//"github.com/libp2p/go-libp2p/p2p/security/noise"
+	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
+	"github.com/HORNET-Storage/hornet-storage/lib/web"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/count"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/filter"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
@@ -28,26 +46,12 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9802"
-	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
-	"github.com/HORNET-Storage/hornet-storage/lib/proxy"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	"github.com/HORNET-Storage/hornet-storage/lib/web"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/fsnotify/fsnotify"
-	"github.com/ipfs/go-cid"
-	"github.com/spf13/viper"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
-	//"github.com/libp2p/go-libp2p/p2p/security/noise"
-	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
-
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers"
-
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
-
-	//stores_bbolt "github.com/HORNET-Storage/hornet-storage/lib/stores/bbolt"
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	//negentropy "github.com/illuzen/go-negentropy"
@@ -59,9 +63,7 @@ func init() {
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
-	viper.SetDefault("query_cache", map[string]string{
-		"hkind:2": "ItemName",
-	})
+	viper.SetDefault("query_cache", map[string]string{})
 	viper.SetDefault("service_tag", "hornet-storage-service")
 
 	viper.AddConfigPath(".")
@@ -86,7 +88,7 @@ func main() {
 	// Private key
 	key := viper.GetString("key")
 
-	host := web.GetHost(key)
+	host := libp2p.GetHost(key)
 
 	// Create and initialize database
 	store := &stores_graviton.GravitonStore{}
@@ -95,35 +97,28 @@ func main() {
 	store.InitStore(queryCache)
 
 	// Stream Handlers
-	handlers.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		return true
 	})
 
-	handlers.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+	upload.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		decodedSignature, err := hex.DecodeString(*signature)
 		if err != nil {
-			fmt.Println("2")
 			return false
 		}
 
 		parsedSignature, err := schnorr.ParseSignature(decodedSignature)
 		if err != nil {
-			fmt.Println("3")
 			return false
 		}
 
 		cid, err := cid.Parse(rootLeaf.Hash)
 		if err != nil {
-			fmt.Println("4")
 			return false
 		}
 
-		fmt.Println(*pubKey)
-
 		publicKey, err := signing.DeserializePublicKey(*pubKey)
 		if err != nil {
-			fmt.Printf("err: %vzn", err)
-			fmt.Println("5")
 			return false
 		}
 
@@ -131,7 +126,7 @@ func main() {
 		return err == nil
 	}, func(dag *merkle_dag.Dag, pubKey *string) {})
 
-	handlers.AddQueryHandler(host, store)
+	query.AddQueryHandler(host, store)
 
 	settings, err := nostr.LoadRelaySettings()
 	if err != nil {
@@ -142,8 +137,7 @@ func main() {
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
 		log.Println("Limited server mode")
-		nostr.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
-
+		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	} else if settings.Mode == "smart" {
 		log.Println("Smart server mode")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
@@ -229,7 +223,7 @@ func main() {
 		fmt.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			err := proxy.StartServer(store)
+			err := websocket.StartServer(store)
 
 			if err != nil {
 				fmt.Println("Fatal error occurred in web server")
@@ -239,7 +233,7 @@ func main() {
 		}()
 	}
 
-	if err := web.SetupMDNS(host, viper.GetString("serviceTag")); err != nil {
+	if err := libp2p.SetupMDNS(host, viper.GetString("serviceTag")); err != nil {
 		log.Fatal(err)
 	}
 

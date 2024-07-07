@@ -2,7 +2,6 @@ package kind36810
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -17,15 +16,7 @@ func BuildKind36810Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Handling kind 36810 events.")
-
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
-		// Read data from the stream.
+		// Read data from the stream
 		data, err := read()
 		if err != nil {
 			write("NOTICE", "Error reading from stream.")
@@ -39,48 +30,26 @@ func BuildKind36810Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Validate that the event kind is specifically for kind 36810 events.
-		if event.Kind != 36810 {
-			write("NOTICE", fmt.Sprintf("Received non-kind-36810 event (kind %d) on kind 36810 handler, ignoring.", event.Kind))
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 36810)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Validate the kind 36810 event's tags.
-		if errMsg := validateKind36810EventTags(event.Tags); errMsg != "" {
-			write("OK", event.ID, false, errMsg)
+		if errMsg := validateKind36810EventTags(env.Event.Tags); errMsg != "" {
+			write("OK", env.Event.ID, false, errMsg)
 			return
 		}
 
-		log.Printf("Storing kind 36810 event: %s", event.ID)
-		// Store the new kind 36810 event
-		if err := store.StoreEvent(&event); err != nil {
-			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

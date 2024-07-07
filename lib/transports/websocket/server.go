@@ -1,4 +1,4 @@
-package proxy
+package websocket
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/blossom"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/blossom"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
@@ -26,8 +26,6 @@ const challengeLength = 32
 func StartServer(store stores.Store) error {
 	app := fiber.New()
 
-	// initConfig()
-
 	// Middleware for handling relay information requests
 	app.Use(handleRelayInfoRequests)
 
@@ -36,10 +34,9 @@ func StartServer(store stores.Store) error {
 		handleWebSocketConnections(c) // Pass the host to the connection handler
 	}))
 
-	if viper.GetBool("blossom") {
-		server := blossom.NewServer(store)
-		server.SetupRoutes(app)
-	}
+	// Enable blossom routes for unchunked file storage
+	server := blossom.NewServer(store)
+	server.SetupRoutes(app)
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
@@ -111,27 +108,39 @@ func processWebSocketMessage(c *websocket.Conn) error {
 	case *nostr.EventEnvelope:
 		log.Println("Received EVENT message:", env.Kind)
 
-		handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
+		read := func() ([]byte, error) {
+			bytes, err := json.Marshal(env)
+			if err != nil {
+				return nil, err
+			}
+
+			return bytes, nil
+		}
+
+		write := func(messageType string, params ...interface{}) {
+			response := lib_nostr.BuildResponse(messageType, params)
+
+			if len(response) > 0 {
+				handleIncomingMessage(c, response)
+			}
+		}
+
+		// Load and check relay settings
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			write("NOTICE", env.SubscriptionID, false, "Failed to load relay settings")
+			return err
+		}
+
+		var handler lib_nostr.KindHandler
+		if settings.Mode == "smart" {
+			handler = lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
+		} else {
+			handler = lib_nostr.GetHandler("universal")
+		}
 
 		if handler != nil {
 			notifyListeners(&env.Event)
-
-			read := func() ([]byte, error) {
-				bytes, err := json.Marshal(env)
-				if err != nil {
-					return nil, err
-				}
-
-				return bytes, nil
-			}
-
-			write := func(messageType string, params ...interface{}) {
-				response := lib_nostr.BuildResponse(messageType, params)
-
-				if len(response) > 0 {
-					handleIncomingMessage(c, response)
-				}
-			}
 
 			if verifyNote(&env.Event) {
 				handler(read, write)
@@ -147,7 +156,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 
 			challenge, err := generateChallenge()
 			if err != nil {
-				log.Printf("Failed to generate challenge: %w", err)
+				log.Println("Failed to generate challenge")
 			}
 
 			setListener(env.SubscriptionID, c, env.Filters, challenge, cancelFunc)
@@ -213,7 +222,7 @@ func processWebSocketMessage(c *websocket.Conn) error {
 
 			challenge, err := generateChallenge()
 			if err != nil {
-				log.Printf("Failed to generate challenge: %w", err)
+				log.Println("Failed to generate challenge")
 			}
 
 			setListener(env.SubscriptionID, c, env.Filters, challenge, cancelFunc)
@@ -281,12 +290,6 @@ func processWebSocketMessage(c *websocket.Conn) error {
 
 		if env.Event.Kind != 22242 {
 			write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
-			return nil
-		}
-
-		isValid, errMsg := lib_nostr.TimeCheck(env.Event.CreatedAt.Time().Unix())
-		if !isValid {
-			write("OK", env.Event.ID, false, errMsg)
 			return nil
 		}
 
