@@ -16,15 +16,6 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Handling deletion event.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		data, err := read()
 		if err != nil {
 			write("NOTICE", "Error reading from stream.")
@@ -38,45 +29,14 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Event Time checker
-		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())
-		if !isValid {
-			// If the timestamp is invalid, respond with an error message and return early
-			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
-			return
-		}
-
-		// Check if the event is of kind 5
-		if event.Kind != 5 {
-			log.Printf("Received non-kind-5 event on kind-5 handler, ignoring.")
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 5)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Inside handleKindFiveEvents, within the for loop that processes each deletion request
-		for _, tag := range event.Tags {
+		for _, tag := range env.Event.Tags {
 			if tag[0] == "e" && len(tag) > 1 {
 				eventID := tag[1]
 				// Retrieve the public key of the event to be deleted
@@ -91,12 +51,12 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 				log.Println("Found Public key:", pubKey)
 
 				// Validate that the deletion request and the event have the same public key
-				if pubKey == event.PubKey {
+				if pubKey == env.Event.PubKey {
 					if err := store.DeleteEvent(eventID); err != nil {
 						log.Printf("Error deleting event %s: %v", eventID, err)
 						// Optionally, handle individual delete failures
 					} else {
-						write("OK", event.ID, true, "Deletion processed")
+						write("OK", env.Event.ID, true, "Deletion processed")
 					}
 				} else {
 					log.Printf("Public key mismatch for event %s, deletion request ignored", eventID)

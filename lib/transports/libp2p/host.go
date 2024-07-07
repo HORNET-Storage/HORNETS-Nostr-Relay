@@ -1,4 +1,4 @@
-package web
+package libp2p
 
 import (
 	"context"

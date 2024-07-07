@@ -1,7 +1,6 @@
 package kind0
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -17,17 +16,6 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		// Use Jsoniter for JSON operations
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Working with kind zero handler.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
-		log.Println("Settings", settings)
-
 		// Read data from the stream
 		data, err := read()
 		if err != nil {
@@ -42,54 +30,21 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Check if the event is of kind 0
-		if event.Kind != 0 {
-			log.Printf("Received non-kind-0 event on kind-0 handler, ignoring.")
-			return
-		}
-
-		log.Printf("Processing kind 0 event: %s", event)
-
-		// Perform time check
-		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())
-		if !isValid {
-			// If the timestamp is invalid, respond with an error message and return early
-			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 0)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Retrieve existing kind 0 events for the pubkey
 		filter := nostr.Filter{
-			Authors: []string{event.PubKey},
+			Authors: []string{env.Event.PubKey},
 			Kinds:   []int{0},
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
 			log.Printf("Error querying existing kind 0 events: %v", err)
-			write("NOTICE", fmt.Sprintf("Error querying existing events: %v", err))
+			write("NOTICE", "Error querying existing events")
 			return
 		}
 
@@ -103,14 +58,14 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			}
 		}
 
-		// Store the event
-		if err := store.StoreEvent(&event); err != nil {
-			// Example: Sending an "OK" message with an error indication
-			write("OK", event.ID, false, "error storing event")
-		} else {
-			// Example: Successfully stored event, sending a success "OK" message
-			write("OK", event.ID, true, "")
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
+			return
 		}
+
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

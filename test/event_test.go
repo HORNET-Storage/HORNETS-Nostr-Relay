@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
-	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/nbd-wtf/go-nostr"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
@@ -26,13 +28,12 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9372"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
-	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	"github.com/HORNET-Storage/hornet-storage/lib/web"
-	"github.com/nbd-wtf/go-nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 
-	"github.com/libp2p/go-libp2p/core/host"
+	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 )
 
 const DiscoveryServiceTag = "mdns-discovery"
@@ -116,7 +117,7 @@ func setupStore() *stores_graviton.GravitonStore {
 	store := &stores_graviton.GravitonStore{}
 	store.InitStore()
 
-	handlers.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
+	handlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
 	handlers.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	handlers.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
@@ -179,9 +180,9 @@ func TestHostConnections(t *testing.T) {
 	hosts := []host.Host{}
 
 	for i := 0; i < numHosts; i++ {
-		host := web.GetHost("")
+		host := libp2p.GetHost("")
 		defer host.Close()
-		if err := web.SetupMDNS(host, DiscoveryServiceTag); err != nil {
+		if err := libp2p.SetupMDNS(host, DiscoveryServiceTag); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("Host %s addresses:\n", host.ID())

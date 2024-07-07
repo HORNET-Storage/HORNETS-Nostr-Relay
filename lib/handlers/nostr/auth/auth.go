@@ -10,8 +10,8 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
-// Not being used until the session system is finished to unify the web socket / libp2p side of things
-// as the current listenere / subscriptions are dependant on the web socket connection
+// Not being used until the session system is finished to unify the transports
+// as the current listeners / subscriptions are dependant on the web socket connection
 func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	return func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -33,12 +33,6 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 
 		if request.Event.Kind != 22242 {
 			write("OK", request.Event.ID, false, "Error auth event kind must be 22242")
-			return
-		}
-
-		isValid, errMsg := lib_nostr.TimeCheck(request.Event.CreatedAt.Time().Unix())
-		if !isValid {
-			write("OK", request.Event.ID, false, errMsg)
 			return
 		}
 
