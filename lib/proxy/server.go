@@ -2,8 +2,6 @@ package proxy
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"strconv"
@@ -21,20 +19,17 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-const challengeLength = 32
-
 func StartServer(store stores.Store) error {
+	// Generate the global challenge
+	challenge, err := generateGlobalChallenge()
+	if err != nil {
+		log.Fatalf("Failed to generate global challenge: %v", err)
+	}
+	log.Printf("Global challenge generated: %s", challenge)
+
 	app := fiber.New()
-
-	// initConfig()
-
-	// Middleware for handling relay information requests
 	app.Use(handleRelayInfoRequests)
-
-	// Setup WebSocket route at the root
-	app.Get("/", websocket.New(func(c *websocket.Conn) {
-		handleWebSocketConnections(c) // Pass the host to the connection handler
-	}))
+	app.Get("/", websocket.New(handleWebSocketConnections))
 
 	if viper.GetBool("blossom") {
 		server := blossom.NewServer(store)
@@ -44,7 +39,7 @@ func StartServer(store stores.Store) error {
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
 	if err != nil {
-		log.Fatal("Error parsing port #{port}: #{err}")
+		log.Fatalf("Error parsing port %s: %v", port, err)
 	}
 
 	for {
@@ -80,25 +75,28 @@ func getRelayInfo() nip11RelayInfo {
 		Description:   viper.GetString("RelayDescription"),
 		Pubkey:        viper.GetString("RelayPubkey"),
 		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57},
+		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42},
 		Software:      viper.GetString("RelaySoftware"),
 		Version:       viper.GetString("RelayVersion"),
 	}
 }
 
 // Handles WebSocket connections and their lifecycles
-func handleWebSocketConnections(c *websocket.Conn) { // Replace HostType with the actual type of your host
-	defer removeListener(c) // Clean up when connection closes
+func handleWebSocketConnections(c *websocket.Conn) {
+	defer removeListener(c)
+
+	challenge := getGlobalChallenge()
+	log.Printf("Using global challenge for connection: %s", challenge)
 
 	for {
-		if err := processWebSocketMessage(c); err != nil { // Pass the host to the message processor
+		if err := processWebSocketMessage(c, challenge); err != nil {
 			log.Printf("Error processing WebSocket message: %v\n", err)
 			break
 		}
 	}
 }
 
-func processWebSocketMessage(c *websocket.Conn) error {
+func processWebSocketMessage(c *websocket.Conn, challenge string) error {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	_, message, err := c.ReadMessage()
 	if err != nil {
@@ -145,19 +143,12 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		if handler != nil {
 			_, cancelFunc := context.WithCancel(context.Background())
 
-			challenge, err := generateChallenge()
-			if err != nil {
-				log.Printf("Failed to generate challenge: %w", err)
-			}
+			setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
 
-			setListener(env.SubscriptionID, c, env.Filters, challenge, cancelFunc)
+			response := lib_nostr.BuildResponse("AUTH", challenge)
 
-			if challenge != nil {
-				response := lib_nostr.BuildResponse("AUTH", challenge)
-
-				if len(response) > 0 {
-					handleIncomingMessage(c, response)
-				}
+			if len(response) > 0 {
+				handleIncomingMessage(c, response)
 			}
 
 			read := func() ([]byte, error) {
@@ -211,19 +202,12 @@ func processWebSocketMessage(c *websocket.Conn) error {
 		if handler != nil {
 			_, cancelFunc := context.WithCancel(context.Background())
 
-			challenge, err := generateChallenge()
-			if err != nil {
-				log.Printf("Failed to generate challenge: %w", err)
-			}
+			setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
 
-			setListener(env.SubscriptionID, c, env.Filters, challenge, cancelFunc)
+			response := lib_nostr.BuildResponse("AUTH", challenge)
 
-			if challenge != nil {
-				response := lib_nostr.BuildResponse("AUTH", challenge)
-
-				if len(response) > 0 {
-					handleIncomingMessage(c, response)
-				}
+			if len(response) > 0 {
+				handleIncomingMessage(c, response)
 			}
 
 			read := func() ([]byte, error) {
@@ -245,99 +229,8 @@ func processWebSocketMessage(c *websocket.Conn) error {
 
 			handler(read, write)
 		}
-		/*
-			case *nostr.AuthEnvelope:
-				handler := lib_nostr.GetHandler("auth")
-
-				if handler != nil {
-					read := func() ([]byte, error) {
-						bytes, err := json.Marshal(env)
-						if err != nil {
-							return nil, err
-						}
-
-						return bytes, nil
-					}
-
-					write := func(messageType string, params ...interface{}) {
-						response := lib_nostr.BuildResponse(messageType, params)
-
-						if len(response) > 0 {
-							handleIncomingMessage(c, response)
-						}
-					}
-
-					handler(read, write)
-				}
-		*/
 	case *nostr.AuthEnvelope:
-		write := func(messageType string, params ...interface{}) {
-			response := lib_nostr.BuildResponse(messageType, params)
-
-			if len(response) > 0 {
-				handleIncomingMessage(c, response)
-			}
-		}
-
-		if env.Event.Kind != 22242 {
-			write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
-			return nil
-		}
-
-		isValid, errMsg := lib_nostr.TimeCheck(env.Event.CreatedAt.Time().Unix())
-		if !isValid {
-			write("OK", env.Event.ID, false, errMsg)
-			return nil
-		}
-
-		result, err := env.Event.CheckSignature()
-		if err != nil {
-			write("OK", env.Event.ID, false, "Error checking event signature")
-			return nil
-		}
-
-		if !result {
-			write("OK", env.Event.ID, false, "Error signature verification failed")
-			return nil
-		}
-
-		var hasRelayTag, hasChallengeTag bool
-		for _, tag := range env.Event.Tags {
-			if len(tag) >= 2 {
-				if tag[0] == "relay" {
-					hasRelayTag = true
-				} else if tag[0] == "challenge" {
-					hasChallengeTag = true
-
-					challenge, err := GetListenerChallenge(c)
-					if err != nil {
-						write("OK", env.Event.ID, false, "Error checking session")
-						return nil
-					}
-
-					tag := env.Event.Tags.GetFirst([]string{"challenge"})
-					eventChallenge := tag.Value()
-
-					if challenge == nil || *challenge != eventChallenge {
-						write("OK", env.Event.ID, false, "Error checking session")
-						return nil
-					}
-				}
-			}
-		}
-
-		if !hasRelayTag || !hasChallengeTag {
-			write("CLOSE", env.Event.ID, false, "Error event does not have required tags")
-			return nil
-		}
-
-		err = AuthenticateConnection(c)
-		if err != nil {
-			write("OK", env.Event.ID, false, "Error checking session")
-			return nil
-		}
-
-		write("OK", env.Event.ID, true, "")
+		return handleAuthMessage(c, env, challenge)
 	default:
 		log.Println("Unknown message type:")
 	}
@@ -345,15 +238,59 @@ func processWebSocketMessage(c *websocket.Conn) error {
 	return nil
 }
 
-func generateChallenge() (*string, error) {
-	bytes := make([]byte, challengeLength)
-
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate random bytes: %v", err)
+func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string) error {
+	write := func(messageType string, params ...interface{}) {
+		response := lib_nostr.BuildResponse(messageType, params)
+		if len(response) > 0 {
+			handleIncomingMessage(c, response)
+		}
 	}
 
-	challenge := hex.EncodeToString(bytes)
+	if env.Event.Kind != 22242 {
+		write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
+		return nil
+	}
 
-	return &challenge, nil
+	isValid, errMsg := lib_nostr.TimeCheck(env.Event.CreatedAt.Time().Unix())
+	if !isValid {
+		write("OK", env.Event.ID, false, errMsg)
+		return nil
+	}
+
+	result, err := env.Event.CheckSignature()
+	if err != nil || !result {
+		write("OK", env.Event.ID, false, "Error checking event signature")
+		return nil
+	}
+
+	var hasRelayTag, hasChallengeTag bool
+	for _, tag := range env.Event.Tags {
+		if len(tag) >= 2 {
+			if tag[0] == "relay" {
+				hasRelayTag = true
+			} else if tag[0] == "challenge" {
+				hasChallengeTag = true
+				if tag[1] != challenge {
+					write("OK", env.Event.ID, false, "Error checking session challenge")
+					return nil
+				}
+			}
+		}
+	}
+
+	if !hasRelayTag || !hasChallengeTag {
+		write("CLOSE", env.Event.ID, false, "Error event does not have required tags")
+		return nil
+	}
+
+	err = AuthenticateConnection(c)
+	if err != nil {
+		write("OK", env.Event.ID, false, "Error authorizing connection")
+		return nil
+	}
+
+	log.Println("Authenticated connection!")
+
+	write("OK", env.Event.ID, true, "")
+	return nil
 }
