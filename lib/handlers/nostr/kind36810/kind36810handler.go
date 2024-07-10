@@ -73,7 +73,6 @@ func BuildKind36810Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		log.Printf("Storing kind 36810 event: %s", event.ID)
 		// Store the new kind 36810 event
 		if err := store.StoreEvent(&event); err != nil {
 			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
