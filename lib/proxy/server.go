@@ -109,32 +109,70 @@ func processWebSocketMessage(c *websocket.Conn, challenge string) error {
 	case *nostr.EventEnvelope:
 		log.Println("Received EVENT message:", env.Kind)
 
-		handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
+		settings, err := lib_nostr.LoadRelaySettings()
+		if err != nil {
+			log.Fatalf("Failed to load relay settings: %v", err)
+			return err
+		}
 
-		if handler != nil {
-			notifyListeners(&env.Event)
+		if settings.Mode == "unlimited" {
+			log.Println("Unlimited Mode processing.")
+			handler := lib_nostr.GetHandler("universal")
 
-			read := func() ([]byte, error) {
-				bytes, err := json.Marshal(env)
-				if err != nil {
-					return nil, err
+			if handler != nil {
+				notifyListeners(&env.Event)
+
+				read := func() ([]byte, error) {
+					bytes, err := json.Marshal(env)
+					if err != nil {
+						return nil, err
+					}
+
+					return bytes, nil
 				}
 
-				return bytes, nil
-			}
+				write := func(messageType string, params ...interface{}) {
+					response := lib_nostr.BuildResponse(messageType, params)
 
-			write := func(messageType string, params ...interface{}) {
-				response := lib_nostr.BuildResponse(messageType, params)
+					if len(response) > 0 {
+						handleIncomingMessage(c, response)
+					}
+				}
 
-				if len(response) > 0 {
-					handleIncomingMessage(c, response)
+				if verifyNote(&env.Event) {
+					handler(read, write)
+				} else {
+					write("OK", env.ID, false, "Invalid note")
 				}
 			}
+		} else if settings.Mode == "smart" {
+			handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
 
-			if verifyNote(&env.Event) {
-				handler(read, write)
-			} else {
-				write("OK", env.ID, false, "Invalid note")
+			if handler != nil {
+				notifyListeners(&env.Event)
+
+				read := func() ([]byte, error) {
+					bytes, err := json.Marshal(env)
+					if err != nil {
+						return nil, err
+					}
+
+					return bytes, nil
+				}
+
+				write := func(messageType string, params ...interface{}) {
+					response := lib_nostr.BuildResponse(messageType, params)
+
+					if len(response) > 0 {
+						handleIncomingMessage(c, response)
+					}
+				}
+
+				if verifyNote(&env.Event) {
+					handler(read, write)
+				} else {
+					write("OK", env.ID, false, "Invalid note")
+				}
 			}
 		}
 	case *nostr.ReqEnvelope:
@@ -251,7 +289,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return nil
 	}
 
-	isValid, errMsg := lib_nostr.TimeCheck(env.Event.CreatedAt.Time().Unix())
+	isValid, errMsg := lib_nostr.AuthTimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !isValid {
 		write("OK", env.Event.ID, false, errMsg)
 		return nil

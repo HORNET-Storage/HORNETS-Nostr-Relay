@@ -36,7 +36,7 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 			return
 		}
 
-		isValid, errMsg := lib_nostr.TimeCheck(request.Event.CreatedAt.Time().Unix())
+		isValid, errMsg := lib_nostr.AuthTimeCheck(request.Event.CreatedAt.Time().Unix())
 		if !isValid {
 			write("OK", request.Event.ID, false, errMsg)
 			return
