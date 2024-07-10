@@ -21,11 +21,10 @@ import (
 
 func StartServer(store stores.Store) error {
 	// Generate the global challenge
-	challenge, err := generateGlobalChallenge()
+	_, err := generateGlobalChallenge()
 	if err != nil {
 		log.Fatalf("Failed to generate global challenge: %v", err)
 	}
-	log.Printf("Global challenge generated: %s", challenge)
 
 	app := fiber.New()
 	app.Use(handleRelayInfoRequests)
@@ -216,19 +215,17 @@ func processWebSocketMessage(c *websocket.Conn, challenge string) error {
 			// Send a NOTICE message in case of unmarshalling error
 			errMsg := "Error unmarshalling CLOSE request: " + err.Error()
 			if writeErr := sendWebSocketMessage(c, nostr.NoticeEnvelope(errMsg)); writeErr != nil {
-				fmt.Println("Error sending NOTICE message:", writeErr)
+				log.Println("Error sending NOTICE message:", writeErr)
 			}
 			return err
 		}
 		subscriptionID := closeEvent[1]
-		log.Println("Received CLOSE message:", subscriptionID)
 
 		// Assume removeListenerId will be called
 		responseMsg := nostr.ClosedEnvelope{SubscriptionID: subscriptionID, Reason: "Subscription closed successfully."}
 		// Attempt to remove the listener for the given subscription ID
 		removeListenerId(c, subscriptionID)
 
-		log.Println("Response message:", responseMsg)
 		// Send the prepared CLOSED or error message
 		if err := sendWebSocketMessage(c, responseMsg); err != nil {
 			log.Printf("Error sending 'CLOSED' envelope over WebSocket: %v", err)
@@ -327,7 +324,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return nil
 	}
 
-	log.Println("Authenticated connection!")
+	log.Println("Connection successfully authenticated.")
 
 	write("OK", env.Event.ID, true, "")
 	return nil
