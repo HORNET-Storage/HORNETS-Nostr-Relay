@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 
 	"sync/atomic"
 
@@ -46,7 +47,6 @@ func removeListenerId(ws *websocket.Conn, id string) bool {
 		}
 		if conData.subscriptions.Size() == 0 {
 			listeners.Delete(ws)
-			fmt.Println("No more subscriptions for this connection. All listeners removed.")
 		}
 	}
 	return removed
@@ -68,7 +68,7 @@ func notifyListeners(event *nostr.Event) {
 				return true
 			}
 			if err := ws.WriteJSON(nostr.EventEnvelope{SubscriptionID: &id, Event: *event}); err != nil {
-				fmt.Printf("Error notifying listener: %v\n", err)
+				log.Printf("Error notifying listener: %v\n", err)
 			}
 			return true
 		})
