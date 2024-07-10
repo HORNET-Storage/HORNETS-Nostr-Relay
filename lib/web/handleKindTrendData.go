@@ -30,7 +30,6 @@ func handleKindTrendData(c *fiber.Ctx) error {
 		log.Printf("Error converting kind number to integer: %v", err)
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid kind number")
 	}
-	log.Println("Kind number:", kindNumber)
 
 	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
 	if err != nil {
@@ -44,7 +43,6 @@ func handleKindTrendData(c *fiber.Ctx) error {
 		FROM kinds
 		WHERE kind_number = ? AND timestamp >= date('now', '-12 months')
 	`
-	log.Printf("Executing query: %s with kindNumber: %d", query, kindNumber)
 	err = db.Raw(query, kindNumber).Scan(&data).Error
 
 	if err != nil {
@@ -73,11 +71,6 @@ func handleKindTrendData(c *fiber.Ctx) error {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Month < result[j].Month
 	})
-
-	log.Printf("Query returned %d rows", len(data))
-	for _, row := range result {
-		log.Printf("Month: %s, TotalSize: %f", row.Month, row.TotalSize)
-	}
 
 	return c.JSON(result)
 }
