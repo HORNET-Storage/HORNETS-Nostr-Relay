@@ -74,7 +74,6 @@ func BuildKind1984Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		log.Printf("Storing report event: %s", event.ID)
 		// Store the new report event
 		if err := store.StoreEvent(&event); err != nil {
 			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
