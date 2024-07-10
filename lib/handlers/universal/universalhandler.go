@@ -47,8 +47,6 @@ func BuildUniversalHandler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		log.Printf("Default handling for event of kind %d: %s", event.Kind, event.Content)
-
 		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())
 		if !isValid {
 			// If the timestamp is invalid, respond with an error message and return early
