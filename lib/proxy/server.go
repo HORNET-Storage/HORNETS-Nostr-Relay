@@ -215,17 +215,19 @@ func processWebSocketMessage(c *websocket.Conn, challenge string) error {
 			// Send a NOTICE message in case of unmarshalling error
 			errMsg := "Error unmarshalling CLOSE request: " + err.Error()
 			if writeErr := sendWebSocketMessage(c, nostr.NoticeEnvelope(errMsg)); writeErr != nil {
-				log.Println("Error sending NOTICE message:", writeErr)
+				fmt.Println("Error sending NOTICE message:", writeErr)
 			}
 			return err
 		}
 		subscriptionID := closeEvent[1]
+		log.Println("Received CLOSE message:", subscriptionID)
 
 		// Assume removeListenerId will be called
 		responseMsg := nostr.ClosedEnvelope{SubscriptionID: subscriptionID, Reason: "Subscription closed successfully."}
 		// Attempt to remove the listener for the given subscription ID
 		removeListenerId(c, subscriptionID)
 
+		log.Println("Response message:", responseMsg)
 		// Send the prepared CLOSED or error message
 		if err := sendWebSocketMessage(c, responseMsg); err != nil {
 			log.Printf("Error sending 'CLOSED' envelope over WebSocket: %v", err)
@@ -265,6 +267,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string) error {
 			handler(read, write)
 		}
 	case *nostr.AuthEnvelope:
+		log.Println("Received AUTH message")
 		return handleAuthMessage(c, env, challenge)
 	default:
 		log.Println("Unknown message type:")
