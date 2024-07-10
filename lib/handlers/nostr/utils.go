@@ -53,8 +53,6 @@ func Responder(stream network.Stream, messageType string, params ...interface{})
 		return
 	}
 
-	log.Println("Writing to stream:", string(jsonMessage))
-
 	// Write the JSON message to the stream
 	if _, err := stream.Write(jsonMessage); err != nil {
 		log.Printf("Error writing to stream: %s\n", err)
