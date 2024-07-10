@@ -134,7 +134,6 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			Count int `json:"count"`
 		}
 		log.Println("Dealing with 'COUNT' message...")
-		log.Println("Received 'COUNT' message:", messageSlice[1].(string))
 		// Assuming the COUNT message includes the subscription ID as the second element
 		if len(messageSlice) < 2 {
 			log.Println("Expected data for 'COUNT' message type is missing.")
