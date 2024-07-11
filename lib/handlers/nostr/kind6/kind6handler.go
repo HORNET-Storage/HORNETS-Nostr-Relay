@@ -16,6 +16,8 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+		log.Println("Working with repost handler.")
+
 		// Load and check relay settings
 		settings, err := lib_nostr.LoadRelaySettings()
 		if err != nil {

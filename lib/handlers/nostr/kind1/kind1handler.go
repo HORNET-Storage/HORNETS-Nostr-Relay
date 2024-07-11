@@ -57,8 +57,6 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		log.Printf("Processing kind 1 event: %s", event.Content)
-
 		// Perform time check
 		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())
 		if !isValid {

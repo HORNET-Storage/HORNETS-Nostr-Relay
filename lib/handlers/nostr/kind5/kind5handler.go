@@ -105,8 +105,6 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			}
 		}
 
-		// Respond to indicate successful processing of the deletion request
-		// responder(stream, "OK", event.ID, true, "Deletion processed")
 	}
 
 	return handler

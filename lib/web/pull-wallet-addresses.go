@@ -39,8 +39,6 @@ func getAddresses(c *fiber.Ctx) error {
 		})
 	}
 
-	log.Println("Sending Addresses", addresses)
-
 	// Respond with the formatted addresses
 	return c.JSON(addresses)
 }
