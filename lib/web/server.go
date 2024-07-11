@@ -50,11 +50,15 @@ func StartServer() error {
 		log.Fatal("Error parsing port port")
 	}
 
-	app.Use("/", filesystem.New(filesystem.Config{
+	app.Use(filesystem.New(filesystem.Config{
 		Root:   http.Dir("./web"),
 		Browse: false,
 		Index:  "index.html",
 	}))
+
+	app.Use(func(c *fiber.Ctx) error {
+		return c.SendFile("./web/index.html")
+	})
 
 	return app.Listen(fmt.Sprintf(":%d", p+2))
 }
