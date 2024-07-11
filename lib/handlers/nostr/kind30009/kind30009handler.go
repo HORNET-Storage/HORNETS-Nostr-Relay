@@ -67,8 +67,6 @@ func BuildKind30009Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		log.Printf("Processing Badge Definition event: %s", event.Content)
-
 		// Perform validation of the Badge Definition event.
 		isValid, errMsg := validateBadgeDefinitionEvent(event)
 		if !isValid {

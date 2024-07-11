@@ -41,7 +41,7 @@ type Subscription struct {
 
 type ListenerData struct {
 	authenticated bool
-	challenge     *string
+	challenge     string
 	subscriptions *xsync.MapOf[string, *Subscription]
 }
 

@@ -14,10 +14,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type CryptoCompareResponse struct {
-	USD float64 `json:"USD"`
-}
-
 type CoinGeckoResponse struct {
 	Bitcoin struct {
 		USD float64 `json:"usd"`
@@ -26,27 +22,6 @@ type CoinGeckoResponse struct {
 
 type BinanceResponse struct {
 	Price string `json:"price"`
-}
-
-func fetchCryptoComparePrice() (float64, error) {
-	resp, err := http.Get("https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD")
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	var result CryptoCompareResponse
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		return 0, err
-	}
-
-	return result.USD, nil
 }
 
 func fetchCoinGeckoPrice() (float64, error) {
@@ -98,7 +73,6 @@ func fetchBinancePrice() (float64, error) {
 
 func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 	apis := []func() (float64, error){
-		fetchCryptoComparePrice,
 		fetchCoinGeckoPrice,
 		fetchBinancePrice,
 	}

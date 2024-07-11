@@ -26,8 +26,6 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		log.Println("Settings", settings)
-
 		// Read data from the stream
 		data, err := read()
 		if err != nil {
@@ -58,8 +56,6 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			log.Printf("Received non-kind-0 event on kind-0 handler, ignoring.")
 			return
 		}
-
-		log.Printf("Processing kind 0 event: %s", event)
 
 		// Perform time check
 		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())

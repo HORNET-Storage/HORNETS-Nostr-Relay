@@ -94,7 +94,6 @@ func BuildKind10000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			}
 		}
 
-		log.Printf("Storing new mute list event: %s", event.ID)
 		if err := store.StoreEvent(&event); err != nil {
 			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
 			return
