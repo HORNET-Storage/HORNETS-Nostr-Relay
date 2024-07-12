@@ -18,7 +18,7 @@ Relay operators can select which file types and nostr features to enable in the 
 | NIP-05     | Mapping Nostr Public Keys to DNS   | No Specific Kinds Listed ✅                                       |
 | NIP-09     | Delete Note                        | [***kind5***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind5) → Delete Request ✅                                         |
 | NIP-11     | Relay Info Document                | No Specific Kinds Listed ✅                                       |
-| NIP-18     | Reposts                            | [***kind6***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind6) → Repost of `kind1` Notes ✅<br><br>[***kind6***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind6) → Repost of All Other `kind` Notes ✅ |
+| NIP-18     | Reposts                            | [***kind6***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind6) → Repost of `kind1` Notes ✅<br><br>[***kind16***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind6) → Repost of All Other `kind` Notes ✅ |
 | NIP-23     | Formatted Articles                 | [***kind30023***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind30023) → Markdown Post [Replaceable] ✅                        |
 | NIP-25     | Reactions                          | [***kind7***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind7) → Like, Heart, or Custom Reaction ✅                        |
 | NIP-45     | Follower Count etc.                 | No Specific Kinds Listed ✅                                       |
