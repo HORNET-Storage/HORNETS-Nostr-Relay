@@ -447,10 +447,7 @@ func (store *GravitonStore) StoreDag(dag *types.DagData) error {
 }
 
 func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
-	//log.Println("Processing filter:", filter)
-
 	var events []*nostr.Event
-
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, err
@@ -460,6 +457,9 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 	if err != nil {
 		return nil, err
 	}
+
+	// Convert search term to lowercase for case-insensitive comparison
+	searchTerm := strings.ToLower(filter.Search)
 
 	for _, bucket := range masterBucketList {
 		if strings.HasPrefix(bucket, "kind") {
@@ -474,6 +474,12 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 					}
 
 					if filter.Matches(&event) {
+						// If there's a search term, check if the event content contains it
+						if searchTerm != "" {
+							if !strings.Contains(strings.ToLower(event.Content), searchTerm) {
+								continue // Skip this event if it doesn't contain the search term
+							}
+						}
 						events = append(events, &event)
 					}
 				}
@@ -489,10 +495,56 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 		events = events[:filter.Limit]
 	}
 
-	//log.Println("Found", len(events), "matching events")
-
 	return events, nil
 }
+
+// func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
+// 	//log.Println("Processing filter:", filter)
+
+// 	var events []*nostr.Event
+
+// 	snapshot, err := store.Database.LoadSnapshot(0)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	masterBucketList, err := store.GetMasterBucketList("kinds")
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	for _, bucket := range masterBucketList {
+// 		if strings.HasPrefix(bucket, "kind") {
+// 			tree, err := snapshot.GetTree(bucket)
+// 			if err == nil {
+// 				c := tree.Cursor()
+
+// 				for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+// 					var event nostr.Event
+// 					if err := jsoniter.Unmarshal(v, &event); err != nil {
+// 						continue
+// 					}
+
+// 					if filter.Matches(&event) {
+// 						events = append(events, &event)
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	sort.Slice(events, func(i, j int) bool {
+// 		return events[i].CreatedAt > events[j].CreatedAt
+// 	})
+
+// 	if filter.Limit > 0 && len(events) > filter.Limit {
+// 		events = events[:filter.Limit]
+// 	}
+
+// 	//log.Println("Found", len(events), "matching events")
+
+// 	return events, nil
+// }
 
 func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 	eventData, err := jsoniter.Marshal(event)
