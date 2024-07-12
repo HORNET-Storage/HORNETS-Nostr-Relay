@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"strconv"
@@ -97,7 +98,6 @@ func handleWebSocketConnections(c *websocket.Conn) {
 
 	for {
 		if err := processWebSocketMessage(c, challenge, state); err != nil {
-			log.Printf("Error processing WebSocket message: %v\n", err)
 			break
 		}
 	}
@@ -128,7 +128,13 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		handleCountMessage(c, env, challenge)
 
 	default:
-		log.Println("Unknown message type:")
+		firstComma := bytes.Index(message, []byte{','})
+		if firstComma == -1 {
+			return nil
+		}
+		label := message[0:firstComma]
+
+		log.Println("Unknown message type: " + string(label))
 	}
 
 	return nil

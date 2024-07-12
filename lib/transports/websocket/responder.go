@@ -29,8 +29,6 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		return
 	}
 
-	log.Println("Full Message Slice:", messageSlice)
-
 	// Ensure the message has at least 2 elements (type and subID)
 	if len(messageSlice) < 2 {
 		log.Println("Incoming message does not have the expected format or number of elements.")
@@ -52,12 +50,9 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 	// Handle the message based on its type
 	switch messageType {
 	case "EOSE":
-		log.Println("Dealing with 'EOSE' message...")
 		// EOSE does not need additional data beyond subID, which is already extracted
 		sendWebSocketMessage(ws, nostr.EOSEEnvelope(subID))
-
 	case "EVENT":
-		log.Println("Dealing with 'EVENT' message...")
 		// For "EVENT", assuming direct JSON structure for the event details as the third element
 		if len(messageSlice) < 3 {
 			log.Println("Expected data for 'EVENT' message type is missing.")
@@ -74,10 +69,7 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			return
 		}
 		sendWebSocketMessage(ws, nostr.EventEnvelope{SubscriptionID: &subID, Event: eventData})
-
 	case "NOTICE":
-		log.Println("Dealing with 'NOTICE' message...")
-		log.Println("Received 'NOTICE' message:", messageSlice[1].(string))
 		// Assuming "NOTICE" message contains a string as the third element
 		if len(messageSlice) < 2 {
 			log.Println("Expected data for 'NOTICE' message type is missing.")
@@ -88,10 +80,8 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			log.Println("Expected data for 'NOTICE' message type is not a string.")
 			return
 		}
-		log.Println("Received 'NOTICE' message:", noticeMsg)
 		sendWebSocketMessage(ws, nostr.NoticeEnvelope(noticeMsg))
 	case "OK":
-		log.Println("Dealing with 'OK' message...")
 		// Assuming the OK message includes the event ID as the second element and a boolean as the third.
 		if len(messageSlice) < 3 {
 			log.Println("Expected data for 'OK' message type is missing.")
@@ -131,8 +121,6 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		type CountStruct struct {
 			Count int `json:"count"`
 		}
-		log.Println("Dealing with 'COUNT' message...")
-		log.Println("Received 'COUNT' message:", messageSlice[1].(string))
 		// Assuming the COUNT message includes the subscription ID as the second element
 		if len(messageSlice) < 2 {
 			log.Println("Expected data for 'COUNT' message type is missing.")
@@ -149,14 +137,11 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			log.Println("Error:", err)
 			return
 		}
-		log.Println("Received 'COUNT' message:", countMsg)
-
 		if err := sendWebSocketMessage(ws, messageSlice); err != nil {
 			log.Printf("Error sending 'COUNT' envelope over WebSocket: %v", err)
 		}
 
 	case "AUTH":
-		log.Println("Dealing with 'AUTH' message...")
 		if len(messageSlice) < 2 {
 			log.Println("Expected data for 'AUTH' message type is missing.")
 			return
@@ -171,7 +156,6 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		sendWebSocketMessage(ws, authMessage)
 
 	default:
-
 		log.Printf("Unhandled message type: %s", messageType)
 	}
 }

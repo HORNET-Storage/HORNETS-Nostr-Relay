@@ -22,12 +22,10 @@ func handleCloseMessage(c *websocket.Conn, env *nostr.CloseEnvelope) {
 		}
 	}
 	subscriptionID := closeEvent[1]
-	log.Println("Received CLOSE message:", subscriptionID)
 
 	removeListenerId(c, subscriptionID)
 
 	responseMsg := nostr.ClosedEnvelope{SubscriptionID: subscriptionID, Reason: "Subscription closed successfully."}
-	log.Println("Response message:", responseMsg)
 
 	if err := sendWebSocketMessage(c, responseMsg); err != nil {
 		log.Printf("Error sending 'CLOSED' envelope over WebSocket: %v", err)
