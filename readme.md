@@ -11,9 +11,9 @@ Select which file types and nostr features to enable in the [H.O.R.N.E.T Storage
 **✅ - Implemented:** Features that are currently available and fully operational.  
 **⚠️ - In-Progress:** Features that are currently under development and not yet released.
 
-| NIP Number | Description                        | Kind Numbers                                                      |
+| NIP Number | NIP Description                        | Kind Number Description                                                      |
 |------------|------------------------------------|-------------------------------------------------------------------|
-| NIP-01     | Basic Nostr Protocol               | `kind0` → User Metadata ✅<br><br>`kind1` → Short Text Post [Immutable] ✅ |
+| NIP-01     | Basic Nostr Protocol Flow               | `kind0` → User Metadata ✅<br><br>`kind1` → Short Text Post [Immutable] ✅ |
 | NIP-02     | Follow List                        | `kind3` → Following List ✅                                         |
 | NIP-05     | Mapping Nostr Public Keys to DNS   | No Specific Kinds Listed ✅                                       |
 | NIP-09     | Delete Note                        | `kind5` → Delete Request ✅                                         |
