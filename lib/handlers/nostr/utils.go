@@ -63,24 +63,8 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 // Check if the event is pretending it can time travel
 func TimeCheck(eventCreatedAt int64) bool {
 	currentTime := time.Now()
-	//eventTime := time.Unix(eventCreatedAt, 0)
 
-	/* This just needs to be something ridiculous but not out of bounds ridiclous to stop max int64 values
-	futureLimit := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
-	if eventTime.After(futureLimit) {
-		fmt.Println("Event time is unrealistically far in the future.")
-		return false
-	}
-	*/
-
-	// Can't trust the above to work with max integers, typical
-	if eventCreatedAt > currentTime.Unix() {
-		fmt.Println("Event time is in the future.")
-		return false
-	}
-
-	// Check if the event timestamp is in the future relative to current time
-	return true //Message type!eventTime.After(currentTime)
+	return eventCreatedAt <= currentTime.Unix()
 }
 
 func AuthTimeCheck(eventCreatedAt int64) (bool, string) {
