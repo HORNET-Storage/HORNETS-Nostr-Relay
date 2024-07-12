@@ -447,7 +447,9 @@ func (store *GravitonStore) StoreDag(dag *types.DagData) error {
 }
 
 func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
+	log.Println("Processing filter:", filter)
 	var events []*nostr.Event
+
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, err
@@ -464,37 +466,44 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 	for _, bucket := range masterBucketList {
 		if strings.HasPrefix(bucket, "kind") {
 			tree, err := snapshot.GetTree(bucket)
-			if err == nil {
-				c := tree.Cursor()
+			if err != nil {
+				continue // Skip this bucket if there's an error
+			}
 
-				for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
-					var event nostr.Event
-					if err := jsoniter.Unmarshal(v, &event); err != nil {
-						continue
-					}
-
-					if filter.Matches(&event) {
-						// If there's a search term, check if the event content contains it
-						if searchTerm != "" {
-							if !strings.Contains(strings.ToLower(event.Content), searchTerm) {
-								continue // Skip this event if it doesn't contain the search term
-							}
-						}
-						events = append(events, &event)
-					}
+			c := tree.Cursor()
+			for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+				var event nostr.Event
+				if err := jsoniter.Unmarshal(v, &event); err != nil {
+					continue // Skip on unmarshal error
 				}
+
+				// Step 1: Check if the event matches the filter criteria, including kind
+				if !filter.Matches(&event) {
+					continue
+				}
+
+				// Step 2: Implement search logic here, after ensuring the event matches the filter
+				if searchTerm != "" && !strings.Contains(strings.ToLower(event.Content), searchTerm) {
+					continue // If the lowercase content doesn't contain the lowercase search term, skip
+				}
+
+				// If the event passes both the filter and search, add it to the results
+				events = append(events, &event)
 			}
 		}
 	}
 
+	// Sort the events based on creation time, most recent first
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].CreatedAt > events[j].CreatedAt
 	})
 
+	// Step 3: Apply the limit, if specified
 	if filter.Limit > 0 && len(events) > filter.Limit {
 		events = events[:filter.Limit]
 	}
 
+	log.Println("Found", len(events), "matching events")
 	return events, nil
 }
 
