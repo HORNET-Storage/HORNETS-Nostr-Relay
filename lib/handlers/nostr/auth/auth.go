@@ -20,19 +20,25 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 		data, err := read()
 		if err != nil {
 			log.Println("Error reading from stream:", err)
-			write("OK", "", false, "Error reading from stream.")
+			write("NOTICE", "Error reading from stream.")
 			return
 		}
 
 		var request nostr.AuthEnvelope
 		if err := json.Unmarshal(data, &request); err != nil {
 			log.Println("Error unmarshaling count request:", err)
-			write("OK", "", false, "Error unmarshaling auth request.")
+			write("NOTICE", "Error unmarshaling auth request.")
 			return
 		}
 
 		if request.Event.Kind != 22242 {
 			write("OK", request.Event.ID, false, "Error auth event kind must be 22242")
+			return
+		}
+
+		isValid, errMsg := lib_nostr.AuthTimeCheck(request.Event.CreatedAt.Time().Unix())
+		if !isValid {
+			write("OK", request.Event.ID, false, errMsg)
 			return
 		}
 

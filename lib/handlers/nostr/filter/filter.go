@@ -31,7 +31,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// Ensure that we respond to the client after processing all filters
 		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
-		log.Println("WE have this many filters:", request.Filters)
 		var combinedEvents []*nostr.Event
 		for _, filter := range request.Filters {
 			events, err := store.QueryEvents(filter)
@@ -41,8 +40,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 			combinedEvents = append(combinedEvents, events...)
 		}
-
-		log.Println("Combined events:", combinedEvents)
 
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
@@ -56,8 +53,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 			write("EVENT", request.SubscriptionID, string(eventJSON))
 		}
-
-		log.Printf("Processed filters for subscription ID: %s", request.SubscriptionID)
 
 		write("EOSE", request.SubscriptionID, "End of stored events")
 	}

@@ -36,7 +36,6 @@ func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			return
 		}
 
-		log.Println("Processing count request with filters:", request.Filters)
 		var totalCount int
 		for _, filter := range request.Filters {
 			count, err := store.QueryEvents(filter) //CountEvents(filter) // Assume QueryEvents now returns both events and counts or adjust accordingly
@@ -50,7 +49,6 @@ func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		log.Printf("Total count: %d", totalCount)
 		log.Println("Testing to see request.SubscriptionID:", request.SubscriptionID)
 		responseJSON, _ := json.Marshal(map[string]int{"count": totalCount})
-		log.Println(string(responseJSON))
 		write("COUNT", request.SubscriptionID, string(responseJSON))
 	}
 }
