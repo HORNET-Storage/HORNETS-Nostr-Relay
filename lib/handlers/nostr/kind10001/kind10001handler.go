@@ -17,15 +17,6 @@ func BuildKind10001Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Handling pinned notes event.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -40,36 +31,15 @@ func BuildKind10001Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		if event.Kind != 10001 {
-			write("NOTICE", fmt.Sprintf("Received non-pinned-notes event (kind %d) on pinned-notes handler, ignoring.", event.Kind))
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 10001)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Retrieve existing kind 10001 events for the pubkey to determine if this is an update
 		filter := nostr.Filter{
-			Authors: []string{event.PubKey},
+			Authors: []string{env.Event.PubKey},
 			Kinds:   []int{10001},
 		}
 		existingEvents, err := store.QueryEvents(filter)
@@ -81,7 +51,7 @@ func BuildKind10001Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Perform tag validation only if there are no existing events (i.e., it's a new event)
 		if len(existingEvents) == 0 {
-			if err := validatePinnedNotesTags(event.Tags); err != nil {
+			if err := validatePinnedNotesTags(env.Event.Tags); err != nil {
 				write("NOTICE", err.Error())
 				return
 			}
@@ -94,12 +64,14 @@ func BuildKind10001Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			}
 		}
 
-		if err := store.StoreEvent(&event); err != nil {
-			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "Pinned notes updated successfully")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler
