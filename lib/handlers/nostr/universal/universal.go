@@ -32,8 +32,6 @@ func BuildUniversalHandler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		// Add additional verification steps here specific to the kind being implemented
-
 		// Store the new event
 		if err := store.StoreEvent(&env.Event); err != nil {
 			write("NOTICE", "Failed to store the event")

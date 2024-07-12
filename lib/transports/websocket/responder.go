@@ -125,9 +125,7 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			Reason:  reason, // Note: This will be empty if success is true, based on current message format.
 		}
 		// Sending the constructed OKEnvelope.
-		if err := sendWebSocketMessage(ws, okEnvelope); err != nil {
-			log.Printf("Error sending 'OK' envelope over WebSocket: %v", err)
-		}
+		sendWebSocketMessage(ws, okEnvelope)
 
 	case "COUNT":
 		type CountStruct struct {
@@ -156,17 +154,24 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		if err := sendWebSocketMessage(ws, messageSlice); err != nil {
 			log.Printf("Error sending 'COUNT' envelope over WebSocket: %v", err)
 		}
+
 	case "AUTH":
 		log.Println("Dealing with 'AUTH' message...")
 		if len(messageSlice) < 2 {
 			log.Println("Expected data for 'AUTH' message type is missing.")
 			return
 		}
-
-		if err := sendWebSocketMessage(ws, messageSlice); err != nil {
-			log.Printf("Error sending 'COUNT' envelope over WebSocket: %v", err)
+		challengeString, ok := messageSlice[1].(string)
+		if !ok {
+			log.Println("Expected challenge string for 'AUTH' message type is not a string.")
+			return
 		}
+		// Send the AUTH message with the signed event
+		authMessage := []interface{}{"AUTH", challengeString}
+		sendWebSocketMessage(ws, authMessage)
+
 	default:
+
 		log.Printf("Unhandled message type: %s", messageType)
 	}
 }
