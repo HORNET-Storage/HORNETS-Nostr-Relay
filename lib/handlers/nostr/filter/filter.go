@@ -13,7 +13,6 @@ import (
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
-		log.Println("Working with filter request.")
 
 		data, err := read()
 		if err != nil {

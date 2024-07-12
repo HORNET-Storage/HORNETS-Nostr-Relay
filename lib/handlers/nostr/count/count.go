@@ -13,7 +13,6 @@ import (
 func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	return func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
-		log.Println("Working with count request.")
 
 		data, err := read()
 		if err != nil {

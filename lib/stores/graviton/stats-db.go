@@ -110,9 +110,6 @@ func storeInGorm(event *nostr.Event) {
 		gormDB.Create(&kind)
 		return
 	}
-
-	// Add cases for photos, videos, and gitNestr
-	fmt.Printf("Unhandled kind: %d\n", event.Kind)
 }
 
 func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error {

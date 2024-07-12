@@ -15,7 +15,6 @@ import (
 func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	return func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
-		log.Println("Working with auth request.")
 
 		data, err := read()
 		if err != nil {
