@@ -29,14 +29,8 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		// Validate event kind for repost (kind 6 or kind 16 for generic repost)
-		if env.Event.Kind != 6 && env.Event.Kind != 16 {
-			write("OK", env.Event.ID, false, "Invalid event kind")
-			return
-		}
-
 		// Check relay settings for allowed events whilst also verifying signatures and kind number
-		success := lib_nostr.ValidateEvent(write, env, -1)
+		success := lib_nostr.ValidateEvent(write, env, 6)
 		if !success {
 			return
 		}
