@@ -1,7 +1,6 @@
 package kind30008
 
 import (
-	"fmt"
 	"log"
 
 	jsoniter "github.com/json-iterator/go"
@@ -17,15 +16,6 @@ func BuildKind30008Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Working with Profile Badges handler.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -40,49 +30,28 @@ func BuildKind30008Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Ensure the event is of kind 30008.
-		if event.Kind != 30008 {
-			log.Printf("Received non-kind-30008 event on Profile Badges handler, ignoring.")
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 30008)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Perform validation specific to Profile Badges events.
-		isValid, errMsg := validateProfileBadgesEvent(event)
+		isValid, errMsg := validateProfileBadgesEvent(env.Event)
 		if !isValid {
 			log.Println(errMsg)
-			write("NOTICE", event.ID, false, errMsg)
+			write("OK", env.Event.ID, false, errMsg)
 			return
 		}
 
-		// Store the event in the provided storage system.
-		if err := store.StoreEvent(&event); err != nil {
-			write("NOTICE", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

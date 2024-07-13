@@ -1,18 +1,20 @@
 package test
 
 import (
+	"bytes"
+	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"testing"
 	"time"
-	"io"
-	"bytes"
-	"context"
-	"encoding/json"
 
-	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/nbd-wtf/go-nostr"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
@@ -22,7 +24,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30009"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind36810"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -30,17 +31,16 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9372"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
-	universalhandler "github.com/HORNET-Storage/hornet-storage/lib/handlers/universal"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
+
+	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	"github.com/HORNET-Storage/hornet-storage/lib/web"
-	"github.com/nbd-wtf/go-nostr"
 
-	"github.com/libp2p/go-libp2p/core/host"
-    net "github.com/libp2p/go-libp2p/core/network"
-    peer "github.com/libp2p/go-libp2p/core/peer"
-// 	negentropy "github.com/illuzen/go-negentropy"
-
+	net "github.com/libp2p/go-libp2p/core/network"
+	peer "github.com/libp2p/go-libp2p/core/peer"
+	// 	negentropy "github.com/illuzen/go-negentropy"
 )
 
 const DiscoveryServiceTag = "mdns-discovery"
@@ -124,7 +124,7 @@ func setupStore() *stores_graviton.GravitonStore {
 	store := &stores_graviton.GravitonStore{}
 	store.InitStore()
 
-	handlers.RegisterHandler("universal", universalhandler.BuildUniversalHandler(store))
+	handlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
 	handlers.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	handlers.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
@@ -141,7 +141,6 @@ func setupStore() *stores_graviton.GravitonStore {
 	handlers.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
 	handlers.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
 	handlers.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
-	handlers.RegisterHandler("kind/36810", kind36810.BuildKind36810Handler(store))
 
 	return store
 }
@@ -167,7 +166,7 @@ func getRandomFilter() nostr.Filter {
 
 func getRandomKind() int {
 	kinds := []int{1, 3, 5, 6, 7, 8, 1984, 9735, 9372, 9373, 30023, 10000, 30000, 30008, 30009, 36810}
-    return selectRandomItems(kinds, 1)[0]
+	return selectRandomItems(kinds, 1)[0]
 }
 
 func TestEventGenerationStorageRetrieval(t *testing.T) {
@@ -204,9 +203,9 @@ func TestHostConnections(t *testing.T) {
 	hosts := []host.Host{}
 
 	for i := 0; i < numHosts; i++ {
-		host := web.GetHost("")
+		host := libp2p.GetHost("")
 		defer host.Close()
-		if err := web.SetupMDNS(host, DiscoveryServiceTag); err != nil {
+		if err := libp2p.SetupMDNS(host, DiscoveryServiceTag); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("Host %s addresses:\n", host.ID())
@@ -227,7 +226,7 @@ func TestHostConnections(t *testing.T) {
 
 func TestHostCommunication(t *testing.T) {
 	log.Println("Testing host syncing.")
-    ctx := context.Background()
+	ctx := context.Background()
 
 	store1 := setupStore()
 	err := GenerateRandomEvents(100, store1)
@@ -235,60 +234,59 @@ func TestHostCommunication(t *testing.T) {
 		t.Fatalf("Error generating events: %v", err)
 	}
 
+	// 	store2 := setupStore()
+	host1 := libp2p.GetHost("")
+	host2 := libp2p.GetHost("")
 
-// 	store2 := setupStore()
-    host1 := web.GetHost("")
-    host2 := web.GetHost("")
+	if err := libp2p.SetupMDNS(host1, DiscoveryServiceTag); err != nil {
+		t.Fatal(err)
+	}
+	if err := libp2p.SetupMDNS(host2, DiscoveryServiceTag); err != nil {
+		t.Fatal(err)
+	}
 
-    if err := web.SetupMDNS(host1, DiscoveryServiceTag); err != nil {
-        t.Fatal(err)
-    }
-    if err := web.SetupMDNS(host2, DiscoveryServiceTag); err != nil {
-        t.Fatal(err)
-    }
-
-    if err := host1.Connect(ctx, peer.AddrInfo{ID: host2.ID(), Addrs: host2.Addrs()}); err != nil {
-        t.Fatal(err)
-    }
+	if err := host1.Connect(ctx, peer.AddrInfo{ID: host2.ID(), Addrs: host2.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
 
 	filter := getRandomFilter()
 	events, err := store1.QueryEvents(filter)
-    outgoing, err := json.Marshal(events)
+	outgoing, err := json.Marshal(events)
 
-    // Set a stream handler on the host
-    host2.SetStreamHandler(ProtocolID, func(s net.Stream) {
+	// Set a stream handler on the host
+	host2.SetStreamHandler(ProtocolID, func(s net.Stream) {
 
-        incoming, err := io.ReadAll(s)
-        if err != nil {
-            log.Println("Failed to read data from stream:", err)
-            s.Reset()
-            t.Fatal(err)
-        }
+		incoming, err := io.ReadAll(s)
+		if err != nil {
+			log.Println("Failed to read data from stream:", err)
+			s.Reset()
+			t.Fatal(err)
+		}
 
-        if bytes.Equal(incoming, outgoing) {
-            fmt.Println("Data matches")
-        } else {
-            fmt.Printf("Received: %d bytes\n", len(incoming))
-            fmt.Printf("Sent: %d bytes\n", len(outgoing))
-            t.Fatal("Data mismatch")
-        }
+		if bytes.Equal(incoming, outgoing) {
+			fmt.Println("Data matches")
+		} else {
+			fmt.Printf("Received: %d bytes\n", len(incoming))
+			fmt.Printf("Sent: %d bytes\n", len(outgoing))
+			t.Fatal("Data mismatch")
+		}
 
-        s.Close()
-    })
+		s.Close()
+	})
 
-    // Open a stream to the peer
-    s, err := host1.NewStream(ctx, host2.ID(), ProtocolID)
-    if err != nil {
-        t.Fatal(err)
-    }
+	// Open a stream to the peer
+	s, err := host1.NewStream(ctx, host2.ID(), ProtocolID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-    // Send over connection
-    _, err = s.Write(outgoing)
-    if err != nil {
-        s.Reset()
-        t.Fatal(err)
-    }
-//     fmt.Printf("Sent: %s\n", data)
+	// Send over connection
+	_, err = s.Write(outgoing)
+	if err != nil {
+		s.Reset()
+		t.Fatal(err)
+	}
+	//     fmt.Printf("Sent: %s\n", data)
 
 	time.Sleep(2 * time.Second)
 

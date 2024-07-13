@@ -16,12 +16,6 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -36,45 +30,27 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		log.Println("Working with nip-23 handler.", event.Kind)
-
 		// Validate the event kind.
-		if event.Kind != 30023 && event.Kind != 30024 {
-			write("NOTICE", "Unsupported event kind for this handler.")
+		if env.Event.Kind != 30023 && env.Event.Kind != 30024 {
+			write("OK", env.Event.ID, false, "Unsupported event kind for this handler.")
 			return
 		}
 
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, -1)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Validate Markdown content.
-		if !validateMarkdownContent(event.Content) {
+		if !validateMarkdownContent(env.Event.Content) {
 			write("NOTICE", "Invalid Markdown content.")
 			return
 		}
 
 		// Extract 'd' tag value for identifying the article or draft.
 		dTagValue := ""
-		for _, tag := range event.Tags {
+		for _, tag := range env.Event.Tags {
 			if tag[0] == "d" {
 				dTagValue = tag[1]
 				break
@@ -88,7 +64,7 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Create a filter to check for existing events with the same 'd' tag and author.
 		filter := nostr.Filter{
-			Authors: []string{event.PubKey},
+			Authors: []string{env.Event.PubKey},
 			Tags:    map[string][]string{"d": {dTagValue}},
 		}
 		existingEvents, err := store.QueryEvents(filter)
@@ -105,14 +81,14 @@ func BuildKind30023Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			}
 		}
 
-		// Store the new event.
-		if err := store.StoreEvent(&event); err != nil {
-			write("OK", event.ID, false, "Failed to store the event.")
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		// Successfully processed event.
-		write("OK", event.ID, true, "Event processed successfully.")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler
