@@ -9,6 +9,7 @@ require (
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.6.0
 	github.com/gofiber/contrib/websocket v1.3.1
+	github.com/illuzen/go-negentropy v0.0.0-20240505133407-a298222fce41
 	github.com/json-iterator/go v1.1.12
 	github.com/libp2p/go-libp2p v0.35.0
 	github.com/nbd-wtf/go-nostr v0.32.0
