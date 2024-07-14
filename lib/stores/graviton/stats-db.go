@@ -63,15 +63,17 @@ func storeInGorm(event *nostr.Event) {
 
 	var relaySettings types.RelaySettings
 	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-		log.Fatalf("Error unmarshaling relay settings: %v", err)
+		log.Printf("Error unmarshaling relay settings: %v", err)
+		return
 	}
 
 	if event.Kind == 0 {
 		// Handle user profile creation or update
 		var contentData map[string]interface{}
 		if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
-			log.Printf("Error unmarshaling event content: %v", err)
-			return
+			log.Println("No lightnigAddr or dhtKey keys in event content, proceeding with default values.")
+			// Proceed with default values for lightningAddr and dhtKey
+			contentData = map[string]interface{}{}
 		}
 
 		npubKey := event.PubKey
@@ -110,9 +112,6 @@ func storeInGorm(event *nostr.Event) {
 		gormDB.Create(&kind)
 		return
 	}
-
-	// Add cases for photos, videos, and gitNestr
-	fmt.Printf("Unhandled kind: %d\n", event.Kind)
 }
 
 func upsertUserProfile(db *gorm.DB, npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error {

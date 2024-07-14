@@ -16,18 +16,9 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Working with repost handler.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		data, err := read()
 		if err != nil {
-			log.Printf("Error reading from stream: %v", err)
+			write("NOTICE", "Error reading from stream.")
 			return
 		}
 
@@ -38,45 +29,14 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Validate event kind for repost (kind 6 or kind 16 for generic repost)
-		if event.Kind != 6 && event.Kind != 16 {
-			log.Printf("Received event of kind %d in repost handler, ignoring.", event.Kind)
-			return
-		}
-
-		// Perform time check (Example: Allow only events within the last 30 days)
-		isValid, errMsg := lib_nostr.TimeCheck(event.CreatedAt.Time().Unix())
-		if !isValid {
-			// If the timestamp is invalid, respond with an error message and return early
-			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 6)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Validate 'e' tag for reposted event ID and optionally 'p' tag for public key
-		repostedEventID, repostedEventFound := getTagValue(event.Tags, "e", "p")
+		repostedEventID, repostedEventFound := getTagValue(env.Event.Tags, "e", "p")
 
 		if !repostedEventFound {
 			log.Println("Reposted event ID not found in 'e' or 'p' tag.")
@@ -91,19 +51,18 @@ func BuildKind6Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		if err != nil || len(repostedEvents) == 0 {
 			errMsg := fmt.Sprintf("Reposted event %s not found", repostedEventID)
 			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
+			write("OK", env.Event.ID, false, errMsg)
 			return
 		}
 
-		// Store the repost event
-		if err := store.StoreEvent(&event); err != nil {
-			errMsg := fmt.Sprintf("Error storing repost event %s: %v", event.ID, err)
-			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
-		} else {
-			log.Printf("Successfully stored repost event %s.", event.ID)
-			write("OK", event.ID, true, "Reposted event stored successfully.")
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
+			return
 		}
+
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

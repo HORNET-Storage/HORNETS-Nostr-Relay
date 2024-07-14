@@ -16,14 +16,6 @@ import (
 func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
-		log.Println("Handling follow sets (kind 30000) events.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
 
 		data, err := read()
 		if err != nil {
@@ -38,41 +30,20 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		if event.Kind != 30000 {
-			write("NOTICE", fmt.Sprintf("Received non-follow-sets event (kind %d) on follow-sets handler, ignoring.", event.Kind))
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 30000)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
-		if errMsg := validateFollowSetTags(event.Tags); errMsg != "" {
+		if errMsg := validateFollowSetTags(env.Event.Tags); errMsg != "" {
 			write("NOTICE", errMsg)
 			return
 		}
 
 		// Query and delete existing kind 30000 events for the pubkey
 		filter := nostr.Filter{
-			Authors: []string{event.PubKey},
+			Authors: []string{env.Event.PubKey},
 			Kinds:   []int{30000},
 		}
 		existingEvents, err := store.QueryEvents(filter)
@@ -89,12 +60,14 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			}
 		}
 
-		if err := store.StoreEvent(&event); err != nil {
-			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

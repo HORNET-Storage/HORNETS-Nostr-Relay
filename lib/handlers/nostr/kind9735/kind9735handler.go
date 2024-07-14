@@ -1,8 +1,6 @@
 package kind9735
 
 import (
-	"fmt"
-	"log"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -18,15 +16,6 @@ func BuildKind9735Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Working with zap receipt event handler.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
-
 		// Read data from the stream.
 		data, err := read()
 		if err != nil {
@@ -41,51 +30,20 @@ func BuildKind9735Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Check if the event is of kind 9735.
-		if event.Kind != 9735 {
-			log.Printf("Received non-kind-9735 event on kind-9735 handler, ignoring.")
-			return
-		}
-
-		log.Printf("Processing zap receipt event: %s", event.ID)
-
-		// Perform standard time check.
-		isValid, errMsg := timeCheck(event.CreatedAt.Time().Unix())
-		if !isValid {
-			log.Println(errMsg)
-			write("OK", event.ID, false, errMsg)
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 9735)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
-		// Store the event in the provided storage system.
-		if err := store.StoreEvent(&event); err != nil {
-			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

@@ -1,9 +1,6 @@
 package kind1984
 
 import (
-	"fmt"
-	"log"
-
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -16,15 +13,6 @@ import (
 func BuildKind1984Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
-
-		log.Println("Handling report (kind 1984) events.")
-
-		// Load and check relay settings
-		settings, err := lib_nostr.LoadRelaySettings()
-		if err != nil {
-			log.Fatalf("Failed to load relay settings: %v", err)
-			return
-		}
 
 		// Read data from the stream.
 		data, err := read()
@@ -40,47 +28,26 @@ func BuildKind1984Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		event := env.Event
-
-		blocked := lib_nostr.IsTheKindAllowed(event.Kind, settings)
-
-		// Check if the event kind is allowed
-		if !blocked {
-			log.Printf("Kind %d not handled by this relay", event.Kind)
-			write("NOTICE", "This kind is not handled by the relay.")
-			return
-		}
-
-		// Validate that the event kind is specifically for report events (kind 1984).
-		if event.Kind != 1984 {
-			write("NOTICE", fmt.Sprintf("Received non-report event (kind %d) on report handler, ignoring.", event.Kind))
-			return
-		}
-
-		success, err := event.CheckSignature()
-		if err != nil {
-			write("OK", event.ID, false, "Failed to check signature")
-			return
-		}
-
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 1984)
 		if !success {
-			write("OK", event.ID, false, "Signature failed to verify")
 			return
 		}
 
 		// Validate the report event's tags.
-		if errMsg := validateReportEventTags(event.Tags); errMsg != "" {
-			write("OK", event.ID, false, errMsg)
+		if errMsg := validateReportEventTags(env.Event.Tags); errMsg != "" {
+			write("OK", env.Event.ID, false, errMsg)
 			return
 		}
 
-		// Store the new report event
-		if err := store.StoreEvent(&event); err != nil {
-			write("OK", event.ID, false, fmt.Sprintf("Error storing event: %v", err))
+		// Store the new event
+		if err := store.StoreEvent(&env.Event); err != nil {
+			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		write("OK", event.ID, true, "")
+		// Successfully processed event
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler
