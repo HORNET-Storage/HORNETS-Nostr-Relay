@@ -29,8 +29,8 @@ type GravitonStore struct {
 	CacheConfig map[string]string
 }
 
-func (store *GravitonStore) InitStore(args ...interface{}) error {
-	db, err := graviton.NewDiskStore("gravitondb")
+func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
+	db, err := graviton.NewDiskStore(basepath)
 	if err != nil {
 		return err
 	}

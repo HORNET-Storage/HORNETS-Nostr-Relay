@@ -93,7 +93,7 @@ func main() {
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
-	store.InitStore(queryCache)
+	store.InitStore("gravitondb", queryCache)
 
 	// Stream Handlers
 	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {

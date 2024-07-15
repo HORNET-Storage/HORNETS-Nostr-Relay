@@ -1,4 +1,4 @@
-package main
+package sync
 
 import (
 	"bufio"
@@ -23,7 +23,7 @@ func split(s string, delim rune) []string {
 	})
 }
 
-func setupNegentropyHandler(h host.Host) {
+func SetupNegentropyHandler(h host.Host) {
 	h.SetStreamHandler(NegentropyProtocol, handleIncomingNegentropyStream)
 }
 
@@ -48,7 +48,7 @@ func handleIncomingNegentropyStream(stream network.Stream) {
 
 func performNegentropySync(stream network.Stream, initiator bool) error {
 	store := &stores_graviton.GravitonStore{}
-	store.InitStore()
+	store.InitStore("gravitondb")
 	filter := nostr.Filter{}
 	events, err := store.QueryEvents(filter)
 	if err != nil {
