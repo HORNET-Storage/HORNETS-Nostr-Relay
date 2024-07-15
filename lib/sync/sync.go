@@ -23,19 +23,23 @@ func split(s string, delim rune) []string {
 	})
 }
 
-func SetupNegentropyHandler(h host.Host) {
-	h.SetStreamHandler(NegentropyProtocol, handleIncomingNegentropyStream)
+func SetupNegentropyHandler(h host.Host, db *stores_graviton.GravitonStore) {
+	handler := func(stream network.Stream) {
+		handleIncomingNegentropyStream(stream, h, db)
+	}
+	h.SetStreamHandler(NegentropyProtocol, handler)
 }
 
-func handleIncomingNegentropyStream(stream network.Stream) {
+func handleIncomingNegentropyStream(stream network.Stream, h host.Host, db *stores_graviton.GravitonStore) {
 	defer stream.Close()
 
 	// Log the incoming connection (optional)
+	localPeer := stream.Conn().LocalPeer()
 	remotePeer := stream.Conn().RemotePeer()
-	log.Printf("Received negentropy sync request from %s", remotePeer)
+	log.Printf("Received negentropy sync request to %s from %s", localPeer, remotePeer)
 
 	// Perform the negentropy sync
-	err := performNegentropySync(stream, false)
+	err := PerformNegentropySync(stream, h, db, false)
 	if err != nil {
 		log.Printf("Error during negentropy sync with %s: %v", remotePeer, err)
 		// Optionally, you might want to send an error message to the peer
@@ -46,19 +50,19 @@ func handleIncomingNegentropyStream(stream network.Stream) {
 	log.Printf("Successfully completed negentropy sync with %s", remotePeer)
 }
 
-func performNegentropySync(stream network.Stream, initiator bool) error {
-	store := &stores_graviton.GravitonStore{}
-	store.InitStore("gravitondb")
+func PerformNegentropySync(stream network.Stream, h host.Host, store *stores_graviton.GravitonStore, initiator bool) error {
+	log.Printf("Performing negentropy on %s", h.ID())
 	filter := nostr.Filter{}
 	events, err := store.QueryEvents(filter)
 	if err != nil {
 		return err
 	}
+	log.Printf("%s has %d events", h.ID(), len(events))
 
 	// vector conforms to Storage interface, fill it with events
 	vector := negentropy.NewVector()
 	for _, event := range events {
-		err = vector.Insert(uint64(event.CreatedAt), event.Serialize())
+		err = vector.Insert(uint64(event.CreatedAt), event.Serialize()[:32])
 		if err != nil {
 			return err
 		}
@@ -68,6 +72,7 @@ func performNegentropySync(stream network.Stream, initiator bool) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("%s sealed the events", h.ID())
 
 	frameSizeLimit := 4096
 	neg, err := negentropy.NewNegentropy(vector, uint64(frameSizeLimit))
@@ -76,10 +81,11 @@ func performNegentropySync(stream network.Stream, initiator bool) error {
 	}
 
 	if initiator {
-		version, err := neg.Initiate()
-		log.Printf(" %s", version)
+		initialMsg, err := neg.Initiate()
+		log.Printf("%s is initiating with version %s", h.ID(), initialMsg[0])
 
-		message := fmt.Sprintf("msg,%x\n", version)
+		message := fmt.Sprintf("msg,%x\n", initialMsg)
+		log.Printf("%s sent: %s", h.ID(), message)
 
 		_, err = io.WriteString(stream, message)
 		if err != nil {
@@ -98,6 +104,8 @@ func performNegentropySync(stream network.Stream, initiator bool) error {
 			return fmt.Errorf("error reading from stream: %w", err)
 		}
 		response = strings.TrimSpace(response)
+		log.Printf("%s received: %s", h.ID(), response)
+
 		items := split(response, ',')
 
 		switch items[0] {
@@ -175,7 +183,10 @@ func performNegentropySync(stream network.Stream, initiator bool) error {
 					return err
 				}
 				event, err := DeserializeEvent(eventBytes.ID)
-				store.StoreEvent(event)
+				err = store.StoreEvent(event)
+				if err != nil {
+					return err
+				}
 			}
 		default:
 			panic("unknown cmd: " + items[0])
