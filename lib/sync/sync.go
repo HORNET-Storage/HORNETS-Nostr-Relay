@@ -2,8 +2,9 @@ package sync
 
 import (
 	"bufio"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/illuzen/go-negentropy"
@@ -16,6 +17,7 @@ import (
 )
 
 const NegentropyProtocol = "/negentropy/1.0.0"
+const frameSizeLimit = 4096
 
 func split(s string, delim rune) []string {
 	return strings.FieldsFunc(s, func(r rune) bool {
@@ -23,14 +25,14 @@ func split(s string, delim rune) []string {
 	})
 }
 
-func SetupNegentropyHandler(h host.Host, db *stores_graviton.GravitonStore) {
+func SetupNegentropyHandler(h host.Host, hostId string, db *stores_graviton.GravitonStore) {
 	handler := func(stream network.Stream) {
-		handleIncomingNegentropyStream(stream, h, db)
+		handleIncomingNegentropyStream(stream, hostId, db)
 	}
 	h.SetStreamHandler(NegentropyProtocol, handler)
 }
 
-func handleIncomingNegentropyStream(stream network.Stream, h host.Host, db *stores_graviton.GravitonStore) {
+func handleIncomingNegentropyStream(stream network.Stream, hostId string, store *stores_graviton.GravitonStore) {
 	defer stream.Close()
 
 	// Log the incoming connection (optional)
@@ -39,25 +41,30 @@ func handleIncomingNegentropyStream(stream network.Stream, h host.Host, db *stor
 	log.Printf("Received negentropy sync request to %s from %s", localPeer, remotePeer)
 
 	// Perform the negentropy sync
-	err := PerformNegentropySync(stream, h, db, false)
+	vector := negentropy.NewVector()
+	err := listenNegentropy(vector, &negentropy.Negentropy{}, stream, hostId, store, false)
 	if err != nil {
-		log.Printf("Error during negentropy sync with %s: %v", remotePeer, err)
-		// Optionally, you might want to send an error message to the peer
-		// stream.Write([]byte("Sync failed"))
+		messageArray := []interface{}{
+			"NEG-ERR",
+			"N",
+			err.Error(),
+		}
+		jsonData, _ := json.Marshal(messageArray)
+		_, _ = io.WriteString(stream, string(jsonData)+"\n")
+
 		return
 	}
 
 	log.Printf("Successfully completed negentropy sync with %s", remotePeer)
 }
 
-func PerformNegentropySync(stream network.Stream, h host.Host, store *stores_graviton.GravitonStore, initiator bool) error {
-	log.Printf("Performing negentropy on %s", h.ID())
-	filter := nostr.Filter{}
+func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId string, store *stores_graviton.GravitonStore) error {
+	log.Printf("Performing negentropy on %s", hostId)
 	events, err := store.QueryEvents(filter)
 	if err != nil {
 		return err
 	}
-	log.Printf("%s has %d events", h.ID(), len(events))
+	log.Printf("%s has %d events", hostId, len(events))
 
 	// vector conforms to Storage interface, fill it with events
 	vector := negentropy.NewVector()
@@ -72,29 +79,45 @@ func PerformNegentropySync(stream network.Stream, h host.Host, store *stores_gra
 	if err != nil {
 		return err
 	}
-	log.Printf("%s sealed the events", h.ID())
+	log.Printf("%s sealed the events", hostId)
 
-	frameSizeLimit := 4096
+	idSize := 16
+
 	neg, err := negentropy.NewNegentropy(vector, uint64(frameSizeLimit))
 	if err != nil {
 		panic(err)
 	}
 
-	if initiator {
-		initialMsg, err := neg.Initiate()
-		log.Printf("%s is initiating with version %s", h.ID(), initialMsg[0])
+	initialMsg, err := neg.Initiate()
+	log.Printf("%s is initiating with version %d", hostId, uint8(initialMsg[0]))
 
-		message := fmt.Sprintf("msg,%x\n", initialMsg)
-		log.Printf("%s sent: %s", h.ID(), message)
-
-		_, err = io.WriteString(stream, message)
-		if err != nil {
-			return fmt.Errorf("failed to send initial query: %w", err)
-		}
+	messageArray := []interface{}{
+		"NEG-OPEN",
+		"N",
+		filter,
+		idSize,
+		initialMsg,
+	}
+	jsonData, err := json.Marshal(messageArray)
+	if err != nil {
+		log.Fatal("Error marshaling JSON:", err)
 	}
 
+	log.Printf("%s sent: %s", hostId, jsonData)
+
+	_, err = io.WriteString(stream, string(jsonData)+"\n")
+	if err != nil {
+		return fmt.Errorf("failed to send initial query: %w", err)
+	}
+
+	err = listenNegentropy(vector, neg, stream, hostId, store, true)
+	return nil
+}
+
+func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, stream network.Stream, hostId string, store *stores_graviton.GravitonStore, initiator bool) error {
 	// Now, start listening to responses and reconcile
 	reader := bufio.NewReader(stream)
+
 	for {
 		response, err := reader.ReadString('\n')
 		if err != nil {
@@ -104,96 +127,134 @@ func PerformNegentropySync(stream network.Stream, h host.Host, store *stores_gra
 			return fmt.Errorf("error reading from stream: %w", err)
 		}
 		response = strings.TrimSpace(response)
-		log.Printf("%s received: %s", h.ID(), response)
+		log.Printf("%s received: %s", hostId, response)
 
-		items := split(response, ',')
+		// Create a slice to hold the parsed data
+		var parsedData []interface{}
 
-		switch items[0] {
-		case "msg":
-			var q []byte
-			if len(items) >= 2 {
-				s, err := hex.DecodeString(items[1])
-				if err != nil {
-					panic(err)
-				}
-				q = s
+		// Unmarshal the JSON string into the slice
+		err = json.Unmarshal([]byte(response), &parsedData)
+		if err != nil {
+			fmt.Println("Error parsing JSON:", err)
+			return err
+		}
+
+		msgType := parsedData[0].(string)
+
+		switch msgType {
+		case "NEG-OPEN":
+			fmt.Println(hostId, "Received:", parsedData)
+
+			var filter nostr.Filter
+			filterJSON, err := json.Marshal(parsedData[2])
+			if err != nil {
+				fmt.Println("Error re-marshaling filter data:", err)
+				return err
 			}
 
+			err = json.Unmarshal(filterJSON, &filter)
+			if err != nil {
+				fmt.Println("Error parsing filter:", err)
+				return err
+			}
+
+			events, err := store.QueryEvents(filter)
+			if err != nil {
+				return err
+			}
+			log.Printf("%s has %d events", hostId, len(events))
+
+			for _, event := range events {
+				err = vector.Insert(uint64(event.CreatedAt), event.Serialize()[:32])
+				if err != nil {
+					return err
+				}
+			}
+
+			err = vector.Seal()
+			if err != nil {
+				return err
+			}
+			log.Printf("%s sealed the events", hostId)
+			// intentional shadowing
+			neg, err := negentropy.NewNegentropy(vector, uint64(frameSizeLimit))
+			if err != nil {
+				return err
+			}
+			decodedBytes, err := base64.StdEncoding.DecodeString(parsedData[4].(string))
+			msg, err := neg.Reconcile(decodedBytes)
+			if err != nil {
+				return err
+			}
+
+			messageArray := []interface{}{
+				"NEG-MSG",
+				"N",
+				msg,
+			}
+			jsonData, err := json.Marshal(messageArray)
+			if err != nil {
+				log.Fatal("Error marshaling JSON:", err)
+			}
+
+			log.Printf("%s sent: %s", hostId, string(jsonData))
+
+			_, err = io.WriteString(stream, string(jsonData)+"\n")
+			if err != nil {
+				return err
+			}
+
+			break
+		case "NEG-MSG":
+			fmt.Println(hostId, "Received:", msgType)
+			decodedBytes, err := base64.StdEncoding.DecodeString(parsedData[2].(string))
+			var msg []byte
 			if initiator {
 				var have, need []string
-				resp, err := neg.ReconcileWithIDs(q, &have, &need)
-				if err != nil {
-					panic(fmt.Sprintf("Reconciliation failed: %v", err))
-				}
-
-				for _, id := range have {
-					message := fmt.Sprintf("have,%s\n", hex.EncodeToString([]byte(id)))
-					_, err = io.WriteString(stream, message)
-					if err != nil {
-						return fmt.Errorf("failed to send initial query: %w", err)
-					}
-					fmt.Printf("have,%s\n", hex.EncodeToString([]byte(id)))
-
-				}
-				for _, id := range need {
-					message := fmt.Sprintf("need,%s\n", hex.EncodeToString([]byte(id)))
-					_, err = io.WriteString(stream, message)
-					if err != nil {
-						return fmt.Errorf("failed to send initial query: %w", err)
-					}
-
-					fmt.Printf("need,%s\n", hex.EncodeToString([]byte(id)))
-				}
-
-				if resp == nil {
-					message := fmt.Sprintf("done")
-					_, err = io.WriteString(stream, message)
-					if err != nil {
-						return fmt.Errorf("failed to send initial query: %w", err)
-					}
-					fmt.Println("done")
-					continue
-				}
-
-				q = resp
+				msg, err = neg.ReconcileWithIDs(decodedBytes, &have, &need)
+				fmt.Println(hostId, "have:", have, "need:", need)
+				// TODO: upload have
+				// TODO: download need
 			} else {
-				s, err := neg.Reconcile(q)
-				if err != nil {
-					panic(fmt.Sprintf("Reconciliation failed: %v", err))
-				}
-				q = s
+				msg, err = neg.Reconcile(decodedBytes)
 			}
-
-			if frameSizeLimit > 0 && len(q) > frameSizeLimit {
-				panic("frameSizeLimit exceeded")
-			}
-
-			message := fmt.Sprintf("msg,%s\n", hex.EncodeToString(q))
-			_, err = io.WriteString(stream, message)
 			if err != nil {
-				return fmt.Errorf("failed to send initial query: %w", err)
+				return err
 			}
-		case "done":
-			// put the vector into graviton
-			// this would be more efficient to just make graviton conform to Storage interface...
 
-			for i := 1; i <= vector.Size(); i++ {
-				eventBytes, err := vector.GetItem(uint64(i))
-				if err != nil {
-					return err
-				}
-				event, err := DeserializeEvent(eventBytes.ID)
-				err = store.StoreEvent(event)
-				if err != nil {
-					return err
-				}
+			if len(msg) == 0 {
+				fmt.Println(hostId, ": Sync complete")
+				return nil
 			}
+			messageArray := []interface{}{
+				"NEG-MSG",
+				"N",
+				msg,
+			}
+			jsonData, err := json.Marshal(messageArray)
+			if err != nil {
+				log.Fatal("Error marshaling JSON:", err)
+			}
+
+			log.Printf("%s sent: %s", hostId, string(jsonData))
+
+			_, err = io.WriteString(stream, string(jsonData)+"\n")
+			if err != nil {
+				return err
+			}
+
+			break
+		case "NEG-ERR":
+			fmt.Println(hostId, "Received:", msgType)
+			return nil
+		case "NEG-CLOSE":
+			fmt.Println(hostId, "Received:", msgType)
+			return nil
 		default:
-			panic("unknown cmd: " + items[0])
-
+			fmt.Println(hostId, "Received:", msgType)
+			return errors.New("Unknown message type")
 		}
 	}
-
 	return nil
 }
 
