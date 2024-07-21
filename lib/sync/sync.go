@@ -3,6 +3,7 @@ package sync
 import (
 	"bufio"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +18,8 @@ import (
 )
 
 const NegentropyProtocol = "/negentropy/1.0.0"
-const frameSizeLimit = 4096
+const FrameSizeLimit = 4096
+const IdSize = 32
 
 func split(s string, delim rune) []string {
 	return strings.FieldsFunc(s, func(r rune) bool {
@@ -58,6 +60,28 @@ func handleIncomingNegentropyStream(stream network.Stream, hostId string, store 
 	log.Printf("Successfully completed negentropy sync with %s", remotePeer)
 }
 
+func LoadVector(events []*nostr.Event) (*negentropy.Vector, error) {
+	vector := negentropy.NewVector()
+	for _, event := range events {
+		id, err := hex.DecodeString(event.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		err = vector.Insert(uint64(event.CreatedAt), id[:IdSize])
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err := vector.Seal()
+	if err != nil {
+		return nil, err
+	}
+
+	return vector, nil
+}
+
 func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId string, store *stores_graviton.GravitonStore) error {
 	log.Printf("Performing negentropy on %s", hostId)
 	events, err := store.QueryEvents(filter)
@@ -67,23 +91,14 @@ func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId s
 	log.Printf("%s has %d events", hostId, len(events))
 
 	// vector conforms to Storage interface, fill it with events
-	vector := negentropy.NewVector()
-	for _, event := range events {
-		err = vector.Insert(uint64(event.CreatedAt), event.Serialize()[:32])
-		if err != nil {
-			return err
-		}
-	}
-
-	err = vector.Seal()
+	vector, err := LoadVector(events)
 	if err != nil {
 		return err
 	}
+
 	log.Printf("%s sealed the events", hostId)
 
-	idSize := 16
-
-	neg, err := negentropy.NewNegentropy(vector, uint64(frameSizeLimit))
+	neg, err := negentropy.NewNegentropy(vector, uint64(FrameSizeLimit))
 	if err != nil {
 		panic(err)
 	}
@@ -95,7 +110,7 @@ func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId s
 		"NEG-OPEN",
 		"N",
 		filter,
-		idSize,
+		IdSize,
 		initialMsg,
 	}
 	jsonData, err := json.Marshal(messageArray)
@@ -140,11 +155,10 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 		}
 
 		msgType := parsedData[0].(string)
+		fmt.Println(hostId, "Received:", msgType)
 
 		switch msgType {
 		case "NEG-OPEN":
-			fmt.Println(hostId, "Received:", parsedData)
-
 			var filter nostr.Filter
 			filterJSON, err := json.Marshal(parsedData[2])
 			if err != nil {
@@ -164,20 +178,14 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 			}
 			log.Printf("%s has %d events", hostId, len(events))
 
-			for _, event := range events {
-				err = vector.Insert(uint64(event.CreatedAt), event.Serialize()[:32])
-				if err != nil {
-					return err
-				}
-			}
-
-			err = vector.Seal()
+			vector, err := LoadVector(events)
 			if err != nil {
 				return err
 			}
+
 			log.Printf("%s sealed the events", hostId)
 			// intentional shadowing
-			neg, err := negentropy.NewNegentropy(vector, uint64(frameSizeLimit))
+			neg, err := negentropy.NewNegentropy(vector, uint64(FrameSizeLimit))
 			if err != nil {
 				return err
 			}
@@ -206,14 +214,36 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 
 			break
 		case "NEG-MSG":
-			fmt.Println(hostId, "Received:", msgType)
 			decodedBytes, err := base64.StdEncoding.DecodeString(parsedData[2].(string))
 			var msg []byte
 			if initiator {
 				var have, need []string
 				msg, err = neg.ReconcileWithIDs(decodedBytes, &have, &need)
-				fmt.Println(hostId, "have:", have, "need:", need)
-				// TODO: upload have
+				if err != nil {
+					return err
+				}
+				fmt.Println(len(have), len(need))
+				//fmt.Println(hostId, "have:", have, "need:", need)
+				hexHave := make([]string, len(have))
+
+				// Convert each string to hex
+				for i, s := range have {
+					hexHave[i] = hex.EncodeToString([]byte(s))
+				}
+
+				fmt.Println(hexHave)
+
+				filter := nostr.Filter{
+					IDs: hexHave,
+				}
+
+				haveEvents, err := store.QueryEvents(filter)
+				if err != nil {
+					return err
+				}
+				fmt.Println(haveEvents)
+				// TODO: upload
+
 				// TODO: download need
 			} else {
 				msg, err = neg.Reconcile(decodedBytes)
@@ -245,13 +275,10 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 
 			break
 		case "NEG-ERR":
-			fmt.Println(hostId, "Received:", msgType)
 			return nil
 		case "NEG-CLOSE":
-			fmt.Println(hostId, "Received:", msgType)
 			return nil
 		default:
-			fmt.Println(hostId, "Received:", msgType)
 			return errors.New("Unknown message type")
 		}
 	}
