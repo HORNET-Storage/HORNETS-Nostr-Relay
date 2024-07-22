@@ -2,7 +2,6 @@ package sync
 
 import (
 	"bufio"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -46,14 +45,7 @@ func handleIncomingNegentropyStream(stream network.Stream, hostId string, store 
 	vector := negentropy.NewVector()
 	err := listenNegentropy(vector, &negentropy.Negentropy{}, stream, hostId, store, false)
 	if err != nil {
-		messageArray := []interface{}{
-			"NEG-ERR",
-			"N",
-			err.Error(),
-		}
-		jsonData, _ := json.Marshal(messageArray)
-		_, _ = io.WriteString(stream, string(jsonData)+"\n")
-
+		err = SendNegentropyMessage(hostId, stream, "NEG-ERR", nostr.Filter{}, []byte{}, err.Error(), []string{}, []*nostr.Event{})
 		return
 	}
 
@@ -104,25 +96,11 @@ func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId s
 	}
 
 	initialMsg, err := neg.Initiate()
-	log.Printf("%s is initiating with version %d", hostId, uint8(initialMsg[0]))
+	log.Printf("%s is initiating with version %d", hostId, initialMsg[0])
 
-	messageArray := []interface{}{
-		"NEG-OPEN",
-		"N",
-		filter,
-		IdSize,
-		initialMsg,
-	}
-	jsonData, err := json.Marshal(messageArray)
+	err = SendNegentropyMessage(hostId, stream, "NEG-OPEN", filter, initialMsg, "", []string{}, []*nostr.Event{})
 	if err != nil {
-		log.Fatal("Error marshaling JSON:", err)
-	}
-
-	log.Printf("%s sent: %s", hostId, jsonData)
-
-	_, err = io.WriteString(stream, string(jsonData)+"\n")
-	if err != nil {
-		return fmt.Errorf("failed to send initial query: %w", err)
+		return err
 	}
 
 	err = listenNegentropy(vector, neg, stream, hostId, store, true)
@@ -132,6 +110,7 @@ func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId s
 func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, stream network.Stream, hostId string, store *stores_graviton.GravitonStore, initiator bool) error {
 	// Now, start listening to responses and reconcile
 	reader := bufio.NewReader(stream)
+	final := false
 
 	for {
 		response, err := reader.ReadString('\n')
@@ -142,33 +121,28 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 			return fmt.Errorf("error reading from stream: %w", err)
 		}
 		response = strings.TrimSpace(response)
-		log.Printf("%s received: %s", hostId, response)
+		//log.Printf("%s received: %s", hostId, response)
 
 		// Create a slice to hold the parsed data
-		var parsedData []interface{}
+		var parsedData []string
 
 		// Unmarshal the JSON string into the slice
 		err = json.Unmarshal([]byte(response), &parsedData)
 		if err != nil {
-			fmt.Println("Error parsing JSON:", err)
+			log.Println("Error parsing JSON:", err)
 			return err
 		}
 
-		msgType := parsedData[0].(string)
-		fmt.Println(hostId, "Received:", msgType)
+		msgType := parsedData[0]
+		log.Println(hostId, "Received:", msgType)
 
 		switch msgType {
 		case "NEG-OPEN":
 			var filter nostr.Filter
-			filterJSON, err := json.Marshal(parsedData[2])
-			if err != nil {
-				fmt.Println("Error re-marshaling filter data:", err)
-				return err
-			}
 
-			err = json.Unmarshal(filterJSON, &filter)
+			err := json.Unmarshal([]byte(parsedData[2]), &filter)
 			if err != nil {
-				fmt.Println("Error parsing filter:", err)
+				log.Println("Error unmarshaling filter data:", err)
 				return err
 			}
 
@@ -189,41 +163,41 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 			if err != nil {
 				return err
 			}
-			decodedBytes, err := base64.StdEncoding.DecodeString(parsedData[4].(string))
+			decodedBytes, err := hex.DecodeString(parsedData[4])
 			msg, err := neg.Reconcile(decodedBytes)
 			if err != nil {
 				return err
 			}
 
-			messageArray := []interface{}{
-				"NEG-MSG",
-				"N",
-				msg,
-			}
-			jsonData, err := json.Marshal(messageArray)
-			if err != nil {
-				log.Fatal("Error marshaling JSON:", err)
-			}
-
-			log.Printf("%s sent: %s", hostId, string(jsonData))
-
-			_, err = io.WriteString(stream, string(jsonData)+"\n")
+			err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []*nostr.Event{})
 			if err != nil {
 				return err
 			}
-
 			break
 		case "NEG-MSG":
-			decodedBytes, err := base64.StdEncoding.DecodeString(parsedData[2].(string))
+			decodedBytes, err := hex.DecodeString(parsedData[2])
 			var msg []byte
+			var have, need []string
+
 			if initiator {
-				var have, need []string
 				msg, err = neg.ReconcileWithIDs(decodedBytes, &have, &need)
 				if err != nil {
 					return err
 				}
-				fmt.Println(len(have), len(need))
-				//fmt.Println(hostId, "have:", have, "need:", need)
+				log.Println(len(have), len(need))
+				//log.Println(hostId, "have:", have, "need:", need)
+
+				// download need
+				needIds := make([]string, len(need))
+				for i, s := range need {
+					needIds[i] = hex.EncodeToString([]byte(s))
+				}
+				err = SendNegentropyMessage(hostId, stream, "NEG-NEED", nostr.Filter{}, []byte{}, "", needIds, []*nostr.Event{})
+				if err != nil {
+					return err
+				}
+
+				// upload have
 				hexHave := make([]string, len(have))
 
 				// Convert each string to hex
@@ -231,7 +205,7 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 					hexHave[i] = hex.EncodeToString([]byte(s))
 				}
 
-				fmt.Println(hexHave)
+				log.Println(hexHave)
 
 				filter := nostr.Filter{
 					IDs: hexHave,
@@ -241,10 +215,14 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 				if err != nil {
 					return err
 				}
-				fmt.Println(haveEvents)
-				// TODO: upload
+				//log.Println(haveEvents)
 
-				// TODO: download need
+				// upload
+				err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveEvents)
+				if err != nil {
+					return err
+				}
+
 			} else {
 				msg, err = neg.Reconcile(decodedBytes)
 			}
@@ -253,27 +231,66 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 			}
 
 			if len(msg) == 0 {
-				fmt.Println(hostId, ": Sync complete")
-				return nil
-			}
-			messageArray := []interface{}{
-				"NEG-MSG",
-				"N",
-				msg,
-			}
-			jsonData, err := json.Marshal(messageArray)
-			if err != nil {
-				log.Fatal("Error marshaling JSON:", err)
+				log.Println(hostId, ": Sync complete")
+				if len(need) == 0 {
+					// we are done
+					err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []*nostr.Event{})
+					if err != nil {
+						return err
+					}
+					return nil
+				} else {
+					// we are waiting for final needs
+					final = true
+				}
 			}
 
-			log.Printf("%s sent: %s", hostId, string(jsonData))
-
-			_, err = io.WriteString(stream, string(jsonData)+"\n")
+			err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []*nostr.Event{})
 			if err != nil {
 				return err
 			}
-
 			break
+		case "NEG-HAVE":
+			var newEvents []*nostr.Event
+			err = json.Unmarshal([]byte(parsedData[2]), &newEvents)
+			if err != nil {
+				return err
+			}
+			for _, event := range newEvents {
+				err := store.StoreEvent(event)
+				if err != nil {
+					return err
+				}
+			}
+			if final {
+				err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []*nostr.Event{})
+				if err != nil {
+					return err
+				}
+				return nil
+			}
+		case "NEG-NEED":
+			var needIds []string
+
+			err = json.Unmarshal([]byte(parsedData[2]), needIds)
+
+			filter := nostr.Filter{
+				IDs: needIds,
+			}
+
+			haveEvents, err := store.QueryEvents(filter)
+			if err != nil {
+				return err
+			}
+			//log.Println(haveEvents)
+
+			// upload
+			err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveEvents)
+			if err != nil {
+				log.Println(hostId, "Error uploading", err)
+				return err
+			}
+
 		case "NEG-ERR":
 			return nil
 		case "NEG-CLOSE":
@@ -285,57 +302,69 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 	return nil
 }
 
-func DeserializeEvent(data []byte) (*nostr.Event, error) {
-	var arr []json.RawMessage
-	err := json.Unmarshal(data, &arr)
+func SendNegentropyMessage(
+	hostId string,
+	stream network.Stream,
+	msgType string,
+	filter nostr.Filter,
+	msgBytes []byte,
+	errMsg string,
+	needIds []string,
+	haveEvents []*nostr.Event) error {
+	var msgArray []string
+	msgArray = append(msgArray, msgType)
+	msgArray = append(msgArray, "N")
+	msgString := hex.EncodeToString(msgBytes)
+	switch msgType {
+	case "NEG-OPEN":
+		jsonFilter, err := json.Marshal(filter)
+		if err != nil {
+			return err
+		}
+		msgArray = append(msgArray, string(jsonFilter))
+		msgArray = append(msgArray, string(IdSize))
+		msgArray = append(msgArray, msgString)
+		break
+	case "NEG-MSG":
+		msgArray = append(msgArray, msgString)
+		break
+	case "NEG-ERR":
+		msgArray = append(msgArray, errMsg)
+		break
+	case "NEG-CLOSE":
+		break
+	case "NEG-HAVE":
+		// Marshal the array of events to JSON
+		jsonBytes, err := json.Marshal(haveEvents)
+		if err != nil {
+			log.Println("Error marshaling to JSON:", err)
+			return err
+		}
+		msgArray = append(msgArray, string(jsonBytes))
+	case "NEG-NEED":
+		jsonBytes, err := json.Marshal(needIds)
+		if err != nil {
+			log.Println("Error marshaling to JSON:", err)
+			return err
+		}
+		msgArray = append(msgArray, string(jsonBytes))
+
+	default:
+		return errors.New("unknown message type")
+	}
+
+	jsonData, err := json.Marshal(msgArray)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal event array: %w", err)
+		log.Fatal("Error marshaling JSON:", err)
 	}
 
-	if len(arr) != 6 {
-		return nil, fmt.Errorf("invalid event array length: expected 6, got %d", len(arr))
-	}
+	//log.Printf("%s sent: %s", hostId, string(jsonData))
+	log.Printf("%s sent: %s", hostId, msgType)
 
-	var pubkey string
-	err = json.Unmarshal(arr[1], &pubkey)
+	_, err = io.WriteString(stream, string(jsonData)+"\n")
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pubkey: %w", err)
+		return err
 	}
 
-	var createdAt int64
-	err = json.Unmarshal(arr[2], &createdAt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal created_at: %w", err)
-	}
-
-	var kind int
-	err = json.Unmarshal(arr[3], &kind)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal kind: %w", err)
-	}
-
-	var tags nostr.Tags
-	err = json.Unmarshal(arr[4], &tags)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
-	}
-
-	var content string
-	err = json.Unmarshal(arr[5], &content)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal content: %w", err)
-	}
-
-	event := &nostr.Event{
-		PubKey:    pubkey,
-		CreatedAt: nostr.Timestamp(createdAt),
-		Kind:      kind,
-		Tags:      tags,
-		Content:   content,
-	}
-
-	// Calculate the ID
-	event.ID = event.GetID()
-
-	return event, nil
+	return nil
 }

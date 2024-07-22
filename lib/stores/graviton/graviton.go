@@ -494,8 +494,12 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 	}
 
 	// Sort the events based on creation time, most recent first
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].CreatedAt > events[j].CreatedAt
+	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].CreatedAt != events[j].CreatedAt {
+			return events[i].CreatedAt > events[j].CreatedAt
+		} else {
+			return events[i].ID > events[j].ID
+		}
 	})
 
 	// Step 3: Apply the limit, if specified

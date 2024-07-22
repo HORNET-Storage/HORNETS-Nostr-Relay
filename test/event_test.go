@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -120,9 +122,34 @@ func selectRandomItems(arr []int, n int) []int {
 	return selected
 }
 
+func deleteFileIfExists(filename string) error {
+	// Check if the file exists
+	_, err := os.Stat(filename)
+	if err == nil {
+		// File exists, attempt to delete it
+		err := os.RemoveAll(filename)
+		if err != nil {
+			return fmt.Errorf("failed to delete file: %w", err)
+		}
+		fmt.Printf("File %s has been deleted\n", filename)
+	} else if os.IsNotExist(err) {
+		// File doesn't exist, no action needed
+		fmt.Printf("File %s does not exist\n", filename)
+		return nil
+	} else {
+		// Some other error occurred
+		return fmt.Errorf("error checking file: %w", err)
+	}
+	return nil
+}
+
 func setupStore(basepath string) *stores_graviton.GravitonStore {
 	store := &stores_graviton.GravitonStore{}
-	err := store.InitStore(basepath)
+	err := deleteFileIfExists(basepath)
+	if err != nil {
+		return nil
+	}
+	err = store.InitStore(basepath)
 	if err != nil {
 		return nil
 	}
@@ -148,14 +175,34 @@ func setupStore(basepath string) *stores_graviton.GravitonStore {
 	return store
 }
 
-func GenerateRandomEvents(numEvents int, store *stores_graviton.GravitonStore) error {
+func EventsEqual(a, b *nostr.Event) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Compare all fields
+	return a.ID == b.ID &&
+		a.PubKey == b.PubKey &&
+		a.CreatedAt == b.CreatedAt &&
+		a.Kind == b.Kind &&
+		a.Content == b.Content &&
+		a.Sig == b.Sig &&
+		reflect.DeepEqual(a.Tags, b.Tags)
+}
+
+func GenerateRandomEvents(numEvents int, stores []*stores_graviton.GravitonStore) error {
 	log.Printf("Generating %d random events and storing in graviton\n", numEvents)
 	for i := 0; i < numEvents; i++ {
 		event := GenerateRandomEvent()
 
-		err := store.StoreEvent(event)
-		if err != nil {
-			return err
+		for _, store := range stores {
+			err := store.StoreEvent(event)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -177,7 +224,7 @@ func TestEventGenerationStorageRetrieval(t *testing.T) {
 	store := setupStore("test")
 	numEvents := 1000
 
-	err := GenerateRandomEvents(numEvents, store)
+	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
@@ -232,7 +279,7 @@ func TestHostCommunication(t *testing.T) {
 
 	store1 := setupStore("test")
 	numEvents := 100
-	err := GenerateRandomEvents(numEvents, store1)
+	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
@@ -267,7 +314,7 @@ func TestHostCommunication(t *testing.T) {
 		}
 
 		if bytes.Equal(incoming, outgoing) {
-			fmt.Println("Data matches")
+			log.Println("Data matches")
 		} else {
 			fmt.Printf("Received: %d bytes\n", len(incoming))
 			fmt.Printf("Sent: %d bytes\n", len(outgoing))
@@ -301,8 +348,23 @@ func TestNegentropyEventSync(t *testing.T) {
 
 	store1 := setupStore("store1")
 	store2 := setupStore("store2")
-	numEvents := 10
-	err := GenerateRandomEvents(numEvents, store1)
+	numEvents := 1000
+	// give some events to both, so total events at end should be 3 * numEvents each
+	//err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1, store2})
+	//if err != nil {
+	//	t.Fatalf("Error generating events: %v", err)
+	//}
+	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1})
+	if err != nil {
+		t.Fatalf("Error generating events: %v", err)
+	}
+	err = GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store2})
+	if err != nil {
+		t.Fatalf("Error generating events: %v", err)
+	}
+	//e := GenerateRandomEvent()
+	//store1.StoreEvent(e)
+	//store2.StoreEvent(e)
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
@@ -341,7 +403,7 @@ func TestNegentropyEventSync(t *testing.T) {
 		return
 	}
 
-	time.Sleep(20 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	noFilter := nostr.Filter{}
 	events1, err := store1.QueryEvents(noFilter)
@@ -352,8 +414,8 @@ func TestNegentropyEventSync(t *testing.T) {
 
 	// events are already sorted by QueryEvents
 	for i, _ := range events1 {
-		if events1[i] != events2[i] {
-			t.Fatalf("Event mismatch at index %d", i)
+		if !EventsEqual(events1[i], events2[i]) {
+			t.Fatalf("Event mismatch at index %d: First event\n%s, Second event\n%s", i, events1[i], events2[i])
 		}
 	}
 
