@@ -447,7 +447,7 @@ func (store *GravitonStore) StoreDag(dag *types.DagData) error {
 }
 
 func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
-	log.Println("Processing filter:", filter)
+	//log.Println("Processing filter:", filter)
 	var events []*nostr.Event
 
 	snapshot, err := store.Database.LoadSnapshot(0)

@@ -350,11 +350,11 @@ func TestNegentropyEventSync(t *testing.T) {
 	store2 := setupStore("store2")
 	numEvents := 1000
 	// give some events to both, so total events at end should be 3 * numEvents each
-	//err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1, store2})
-	//if err != nil {
-	//	t.Fatalf("Error generating events: %v", err)
-	//}
-	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1})
+	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1, store2})
+	if err != nil {
+		t.Fatalf("Error generating events: %v", err)
+	}
+	err = GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}

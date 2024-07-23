@@ -159,7 +159,7 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 
 			log.Printf("%s sealed the events", hostId)
 			// intentional shadowing
-			neg, err := negentropy.NewNegentropy(vector, uint64(FrameSizeLimit))
+			neg, err = negentropy.NewNegentropy(vector, uint64(FrameSizeLimit))
 			if err != nil {
 				return err
 			}
@@ -180,50 +180,53 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 			var have, need []string
 
 			if initiator {
+				//log.Printf("%s neg addr: %x\n", hostId, &neg)
+				//log.Printf("%s vector addr: %x\n", hostId, &vector)
 				msg, err = neg.ReconcileWithIDs(decodedBytes, &have, &need)
 				if err != nil {
 					return err
 				}
-				log.Println(len(have), len(need))
+				log.Println(hostId, "have", len(have), "need", len(need))
 				//log.Println(hostId, "have:", have, "need:", need)
 
-				// download need
-				needIds := make([]string, len(need))
-				for i, s := range need {
-					needIds[i] = hex.EncodeToString([]byte(s))
-				}
-				err = SendNegentropyMessage(hostId, stream, "NEG-NEED", nostr.Filter{}, []byte{}, "", needIds, []*nostr.Event{})
-				if err != nil {
-					return err
-				}
-
 				// upload have
-				hexHave := make([]string, len(have))
+				if len(have) > 0 {
+					hexHave := make([]string, len(have))
+					for i, s := range have {
+						hexHave[i] = hex.EncodeToString([]byte(s))
+					}
 
-				// Convert each string to hex
-				for i, s := range have {
-					hexHave[i] = hex.EncodeToString([]byte(s))
+					filter := nostr.Filter{
+						IDs: hexHave,
+					}
+
+					haveEvents, err := store.QueryEvents(filter)
+					if err != nil {
+						return err
+					}
+					//log.Println(haveEvents)
+
+					// upload
+					err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveEvents)
+					if err != nil {
+						return err
+					}
 				}
 
-				log.Println(hexHave)
-
-				filter := nostr.Filter{
-					IDs: hexHave,
+				// download need if needed
+				if len(need) > 0 {
+					needIds := make([]string, len(need))
+					for i, s := range need {
+						needIds[i] = hex.EncodeToString([]byte(s))
+					}
+					err = SendNegentropyMessage(hostId, stream, "NEG-NEED", nostr.Filter{}, []byte{}, "", needIds, []*nostr.Event{})
+					if err != nil {
+						return err
+					}
 				}
-
-				haveEvents, err := store.QueryEvents(filter)
-				if err != nil {
-					return err
-				}
-				//log.Println(haveEvents)
-
-				// upload
-				err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveEvents)
-				if err != nil {
-					return err
-				}
-
 			} else {
+				//log.Printf("%s neg addr: %x\n", hostId, &neg)
+				//log.Printf("%s vector addr: %x\n", hostId, &vector)
 				msg, err = neg.Reconcile(decodedBytes)
 			}
 			if err != nil {
@@ -243,13 +246,15 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 					// we are waiting for final needs
 					final = true
 				}
-			}
-
-			err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []*nostr.Event{})
-			if err != nil {
-				return err
+			} else {
+				log.Println(hostId, ": Sync incomplete, drilling down")
+				err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []*nostr.Event{})
+				if err != nil {
+					return err
+				}
 			}
 			break
+
 		case "NEG-HAVE":
 			var newEvents []*nostr.Event
 			err = json.Unmarshal([]byte(parsedData[2]), &newEvents)
@@ -272,17 +277,18 @@ func listenNegentropy(vector *negentropy.Vector, neg *negentropy.Negentropy, str
 		case "NEG-NEED":
 			var needIds []string
 
-			err = json.Unmarshal([]byte(parsedData[2]), needIds)
+			err = json.Unmarshal([]byte(parsedData[2]), &needIds)
+			//log.Printf("other hos t sent %s\n", needIds)
 
 			filter := nostr.Filter{
 				IDs: needIds,
 			}
+			//log.Printf("other host needs %d\n", len(needIds))
 
 			haveEvents, err := store.QueryEvents(filter)
 			if err != nil {
 				return err
 			}
-			//log.Println(haveEvents)
 
 			// upload
 			err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveEvents)
