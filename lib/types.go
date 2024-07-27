@@ -1,9 +1,14 @@
 package lib
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"time"
 
+	"github.com/gofiber/contrib/websocket"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
@@ -18,6 +23,13 @@ type DagData struct {
 	PublicKey string
 	Signature string
 	Dag       merkle_dag.Dag
+}
+
+type Stream interface {
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	Close() error
+	Context() context.Context
 }
 
 type UploadMessage struct {
@@ -263,4 +275,68 @@ type JWTClaims struct {
 	UserID uint   `json:"user_id"`
 	Email  string `json:"email"`
 	jwt.RegisteredClaims
+}
+
+type Libp2pStream struct {
+	Stream network.Stream
+	Ctx    context.Context
+}
+
+func (ls *Libp2pStream) Read(msg []byte) (int, error) {
+	return ls.Stream.Read(msg)
+}
+
+func (ls *Libp2pStream) Write(msg []byte) (int, error) {
+	return ls.Stream.Write(msg)
+}
+
+func (ls *Libp2pStream) Close() error {
+	return ls.Stream.Close()
+}
+
+func (ls *Libp2pStream) Context() context.Context {
+	return ls.Ctx
+}
+
+type WebSocketStream struct {
+	Conn        *websocket.Conn
+	Ctx         context.Context
+	writeBuffer bytes.Buffer
+}
+
+func NewWebSocketStream(conn *websocket.Conn, ctx context.Context) *WebSocketStream {
+	return &WebSocketStream{
+		Conn: conn,
+		Ctx:  ctx,
+	}
+}
+
+func (ws *WebSocketStream) Read(msg []byte) (int, error) {
+	_, reader, err := ws.Conn.ReadMessage()
+	if err != nil {
+		return 0, err
+	}
+	return io.ReadFull(bytes.NewReader(reader), msg)
+}
+
+func (ws *WebSocketStream) Write(msg []byte) (int, error) {
+	ws.writeBuffer.Write(msg)
+	return len(msg), nil
+}
+
+func (ws *WebSocketStream) Flush() error {
+	err := ws.Conn.WriteMessage(websocket.BinaryMessage, ws.writeBuffer.Bytes())
+	if err != nil {
+		return err
+	}
+	ws.writeBuffer.Reset()
+	return nil
+}
+
+func (ws *WebSocketStream) Close() error {
+	return ws.Conn.Close()
+}
+
+func (ws *WebSocketStream) Context() context.Context {
+	return ws.Ctx
 }

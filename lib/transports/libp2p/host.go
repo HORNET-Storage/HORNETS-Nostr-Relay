@@ -7,8 +7,14 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
+	"github.com/libp2p/go-libp2p/p2p/security/noise"
+	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	libp2pwebtransport "github.com/libp2p/go-libp2p/p2p/transport/webtransport"
+	"github.com/multiformats/go-multiaddr"
 
 	"time"
 
@@ -108,6 +114,24 @@ func GetHost(priv string) host.Host {
 	return host
 }
 
+type connectionNotifier struct{}
+
+func (n *connectionNotifier) Connected(net network.Network, conn network.Conn) {
+	fmt.Printf("Connected to: %s\n", conn.RemotePeer().String())
+}
+
+func (n *connectionNotifier) Disconnected(net network.Network, conn network.Conn) {
+	fmt.Printf("Disconnected from: %s\n", conn.RemotePeer().String())
+}
+
+func (n *connectionNotifier) Listen(net network.Network, multiaddr multiaddr.Multiaddr) {
+	fmt.Printf("Started listening on: %s\n", multiaddr)
+}
+
+func (n *connectionNotifier) ListenClose(net network.Network, multiaddr multiaddr.Multiaddr) {
+	fmt.Printf("Stopped listening on: %s\n", multiaddr)
+}
+
 func GetHostOnPort(priv string, port string) host.Host {
 	key := priv
 	if priv == "" {
@@ -146,50 +170,31 @@ func GetHostOnPort(priv string, port string) host.Host {
 	webtransportListenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", port)
 	log.Printf("Starting server on %s\n", listenAddress)
 
+	connManager, err := connmgr.NewConnManager(
+		50,  // Low water mark
+		100, // High water mark
+		connmgr.WithGracePeriod(time.Second*30),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	host, err := libp2p.New(
 		libp2p.Identity(privateKey),
-		// Multiple listen addresses
-		libp2p.ListenAddrStrings(
-			listenAddress,
-			webtransportListenAddress,
-		),
-		// support TLS connections
-		//libp2p.Security(libp2ptls.ID, libp2ptls.New),
-		// support noise connections
-		//libp2p.Security(noise.ID, noise.New),
-
-		//libp2p.Transport(customQUICConstructor),
-		// support any other default transports (TCP)
-		//libp2p.DefaultTransports,
+		libp2p.ListenAddrStrings(listenAddress, webtransportListenAddress),
+		libp2p.ConnectionManager(connManager),
+		libp2p.Muxer(yamux.ID, yamux.DefaultTransport),
+		libp2p.Security(libp2ptls.ID, libp2ptls.New),
+		libp2p.Security(noise.ID, noise.New),
 		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Transport(libp2pwebtransport.New),
-		//libp2p.Transport(transport),
-		// Let's prevent our peer from having too many
-		// connections by attaching a connection manager.
-
-		//libp2p.ConnectionManager(connmgr),
-		// Attempt to open ports using uPNP for NATed hosts.
-
-		//libp2p.NATPortMap(),
-		// Let this host use the DHT to find other hosts
-
-		//libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
-		//	idht, err = dht.New(ctx, h)
-		//	return idht, err
-		//}),
-
-		// If you want to help other peers to figure out if they are behind
-		// NATs, you can launch the server-side of AutoNAT too (AutoRelay
-		// already runs the client)
-		//
-		// This service is highly rate-limited and should not cause any
-		// performance issues.
-
-		//libp2p.EnableNATService(),
 	)
 	if err != nil {
 		log.Fatal("Error starting server: ", err)
 	}
+
+	notifier := &connectionNotifier{}
+	host.Network().Notify(notifier)
 
 	fmt.Printf("Host started with id: %s\n", host.ID())
 

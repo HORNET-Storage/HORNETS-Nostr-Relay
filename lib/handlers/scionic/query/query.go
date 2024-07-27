@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
@@ -9,20 +10,23 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
 func AddQueryHandler(libp2phost host.Host, store stores.Store) {
-	libp2phost.SetStreamHandler("/query/1.0.0", BuildQueryStreamHandler(store))
+	libp2phost.SetStreamHandler("/query", middleware.SessionMiddleware(libp2phost)(BuildQueryStreamHandler(store)))
 }
 
 func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 	queryStreamHandler := func(stream network.Stream) {
 		enc := cbor.NewEncoder(stream)
 
-		result, message := utils.WaitForQueryMessage(stream)
-		if !result {
-			utils.WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
+		libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: context.Background()}
+
+		message, err := utils.WaitForQueryMessage(libp2pStream)
+		if err != nil {
+			utils.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", nil)
 
 			stream.Close()
 			return
@@ -30,7 +34,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 
 		hashes, err := store.QueryDag(message.QueryFilter)
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Failed to query database", nil)
+			utils.WriteErrorToStream(libp2pStream, "Failed to query database", nil)
 
 			stream.Close()
 			return
@@ -43,7 +47,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 		}
 
 		if err := enc.Encode(&response); err != nil {
-			utils.WriteErrorToStream(stream, "Failed to encode response", nil)
+			utils.WriteErrorToStream(libp2pStream, "Failed to encode response", nil)
 
 			stream.Close()
 			return
