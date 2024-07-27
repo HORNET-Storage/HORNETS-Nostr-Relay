@@ -1,7 +1,6 @@
 package graviton
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -9,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/deroproject/graviton"
 	"github.com/fxamacker/cbor/v2"
@@ -859,75 +857,45 @@ func (store *GravitonStore) CountFileLeavesByType() (map[string]int, error) {
 	return fileTypeCounts, nil
 }
 
-func (store *GravitonStore) StoreBlob(data []byte, contentType string, publicKey string) (*types.BlobDescriptor, error) {
+func (store *GravitonStore) StoreBlob(data []byte, hash []byte, publicKey string) error {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
-	hash := sha256.Sum256(data)
 	encodedHash := hex.EncodeToString(hash[:])
-
-	descriptor := types.BlobDescriptor{
-		URL:      fmt.Sprintf("/%s", encodedHash),
-		SHA256:   encodedHash,
-		Size:     int64(len(data)),
-		Type:     contentType,
-		Uploaded: time.Now().Unix(),
-	}
 
 	cacheTrees, err := store.cacheKey(publicKey, "blossom", encodedHash)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	serializedDescriptor, err := cbor.Marshal(descriptor)
-	if err != nil {
-		return nil, err
-	}
-
-	blossomTree.Put(hash[:], serializedDescriptor)
 	contentTree.Put(hash[:], data)
 
-	cacheTrees = append(cacheTrees, blossomTree)
 	cacheTrees = append(cacheTrees, contentTree)
 
 	graviton.Commit(cacheTrees...)
 
-	return &descriptor, nil
+	return nil
 }
 
-func (store *GravitonStore) GetBlob(hash string) ([]byte, *string, error) {
+func (store *GravitonStore) GetBlob(hash string) ([]byte, error) {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
 	hashBytes, err := hex.DecodeString(hash)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	serializedDescriptor, err := blossomTree.Get(hashBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var descriptor types.BlobDescriptor
-	err = cbor.Unmarshal(serializedDescriptor, &descriptor)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	content, err := contentTree.Get(hashBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return content, &descriptor.Type, nil
+	return content, nil
 }
 
 func (store *GravitonStore) DeleteBlob(hash string) error {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
 	hashBytes, err := hex.DecodeString(hash)
@@ -935,75 +903,11 @@ func (store *GravitonStore) DeleteBlob(hash string) error {
 		return err
 	}
 
-	blossomTree.Delete(hashBytes)
 	contentTree.Delete(hashBytes)
 
-	graviton.Commit(blossomTree, contentTree)
+	graviton.Commit(contentTree)
 
 	return nil
-}
-
-func (store *GravitonStore) ListBlobs(pubkey string, since, until int64) ([]types.BlobDescriptor, error) {
-	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
-	cursor := blossomTree.Cursor()
-
-	results := []types.BlobDescriptor{}
-
-	userTree, err := snapshot.GetTree(pubkey)
-	if err == nil {
-		value, err := userTree.Get([]byte("blossom"))
-
-		if err == nil && value != nil {
-			var cacheData *types.CacheData = &types.CacheData{}
-
-			err = cbor.Unmarshal(value, cacheData)
-			if err == nil {
-				for _, key := range cacheData.Keys {
-					hashBytes, err := hex.DecodeString(key)
-					if err != nil {
-						return nil, err
-					}
-
-					serializedDescriptor, err := blossomTree.Get(hashBytes)
-					if err != nil {
-						return nil, err
-					}
-
-					var descriptor types.BlobDescriptor
-					err = cbor.Unmarshal(serializedDescriptor, &descriptor)
-					if err != nil {
-						return nil, err
-					}
-
-					if descriptor.Uploaded >= since && descriptor.Uploaded <= until {
-						results = append(results, descriptor)
-					}
-				}
-			}
-		}
-	}
-
-	_, value, cursorErr := cursor.First()
-	for {
-		if cursorErr == nil {
-			break
-		}
-
-		var descriptor types.BlobDescriptor
-		err := cbor.Unmarshal(value, &descriptor)
-		if err != nil {
-			return nil, err
-		}
-
-		if descriptor.Uploaded >= since && descriptor.Uploaded <= until {
-			results = append(results, descriptor)
-		}
-
-		_, value, cursorErr = cursor.Next()
-	}
-
-	return results, nil
 }
 
 func GetBucket(leaf *merkle_dag.DagLeaf) string {

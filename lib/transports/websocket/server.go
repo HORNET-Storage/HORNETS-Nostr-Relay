@@ -20,13 +20,7 @@ type connectionState struct {
 	authenticated bool
 }
 
-func StartServer(store stores.Store) error {
-	// Generate the global challenge
-	_, err := generateGlobalChallenge()
-	if err != nil {
-		log.Fatalf("Failed to generate global challenge: %v", err)
-	}
-
+func BuildServer(store stores.Store) *fiber.App {
 	app := fiber.New()
 
 	// Middleware for handling relay information requests
@@ -36,6 +30,16 @@ func StartServer(store stores.Store) error {
 	// Enable blossom routes for unchunked file storage
 	server := blossom.NewServer(store)
 	server.SetupRoutes(app)
+
+	return app
+}
+
+func StartServer(app *fiber.App) error {
+	// Generate the global challenge
+	_, err := generateGlobalChallenge()
+	if err != nil {
+		log.Fatalf("Failed to generate global challenge: %v", err)
+	}
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
@@ -57,6 +61,7 @@ func StartServer(store stores.Store) error {
 			break
 		}
 	}
+
 	return err
 }
 

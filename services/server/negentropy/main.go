@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
+
+	fiber_websocket "github.com/gofiber/contrib/websocket"
 
 	//"github.com/libp2p/go-libp2p/p2p/security/noise"
 	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
@@ -82,6 +85,8 @@ func init() {
 }
 
 func main() {
+	ctx := context.Background()
+
 	wg := new(sync.WaitGroup)
 
 	// Private key
@@ -100,7 +105,7 @@ func main() {
 		return true
 	})
 
-	upload.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+	canUpload := func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		decodedSignature, err := hex.DecodeString(*signature)
 		if err != nil {
 			return false
@@ -123,7 +128,11 @@ func main() {
 
 		err = signing.VerifyCIDSignature(parsedSignature, cid, publicKey)
 		return err == nil
-	}, func(dag *merkle_dag.Dag, pubKey *string) {})
+	}
+
+	handleUpload := func(dag *merkle_dag.Dag, pubKey *string) {}
+
+	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
 
 	query.AddQueryHandler(host, store)
 
@@ -221,7 +230,11 @@ func main() {
 		fmt.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			err := websocket.StartServer(store)
+			app := websocket.BuildServer(store)
+
+			app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
+
+			err := websocket.StartServer(app)
 
 			if err != nil {
 				fmt.Println("Fatal error occurred in web server")

@@ -1,43 +1,95 @@
 package upload
 
 import (
+	"context"
 	"log"
 
+	"github.com/gofiber/contrib/websocket"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
-func AddUploadHandler(libp2phost host.Host, store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string)) {
-	libp2phost.SetStreamHandler("/upload/1.0.0", BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag))
+type CanUploadDagFunc func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool
+type HandleUploadedDagFunc func(dag *merkle_dag.Dag, pubKey *string)
+
+func AddUploadHandlerForLibp2p(ctx context.Context, libp2phost host.Host, store stores.Store, canUploadDag CanUploadDagFunc, handleRecievedDag HandleUploadedDagFunc) {
+	handler := BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag)
+
+	wrapper := func(stream network.Stream) {
+		read := func() (*types.UploadMessage, error) {
+			libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: ctx}
+
+			log.Println("[libp2p] Waiting for message")
+
+			return utils.WaitForUploadMessage(libp2pStream)
+		}
+
+		write := func(message interface{}) error {
+			libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: ctx}
+
+			log.Println("[libp2p] Writing message")
+
+			return utils.WriteMessageToStream(libp2pStream, message)
+		}
+
+		handler(read, write)
+
+		stream.Close()
+	}
+
+	libp2phost.SetStreamHandler("/upload", middleware.SessionMiddleware(libp2phost)(wrapper))
 }
 
-func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string)) func(stream network.Stream) {
-	uploadStreamHandler := func(stream network.Stream) {
-		result, message := utils.WaitForUploadMessage(stream)
-		if !result {
-			utils.WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
+func AddUploadHandlerForWebsockets(store stores.Store, canUploadDag CanUploadDagFunc, handleRecievedDag HandleUploadedDagFunc) func(*websocket.Conn) {
+	ctx := context.Background()
 
-			stream.Close()
+	handler := BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag)
+
+	wrapper := func(conn *websocket.Conn) {
+		read := func() (*types.UploadMessage, error) {
+			wsStream := &types.WebSocketStream{Conn: conn, Ctx: ctx}
+
+			log.Println("[websocket] Waiting for message")
+
+			return utils.WaitForUploadMessage(wsStream)
+		}
+
+		write := func(message interface{}) error {
+			wsStream := &types.WebSocketStream{Conn: conn, Ctx: ctx}
+
+			log.Println("[websocket] Writing message")
+
+			return utils.WriteMessageToStream(wsStream, message)
+		}
+
+		handler(read, write)
+	}
+
+	return wrapper
+}
+
+func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool, handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string)) utils.UploadDagHandler {
+	handler := func(read utils.UploadDagReader, write utils.DagWriter) {
+		message, err := read()
+		if err != nil {
+			write(utils.BuildErrorMessage("Failed to recieve upload message", err))
 			return
 		}
 
-		err := message.Leaf.VerifyRootLeaf()
+		err = message.Leaf.VerifyRootLeaf()
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Failed to verify root leaf", err)
-
-			stream.Close()
+			write(utils.BuildErrorMessage("Failed to verify root leaf", err))
 			return
 		}
 
 		if !canUploadDag(&message.Leaf, &message.PublicKey, &message.Signature) {
-			utils.WriteErrorToStream(stream, "Not allowed to upload this", nil)
-
-			stream.Close()
+			write(utils.BuildErrorMessage("Not allowed to upload this", nil))
 			return
 		}
 
@@ -49,44 +101,34 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		err = store.StoreLeaf(message.Root, rootData)
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Failed to verify root leaf", err)
-
-			stream.Close()
+			write(utils.BuildErrorMessage("Failed to verify root leaf", err))
 			return
 		}
 
-		err = utils.WriteResponseToStream(stream, true)
-		if err != nil || !result {
-			log.Printf("Failed to write response to stream: %e\n", err)
-
-			stream.Close()
+		err = write(utils.BuildResponseMessage(true))
+		if err != nil {
+			write(utils.BuildErrorMessage("Failed to write response to stream", err))
 			return
 		}
 
 		leafCount := 1
 
 		for {
-			result, message := utils.WaitForUploadMessage(stream)
-			if !result {
-				utils.WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
-
-				stream.Close()
+			message, err := read()
+			if err != nil {
+				write(utils.BuildErrorMessage("Failed to recieve upload message in time", nil))
 				break
 			}
 
 			err = message.Leaf.VerifyLeaf()
 			if err != nil {
-				utils.WriteErrorToStream(stream, "Failed to verify leaf", err)
-
-				stream.Close()
+				write(utils.BuildErrorMessage("Failed to verify leaf", err))
 				break
 			}
 
 			parentData, err := store.RetrieveLeaf(message.Root, message.Parent, false)
-			if err != nil || !result {
-				utils.WriteErrorToStream(stream, "Failed to find parent leaf", err)
-
-				stream.Close()
+			if err != nil {
+				write(utils.BuildErrorMessage("Failed to find parent leaf", err))
 				break
 			}
 
@@ -94,10 +136,8 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 			if message.Branch != nil {
 				err = parent.VerifyBranch(message.Branch)
-				if err != nil || !result {
-					utils.WriteErrorToStream(stream, "Failed to verify leaf branch", err)
-
-					stream.Close()
+				if err != nil {
+					write(utils.BuildErrorMessage("Failed to verify leaf branch", err))
 					break
 				}
 			}
@@ -108,43 +148,33 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 			err = store.StoreLeaf(message.Root, data)
 			if err != nil {
-				utils.WriteErrorToStream(stream, "Failed to add leaf to block database", err)
-
-				stream.Close()
+				write(utils.BuildErrorMessage("Failed to add leaf to block database", err))
 				return
 			}
 
 			leafCount++
 
-			err = utils.WriteResponseToStream(stream, true)
-			if err != nil || !result {
-				log.Printf("Failed to write response to stream: %e\n", err)
-
-				stream.Close()
+			err = write(utils.BuildResponseMessage(true))
+			if err != nil {
+				write(utils.BuildErrorMessage("Failed to write response to stream", err))
 				break
 			}
 		}
 
 		dagData, err := store.BuildDagFromStore(message.Root, true)
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Failed to build dag from provided leaves: %e", err)
-
-			stream.Close()
+			write(utils.BuildErrorMessage("Failed to build dag from provided leaves", err))
 			return
 		}
 
 		err = dagData.Dag.Verify()
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Failed to verify dag: %e", err)
-
-			stream.Close()
+			write(utils.BuildErrorMessage("Failed to verify dag", err))
 			return
 		}
 
 		handleRecievedDag(&dagData.Dag, &message.PublicKey)
-
-		stream.Close()
 	}
 
-	return uploadStreamHandler
+	return handler
 }
