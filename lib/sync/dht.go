@@ -21,6 +21,7 @@ type NostrRelay struct {
 	Name          string `json:"name"`
 	Description   string `json:"description"`
 	SupportedNIPs []int  `json:"supported_nips"`
+	Signature     []byte `json:"signature"`
 }
 
 // Pack Nostr relay array into DHT structure
@@ -56,7 +57,7 @@ func unpackNostrRelays(ret *krpc.Return) ([]NostrRelay, error) {
 	return relays, nil
 }
 
-func getRandomDHTNode(s *dht.Server) (dht.Addr, error) {
+func GetRandomDHTNode(s *dht.Server) (dht.Addr, error) {
 	// Get all nodes from the routing table
 	nodes := s.Nodes()
 
@@ -100,7 +101,7 @@ func searchForRelays(d *dht.Server, maxRelays int) []NostrRelay {
 			var target bep44.Target
 			copy(target[:], hash[:])
 
-			addr, err := getRandomDHTNode(d)
+			addr, err := GetRandomDHTNode(d)
 			if err != nil {
 				return
 			}
