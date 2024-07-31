@@ -530,7 +530,7 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 	if err != nil {
 		log.Println("Found", len(events), "matching events")
 	} else {
-		log.Println("Found", len(events), "matching events for filter: ", jsonFilter)
+		log.Println("Found", len(events), "matching events for filter: ", string(jsonFilter))
 	}
 	return events, nil
 }
