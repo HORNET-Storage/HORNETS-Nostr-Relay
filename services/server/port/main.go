@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
@@ -245,6 +248,15 @@ func main() {
 			wg.Done()
 		}()
 	}
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+
+		os.Exit(0)
+	}()
 
 	fmt.Printf("Host started with id: %s\n", host.ID())
 	fmt.Printf("Host started with address: %s\n", host.Addrs())
