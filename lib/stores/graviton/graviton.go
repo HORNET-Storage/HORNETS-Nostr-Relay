@@ -2,6 +2,7 @@ package graviton
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"slices"
@@ -525,7 +526,12 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 		events = events[:filter.Limit]
 	}
 
-	log.Println("Found", len(events), "matching events")
+	jsonFilter, err := json.Marshal(filter)
+	if err != nil {
+		log.Println("Found", len(events), "matching events")
+	} else {
+		log.Println("Found", len(events), "matching events for filter: ", jsonFilter)
+	}
 	return events, nil
 }
 
@@ -964,20 +970,28 @@ func matchWildcard(pattern, value string) bool {
 	patternParts := strings.Split(pattern, "/")
 	valueParts := strings.Split(value, "/")
 
-	if len(patternParts) != len(valueParts) {
-		return false
-	}
+	patternIndex, valueIndex := 0, 0
 
-	for i, patternPart := range patternParts {
-		if patternPart == "*" {
-			continue
-		}
-		if patternPart != valueParts[i] {
+	for patternIndex < len(patternParts) && valueIndex < len(valueParts) {
+		if patternParts[patternIndex] == "*" {
+			patternIndex++
+			if patternIndex == len(patternParts) {
+				return true // "*" at the end matches everything remaining
+			}
+			// Find the next matching part
+			for valueIndex < len(valueParts) && valueParts[valueIndex] != patternParts[patternIndex] {
+				valueIndex++
+			}
+		} else if patternParts[patternIndex] == valueParts[valueIndex] {
+			patternIndex++
+			valueIndex++
+		} else {
 			return false
 		}
 	}
 
-	return true
+	// Check if we've matched all parts
+	return patternIndex == len(patternParts) && valueIndex == len(valueParts)
 }
 
 func ContainsAny(tags nostr.Tags, tagName string, values []string) bool {
