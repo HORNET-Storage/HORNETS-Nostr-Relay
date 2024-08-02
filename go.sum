@@ -19,6 +19,9 @@ github.com/RoaringBitmap/roaring v0.4.17/go.mod h1:D3qVegWTmfCaX4Bl5CrBE9hfrSrrX
 github.com/RoaringBitmap/roaring v0.4.23/go.mod h1:D0gp8kJQgE1A4LQ5wFLggQEyvDi06Mq5mKs52e1TwOo=
 github.com/Shopify/sarama v1.19.0/go.mod h1:FVkBWblsNy7DGZRfXLU0O9RCGt5g3g3yEuWXgklEdEo=
 github.com/Shopify/toxiproxy v2.1.4+incompatible/go.mod h1:OXgGpZ6Cli1/URJOF1DMxUHB2q5Ap20/P/eIdh4G0pI=
+github.com/TBD54566975/did-dht v0.0.0-20240729161519-62769fbd9bfd/go.mod h1:We+wN0Doh03kLk59AQsnuCYg1zj0Dy2mosP4DgUOmr8=
+github.com/TBD54566975/did-dht v0.1.0 h1:owaMAgMhvGr2UrR8yGvdUY5vrtXm+5IpcARQcNgOJHY=
+github.com/TBD54566975/did-dht v0.1.0/go.mod h1:We+wN0Doh03kLk59AQsnuCYg1zj0Dy2mosP4DgUOmr8=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
 github.com/alecthomas/assert/v2 v2.0.0-alpha3 h1:pcHeMvQ3OMstAWgaeaXIAL8uzB9xMm2zlxt+/4ml8lk=
 github.com/alecthomas/assert/v2 v2.0.0-alpha3/go.mod h1:+zD0lmDXTeQj7TgDgCt0ePWxb0hMC1G+PGTsTCv1B9o=

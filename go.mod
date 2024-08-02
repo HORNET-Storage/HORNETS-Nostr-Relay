@@ -5,6 +5,7 @@ go 1.22.1
 require (
 	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36
 	github.com/anacrolix/dht/v2 v2.21.1
+	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/fsnotify/fsnotify v1.7.0
@@ -16,6 +17,7 @@ require (
 	github.com/nbd-wtf/go-nostr v0.32.0
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
 	github.com/spf13/viper v1.19.0
+	github.com/stretchr/testify v1.9.0
 	go.etcd.io/bbolt v1.3.10
 	gorm.io/driver/sqlite v1.5.5
 	gorm.io/gorm v1.25.10
@@ -32,7 +34,6 @@ require (
 	github.com/anacrolix/multiless v0.3.1-0.20221221005021-2d12701f83f7 // indirect
 	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect
 	github.com/anacrolix/sync v0.4.0 // indirect
-	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -128,7 +129,6 @@ require (
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tidwall/gjson v1.17.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

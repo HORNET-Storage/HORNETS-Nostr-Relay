@@ -43,18 +43,18 @@ func packNostrRelays(relays []NostrRelay) (*krpc.Return, error) {
 }
 
 // Unpack DHT structure into Nostr relay array
-func unpackNostrRelays(ret *krpc.Return) ([]NostrRelay, error) {
+func unpackNostrRelays(ret *krpc.Return) (*NostrRelay, error) {
 	if ret == nil || ret.Bep44Return.V == nil {
 		return nil, errors.New("no data in return value")
 	}
 
-	var relays []NostrRelay
-	err := json.Unmarshal(ret.Bep44Return.V, &relays)
+	var relay NostrRelay
+	err := json.Unmarshal(ret.Bep44Return.V, &relay)
 	if err != nil {
 		return nil, err
 	}
 
-	return relays, nil
+	return &relay, nil
 }
 
 func GetRandomDHTNode(s *dht.Server) (dht.Addr, error) {
@@ -119,10 +119,8 @@ func searchForRelays(d *dht.Server, maxRelays int) []NostrRelay {
 			result := d.Get(ctx, addr, target, seq, rl)
 			log.Print(result.Reply)
 
-			relays, err := unpackNostrRelays(result.Reply.R)
-			for _, relay := range relays {
-				ch <- relay
-			}
+			relay, err := unpackNostrRelays(result.Reply.R)
+			ch <- *relay
 		}(i)
 	}
 

@@ -6,13 +6,14 @@ import (
 	"crypto/ed25519"
 	"crypto/sha1"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/krpc"
 	"github.com/anacrolix/torrent/bencode"
 	"log"
+	"reflect"
+	"sort"
 	"sync"
 	"time"
 )
@@ -73,7 +74,7 @@ func (rs *RelayStore) uploadToDHT() error {
 	}
 
 	// Create a target for the DHT (you might want to use a more sophisticated key)
-	target := CreateTarget("nostr:relay:%d") // TODO: search for empty slot
+	target := CreateTarget([]byte("nostr:relay:%d")) // TODO: search for empty slot
 
 	// Get a random DHT node to query
 	addr, err := GetRandomDHTNode(rs.dhtServer)
@@ -82,8 +83,9 @@ func (rs *RelayStore) uploadToDHT() error {
 		return err
 	}
 
+	seq := int64(1)
 	// Get token for put operation
-	token, err := GetDHTToken(rs.dhtServer, addr, target)
+	token, err := GetDHTToken(rs.dhtServer, addr, seq, target)
 	if err != nil {
 		log.Println("Could not get dht token:", err)
 		return err
@@ -121,7 +123,7 @@ func (rs *RelayStore) uploadToDHT() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	putResult := rs.dhtServer.Put(ctx, addr, put, *token, dht.QueryRateLimiting{})
+	putResult := rs.dhtServer.Put(ctx, addr, put, token, dht.QueryRateLimiting{})
 	if putResult.Err != nil {
 		return err
 	}
@@ -157,31 +159,69 @@ func SignPut(put *bep44.Put, privKey ed25519.PrivateKey) error {
 	return nil
 }
 
-func GetDHTToken(dhtServer *dht.Server, addr dht.Addr, target krpc.ID) (*string, error) {
-	// First, we need to get a token for the Put operation
+//func GetDHTToken(dhtServer *dht.Server, addr dht.Addr, target krpc.ID) (*string, error) {
+//	// First, we need to get a token for the Put operation
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//
+//	getResult := dhtServer.Get(ctx, addr, target, nil, dht.QueryRateLimiting{})
+//	if getResult.Err != nil {
+//		return nil, getResult.Err
+//	}
+//
+//	token := getResult.Reply.R.Token
+//	if token == nil {
+//		err := "error: No token received from DHT"
+//		log.Println(err)
+//		return nil, errors.New(err)
+//	}
+//
+//	return token, nil
+//}
+
+func GetDHTToken(dhtServer *dht.Server, addr dht.Addr, seq int64, target krpc.ID) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	getResult := dhtServer.Get(ctx, addr, target, nil, dht.QueryRateLimiting{})
-	if getResult.Err != nil {
-		return nil, getResult.Err
+	// Prepare the QueryInput
+	//input := dht.QueryInput{
+	//	MsgArgs: krpc.MsgArgs{
+	//		InfoHash: target,
+	//	},
+	//	RateLimiting: dht.QueryRateLimiting{},
+	//	NumTries:     3, // You can adjust this value as needed
+	//}
+
+	// Perform a get_peers query
+	res := dhtServer.Get(ctx, addr, target, &seq, dht.QueryRateLimiting{})
+
+	if res.ToError() != nil {
+		return "", fmt.Errorf("DHT query failed: %w", res.ToError())
 	}
 
-	token := getResult.Reply.R.Token
-	if token == nil {
-		err := "error: No token received from DHT"
-		log.Println(err)
-		return nil, errors.New(err)
+	if res.Reply.R == nil {
+		return "", fmt.Errorf("no response received from DHT node")
 	}
-	return token, nil
+
+	if res.Reply.R.Token == nil {
+		return "", fmt.Errorf("no token in DHT response")
+	}
+
+	return *res.Reply.R.Token, nil
 }
 
 // Helper function to create the input for signing
 func createSignatureInput(put *bep44.Put) ([]byte, error) {
 	var buf bytes.Buffer
 
-	// Write prefix "2:v"
-	buf.WriteString("2:v")
+	if len(put.Salt) > 0 {
+		buf.WriteString(fmt.Sprintf("4:salt%d:", len(put.Salt)))
+		buf.Write(put.Salt)
+	}
+
+	buf.WriteString(fmt.Sprintf("3:seqi%d", put.Seq))
+	// Bencode already prefixes the length of V before writing it
+	buf.WriteString(fmt.Sprintf("e1:v"))
 
 	// Encode and write the value
 	encoder := bencode.NewEncoder(&buf)
@@ -190,23 +230,52 @@ func createSignatureInput(put *bep44.Put) ([]byte, error) {
 		return nil, fmt.Errorf("failed to encode value: %w", err)
 	}
 
-	// Write other fields
-	buf.WriteString(fmt.Sprintf("1:k32:%s", string(put.K[:])))
-	buf.WriteString(fmt.Sprintf("3:seqi%de", put.Seq))
-	buf.WriteString(fmt.Sprintf("3:casi%de", put.Cas))
-
-	if len(put.Salt) > 0 {
-		buf.WriteString(fmt.Sprintf("4:salt%d:", len(put.Salt)))
-		buf.Write(put.Salt)
-	}
-
+	log.Println(buf.String())
 	return buf.Bytes(), nil
 }
 
 // Helper function to create a target (as discussed in previous messages)
-func CreateTarget(key string) krpc.ID {
-	hash := sha1.Sum([]byte(key))
-	var target krpc.ID
-	copy(target[:], hash[:])
-	return target
+func CreateTarget(value []byte) krpc.ID {
+	//hash := sha1.Sum([]byte(key))
+	//var target krpc.ID
+	//copy(target[:], hash[:])
+
+	//if i.IsMutable() {
+	//	return sha1.Sum(append(i.K[:], i.Salt...))
+	//}
+
+	return sha1.Sum(bencode.MustMarshal(value))
+}
+
+func MarshalRelay(nr NostrRelay) ([]byte, error) {
+	// Create a map to hold our data
+	m := make(map[string]interface{})
+
+	// Use reflection to get all fields
+	v := reflect.ValueOf(nr)
+	t := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+		value := v.Field(i).Interface()
+		jsonTag := field.Tag.Get("json")
+		if jsonTag != "" && jsonTag != "-" {
+			m[jsonTag] = value
+		}
+	}
+
+	// Get sorted keys
+	var keys []string
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Create a new map with sorted keys
+	sorted := make(map[string]interface{})
+	for _, k := range keys {
+		sorted[k] = m[k]
+	}
+
+	// Marshal the sorted map
+	return json.Marshal(sorted)
 }
