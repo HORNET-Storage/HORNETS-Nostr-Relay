@@ -6,9 +6,11 @@ import (
 	"crypto/ed25519"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
+	"github.com/anacrolix/dht/v2/exts/getput"
 	"github.com/anacrolix/dht/v2/krpc"
 	"github.com/anacrolix/torrent/bencode"
 	"log"
@@ -26,13 +28,24 @@ type RelayStore struct {
 	stopChan     chan struct{}
 }
 
-func NewRelayStore(dhtServer *dht.Server, uploadInterval time.Duration) *RelayStore {
+type KeyPair struct {
+	privKey []byte
+	pubKey  []byte
+}
+
+var HardcodedKey = KeyPair{privKey: []byte{}, pubKey: []byte{}}
+
+const MaxRelays = 10
+
+func NewRelayStore(dhtServer *dht.Server, uploadInterval time.Duration, self *NostrRelay) *RelayStore {
 	rs := &RelayStore{
 		relays:       make(map[string]NostrRelay),
 		dhtServer:    dhtServer,
 		uploadTicker: time.NewTicker(uploadInterval),
 		stopChan:     make(chan struct{}),
 	}
+
+	rs.AddRelay(*self)
 	go rs.periodicUpload()
 	return rs
 }
@@ -53,11 +66,25 @@ func (rs *RelayStore) GetRelays() []NostrRelay {
 	return relays
 }
 
+func (rs *RelayStore) GetSelfRelay() NostrRelay {
+	rs.mutex.RLock()
+	defer rs.mutex.RUnlock()
+	// TODO fix this
+	return rs.relays["localhost"]
+}
+
 func (rs *RelayStore) periodicUpload() {
 	for {
 		select {
 		case <-rs.uploadTicker.C:
-			rs.uploadToDHT()
+			relays, unoccupied := searchForRelays(rs.dhtServer, MaxRelays)
+			for _, relay := range relays {
+				rs.AddRelay(relay)
+			}
+			err := rs.uploadToDHT(unoccupied[0])
+			if err != nil {
+				return
+			}
 		case <-rs.stopChan:
 			rs.uploadTicker.Stop()
 			return
@@ -65,70 +92,86 @@ func (rs *RelayStore) periodicUpload() {
 	}
 }
 
-func (rs *RelayStore) uploadToDHT() error {
-	relays := rs.GetRelays()
-	data, err := json.Marshal(relays)
-	if err != nil {
-		log.Println("Could not marshal relays:", err)
-		return err
+func searchForRelays(d *dht.Server, maxRelays int) ([]NostrRelay, []int) {
+	type result struct {
+		index int
+		relay NostrRelay
+		found bool
 	}
 
-	// Create a target for the DHT (you might want to use a more sophisticated key)
-	target := CreateTarget([]byte("nostr:relay:%d")) // TODO: search for empty slot
+	var relays []NostrRelay
+	var unoccupiedSlots []int
+	ch := make(chan result, maxRelays*2)
 
-	// Get a random DHT node to query
-	addr, err := GetRandomDHTNode(rs.dhtServer)
-	if err != nil {
-		log.Println("Could not find random DHT node:", err)
-		return err
-	}
-
-	seq := int64(1)
-	// Get token for put operation
-	token, err := GetDHTToken(rs.dhtServer, addr, seq, target)
-	if err != nil {
-		log.Println("Could not get dht token:", err)
-		return err
-	}
-
-	// Create the bep44.Put structure
-	// TODO: use the relay's key and store it
-	publicKey, privateKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		log.Println("Could not generate ed25519 keys:", err)
-		return err
-	}
-
-	// Convert public key to the required [32]byte format
-	var pubKey [32]byte
-	copy(pubKey[:], publicKey)
-
-	put := bep44.Put{
-		V:    data,
-		K:    &pubKey,
-		Salt: []byte("nostr:relay"),
-		Sig:  [64]byte{},
-		Cas:  0,                     // Set to 0 if you're not using Compare-And-Swap
-		Seq:  time.Now().UnixNano(), // Use current timestamp as sequence number
-	}
-
-	// Sign the put
-	err = SignPut(&put, privateKey)
-	if err != nil {
-		log.Println("Could not sign put:", err)
-		return err
-	}
-
-	// Perform the Put operation
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Create a context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	putResult := rs.dhtServer.Put(ctx, addr, put, token, dht.QueryRateLimiting{})
-	if putResult.Err != nil {
+	// Start multiple goroutines to search in parallel
+	for i := 0; i < maxRelays*2; i++ {
+		go func(i int) {
+			// Create salt
+			salt := []byte(fmt.Sprintf("nostr:relay:%d", i))
+			target := createMutableTarget(HardcodedKey.pubKey, salt)
+
+			// Perform DHT get operation
+			data, err := DoGet(d, target, salt)
+			if err != nil {
+				ch <- result{index: i, found: false}
+				return
+			}
+
+			foundRelay := NostrRelay{}
+			err = json.Unmarshal(data, &foundRelay)
+			if err != nil {
+				return
+			}
+
+			err = foundRelay.CheckSig()
+			if err != nil {
+				return
+			}
+
+			ch <- result{index: i, relay: foundRelay, found: true}
+		}(i)
+	}
+
+	// Collect results
+	foundCount := 0
+	for i := 0; i < maxRelays*2; i++ {
+		select {
+		case res := <-ch:
+			if res.found { // Check if a relay was found
+				relays = append(relays, res.relay)
+				foundCount++
+			} else {
+				unoccupiedSlots = append(unoccupiedSlots, res.index)
+			}
+			if foundCount >= maxRelays && len(unoccupiedSlots) > 0 {
+				return relays, unoccupiedSlots
+			}
+		case <-ctx.Done():
+			return relays[:foundCount], unoccupiedSlots
+		}
+	}
+
+	// Trim any unfilled slots
+	return relays[:foundCount], unoccupiedSlots
+}
+
+func (rs *RelayStore) uploadToDHT(freeSlot int) error {
+	// Create a target for the DHT (you might want to use a more sophisticated key)
+	salt := []byte(fmt.Sprintf("nostr:relay:%d", freeSlot))
+
+	selfRelay := rs.GetSelfRelay()
+	relayBytes, err := MarshalRelay(selfRelay)
+	if err != nil {
 		return err
 	}
 
-	log.Println("Successfully uploaded relays to DHT")
+	target := DoPut(rs.dhtServer, relayBytes, salt, (*ed25519.PublicKey)(&HardcodedKey.pubKey), (*ed25519.PrivateKey)(&HardcodedKey.privKey))
+
+	log.Printf("Successfully uploaded self relay to DHT at target %x", target)
 	return nil
 }
 
@@ -159,57 +202,6 @@ func SignPut(put *bep44.Put, privKey ed25519.PrivateKey) error {
 	return nil
 }
 
-//func GetDHTToken(dhtServer *dht.Server, addr dht.Addr, target krpc.ID) (*string, error) {
-//	// First, we need to get a token for the Put operation
-//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-//	defer cancel()
-//
-//	getResult := dhtServer.Get(ctx, addr, target, nil, dht.QueryRateLimiting{})
-//	if getResult.Err != nil {
-//		return nil, getResult.Err
-//	}
-//
-//	token := getResult.Reply.R.Token
-//	if token == nil {
-//		err := "error: No token received from DHT"
-//		log.Println(err)
-//		return nil, errors.New(err)
-//	}
-//
-//	return token, nil
-//}
-
-func GetDHTToken(dhtServer *dht.Server, addr dht.Addr, seq int64, target krpc.ID) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Prepare the QueryInput
-	//input := dht.QueryInput{
-	//	MsgArgs: krpc.MsgArgs{
-	//		InfoHash: target,
-	//	},
-	//	RateLimiting: dht.QueryRateLimiting{},
-	//	NumTries:     3, // You can adjust this value as needed
-	//}
-
-	// Perform a get_peers query
-	res := dhtServer.Get(ctx, addr, target, &seq, dht.QueryRateLimiting{})
-
-	if res.ToError() != nil {
-		return "", fmt.Errorf("DHT query failed: %w", res.ToError())
-	}
-
-	if res.Reply.R == nil {
-		return "", fmt.Errorf("no response received from DHT node")
-	}
-
-	if res.Reply.R.Token == nil {
-		return "", fmt.Errorf("no token in DHT response")
-	}
-
-	return *res.Reply.R.Token, nil
-}
-
 // Helper function to create the input for signing
 func createSignatureInput(put *bep44.Put) ([]byte, error) {
 	var buf bytes.Buffer
@@ -234,11 +226,11 @@ func createSignatureInput(put *bep44.Put) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func CreateTarget(value []byte) krpc.ID {
+func createTarget(value []byte) krpc.ID {
 	return sha1.Sum(bencode.MustMarshal(value))
 }
 
-func CreateMutableTarget(pubKey []byte, salt []byte) krpc.ID {
+func createMutableTarget(pubKey []byte, salt []byte) krpc.ID {
 	return sha1.Sum(append(pubKey[:], salt...))
 }
 
@@ -273,4 +265,77 @@ func MarshalRelay(nr NostrRelay) ([]byte, error) {
 
 	// Marshal the sorted map
 	return json.Marshal(sorted)
+}
+
+func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) krpc.ID {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var target krpc.ID
+	if privKey == nil {
+		target = createTarget(value)
+		log.Printf("Derived immutable target %x from %x", target, value)
+	} else {
+		target = createMutableTarget(*pubKey, salt)
+		log.Printf("Derived mutable target %x from %x and %x", target, pubKey, salt)
+	}
+
+	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
+		put := bep44.Put{
+			V:    value,
+			Salt: salt,
+			Seq:  seq,
+		}
+
+		if privKey != nil {
+			var pub [32]byte
+			copy(pub[:], *pubKey)
+			put.K = &pub
+			err := SignPut(&put, *privKey)
+			if err != nil {
+				log.Printf("Unable to sign")
+			}
+		}
+
+		log.Printf("Put created %+v", put)
+
+		return put
+	})
+
+	log.Printf("Put stats %v", stats)
+
+	if err != nil {
+		log.Printf("Put operation failed: %v", err)
+	} else {
+		log.Printf("Put operation successful")
+	}
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		log.Printf("Put operation timed out")
+	}
+
+	return target
+}
+
+func DoGet(server *dht.Server, target bep44.Target, salt []byte) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, stats, err := getput.Get(ctx, target, server, nil, salt)
+	log.Printf("Get stats: %+v", stats)
+
+	if err != nil {
+		log.Printf("Get operation failed: %v", err)
+		return nil, err
+	}
+	log.Printf("Get operation successful: %+v", result)
+
+	var decodedValue []byte
+	err = bencode.Unmarshal(result.V, &decodedValue)
+	if err != nil {
+		log.Printf("failed to unmarshal result: %v", err)
+		return nil, err
+	}
+
+	return decodedValue, nil
 }

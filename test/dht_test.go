@@ -2,17 +2,14 @@ package test
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"encoding/json"
-	"errors"
 	"fmt"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/exts/getput"
 	"github.com/anacrolix/dht/v2/krpc"
-	"github.com/anacrolix/torrent/bencode"
 	"github.com/stretchr/testify/require"
 	"math/rand"
 	"net"
@@ -63,16 +60,13 @@ func TestPutGetDHT(t *testing.T) {
 
 	salt := []byte(fmt.Sprintf("nostr:relay:%d", randomInt))
 
-	target := doPut(t, server, relayBytes, salt, &pubKey, &privKey)
+	target := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
 
 	// Wait a bit for the value to propagate
 	time.Sleep(5 * time.Second)
 
 	// get it from the other server
-	retrievedValue, err := doGet(t, server2, target, salt)
-	require.NoError(t, err)
-	var decodedValue []byte
-	err = bencode.Unmarshal(retrievedValue, &decodedValue)
+	decodedValue, err := sync.DoGet(server2, target, salt)
 	require.NoError(t, err)
 	t.Logf("Got result: %+v", decodedValue)
 
@@ -198,71 +192,6 @@ func verifyConnections(t *testing.T, servers []*dht.Server) {
 	}
 }
 
-func doPut(t *testing.T, server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) krpc.ID {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	var target krpc.ID
-	if privKey == nil {
-		target = sync.CreateTarget(value)
-		t.Logf("Derived immutable target %x from %x", target, value)
-	} else {
-		target = sync.CreateMutableTarget(*pubKey, salt)
-		t.Logf("Derived mutable target %x from %x and %x", target, pubKey, salt)
-	}
-
-	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
-		put := bep44.Put{
-			V:    value,
-			Salt: salt,
-			Seq:  seq,
-		}
-
-		if privKey != nil {
-			var pub [32]byte
-			copy(pub[:], *pubKey)
-			put.K = &pub
-			err := sync.SignPut(&put, *privKey)
-			require.NoError(t, err)
-		}
-
-		t.Logf("Put created %+v", put)
-
-		return put
-	})
-
-	t.Logf("Put stats %v", stats)
-
-	if err != nil {
-		t.Fatalf("Put operation failed: %v", err)
-	} else {
-		t.Logf("Put operation successful")
-	}
-
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		t.Fatalf("Put operation timed out")
-	}
-
-	return target
-}
-
-func doGet(t *testing.T, server *dht.Server, key bep44.Target, salt []byte) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, stats, err := getput.Get(ctx, key, server, nil, salt)
-	t.Logf("Get stats: %+v", stats)
-	t.Logf("Result: %+v", result)
-
-	if err != nil {
-		t.Logf("Get operation failed: %v", err)
-		return nil, err
-	}
-
-	t.Logf("Get operation successful")
-	return result.V, nil
-}
-
 func TestPutGetLocal(t *testing.T) {
 	nodeCount := 5
 	servers := setupLocalDHTNetwork(t, nodeCount)
@@ -280,7 +209,7 @@ func TestPutGetLocal(t *testing.T) {
 	pubKey, privKey, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 
-	target := doPut(t, putServer, value, []byte{}, &pubKey, &privKey)
+	target := sync.DoPut(putServer, value, []byte{}, &pubKey, &privKey)
 
 	// Wait for value to propagate
 	time.Sleep(10 * time.Second)
@@ -289,10 +218,7 @@ func TestPutGetLocal(t *testing.T) {
 	var retrieved bool
 	for i, getServer := range servers {
 		t.Logf("Trying to get value from server %d with ID %x", i, getServer.ID())
-		retrievedValue, err := doGet(t, getServer, target, []byte{})
-		require.NoError(t, err)
-		var decodedValue []byte
-		err = bencode.Unmarshal(retrievedValue, &decodedValue)
+		decodedValue, err := sync.DoGet(getServer, target, []byte{})
 		require.NoError(t, err)
 
 		if bytes.Equal(value, decodedValue) {
