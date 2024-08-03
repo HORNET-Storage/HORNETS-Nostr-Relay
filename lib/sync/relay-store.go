@@ -234,17 +234,12 @@ func createSignatureInput(put *bep44.Put) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Helper function to create a target (as discussed in previous messages)
 func CreateTarget(value []byte) krpc.ID {
-	//hash := sha1.Sum([]byte(key))
-	//var target krpc.ID
-	//copy(target[:], hash[:])
-
-	//if i.IsMutable() {
-	//	return sha1.Sum(append(i.K[:], i.Salt...))
-	//}
-
 	return sha1.Sum(bencode.MustMarshal(value))
+}
+
+func CreateMutableTarget(pubKey []byte, salt []byte) krpc.ID {
+	return sha1.Sum(append(pubKey[:], salt...))
 }
 
 func MarshalRelay(nr NostrRelay) ([]byte, error) {

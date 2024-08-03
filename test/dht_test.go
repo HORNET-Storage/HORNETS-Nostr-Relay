@@ -20,171 +20,65 @@ import (
 	"time"
 )
 
-func TestDHTPutGet(t *testing.T) {
-	nodeCount := 5
-	servers := setupLocalDHTNetwork(t, nodeCount)
+func TestPutGetDHT(t *testing.T) {
+	config := dht.NewDefaultServerConfig()
+	server, err := dht.NewServer(config)
+	require.NoError(t, err)
+	defer server.Close()
 
-	//config := dht.NewDefaultServerConfig()
-	//server, err := dht.NewServer(config)
-	//require.NoError(t, err)
-	//defer server.Close()
-	//
-	//config2 := dht.NewDefaultServerConfig()
-	//server2, err := dht.NewServer(config2)
-	//require.NoError(t, err)
-	//defer server2.Close()
+	config2 := dht.NewDefaultServerConfig()
+	server2, err := dht.NewServer(config2)
+	require.NoError(t, err)
+	defer server2.Close()
 
 	// 1. Bootstrap the DHT
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
+	//ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	//defer cancel()
 
-	//t.Log("Starting DHT bootstrap")
-	//_, err = server.Bootstrap()
-	//require.NoError(t, err)
-	//t.Log("Stats:", stats)
+	t.Log("Starting DHT bootstrap")
+	_, err = server.Bootstrap()
+	require.NoError(t, err)
 
-	// Wait for nodes to be added to the routing table
-	//for i := 0; i < 30; i++ {
-	//	stats := server.Stats()
-	//	t.Logf("DHT stats: %+v", stats)
-	//	if stats.GoodNodes > 0 {
-	//		break
-	//	}
-	//	time.Sleep(2 * time.Second)
-	//}
+	//Wait for nodes to be added to the routing table
+	for i := 0; i < 30; i++ {
+		stats := server.Stats()
+		t.Logf("DHT stats: %+v", stats)
+		if stats.GoodNodes > 0 {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
 
 	// 2. Create a sample relay
+	randomInt := rand.Intn(100000)
 	sampleRelay := sync.NostrRelay{
 		URL:  "wss://example.com",
-		Name: "Test Relay",
+		Name: fmt.Sprintf("Test Relay: %d", randomInt),
 	}
 	relayBytes, err := sync.MarshalRelay(sampleRelay)
 	require.NoError(t, err)
 
-	publicKey, privKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatalf("Unable to generate ed25519 key %v", err)
-	}
-
-	// Convert public key to the required [32]byte format
-	var pubKey [32]byte
-	copy(pubKey[:], publicKey)
-
-	seq := int64(1)
-	// 3. Create a BEP44 Put
-	put := bep44.Put{
-		V: relayBytes,
-		K: &pubKey,
-		//Salt: []byte("nostr:relay"),
-		Sig: [64]byte{},
-		Cas: 0, // Set to 0 if you're not using Compare-And-Swap
-		Seq: seq,
-	}
-
-	// 4. Sign the put
-	err = sync.SignPut(&put, privKey)
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
-	t.Log("Signed put: ", put.Sig)
 
-	randomInt := rand.Intn(100000)
-	targetInput := fmt.Sprintf("nostr:relay:%d", randomInt)
+	salt := []byte(fmt.Sprintf("nostr:relay:%d", randomInt))
 
-	target := sync.CreateTarget([]byte(targetInput))
-	t.Log("Created target: ", target, " from input: ", targetInput)
+	target := doPut(t, server, relayBytes, salt, &pubKey, &privKey)
 
-	seqToPut := makeSeqToPut(t, true, true, put, privKey)
-	stats, err := getput.Put(ctx, target, servers[0], []byte{}, seqToPut)
-	if err != nil {
-		t.Fatalf("Unable to put to network %v", err)
-	}
-	t.Logf("Got put stats: %v", stats)
+	// Wait a bit for the value to propagate
+	time.Sleep(5 * time.Second)
 
-	//var token string
-	//var addr dht.Addr
-	//var putResult dht.QueryResult
-	//for i := 0; i < 5; i++ {
-	//	addr, err = sync.GetRandomDHTNode(server)
-	//	if err != nil {
-	//		continue
-	//	}
-	//	t.Logf("Got random DHT Node: %s", addr)
-	//
-	//	token, err = sync.GetDHTToken(server, addr, seq, target)
-	//	if err != nil {
-	//		continue
-	//	}
-	//	t.Logf("Got token: %x", token)
-	//
-	//	// 5. Announce the relay to the DHT
-	//	t.Logf("Putting %s to addr %s ", target, addr)
-	//	putResult = server.Put(ctx, addr, put, token, dht.QueryRateLimiting{})
-	//	if putResult.Reply.E != nil {
-	//		t.Logf("Putting to addr %s failed: %s", addr, putResult.Reply.E)
-	//		continue
-	//	}
-	//	t.Logf("Got put result: %+v", putResult)
-	//	t.Logf("Result.Reply: %+v", putResult.Reply)
-	//	t.Logf("Result.Reply.R: %+v", putResult.Reply.R)
-	//	t.Logf("Raw V value: %s", string(putResult.Reply.R.V))
-	//	t.Logf("Raw V value (hex): %x", putResult.Reply.R.V)
-	//	break
-	//}
-	//require.NoError(t, err)
-	//require.NotNil(t, token)
-	//require.NoError(t, putResult.Reply.E)
-
-	// 6. Wait a bit for the value to propagate
-	time.Sleep(15 * time.Second)
-
-	// 7. Search for the relay
-	//t.Log("Getting another Random DHT Node")
-	//addr2, err := sync.GetRandomDHTNode(server)
-	//require.NoError(t, err)
-
-	//t.Logf("Getting target %s from addr %s", target, addr)
-	result, stats, err := getput.Get(ctx, target, servers[nodeCount-1], &seq, []byte{})
-	t.Logf("Got get stats: %v", stats)
-	//result := server.Get(ctx, addr, target, &seq, dht.QueryRateLimiting{})
-	//result := server.Get(ctx, addr2, target, nil, dht.QueryRateLimiting{})
+	// get it from the other server
+	retrievedValue, err := doGet(t, server2, target, salt)
 	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	t.Logf("Got result: %+v", result)
-	t.Logf("Got result.V: %+v", result.V)
-	//t.Logf("Result.Reply: %+v", result.Reply)
-	//t.Logf("Result.Reply.R: %+v", result.Reply.R)
-	//t.Logf("Raw Bep44Return value: %s", string(result.Reply.R.Bep44Return.V))
-	//t.Logf("Raw Bep44Return value (hex): %x", result.Reply.R.Bep44Return.V)
-
-	//var getResult dht.QueryResult
-	//if result.Reply.R.Bep44Return.V == nil {
-	//	for _, node := range result.Reply.R.Nodes {
-	//		t.Logf("Trying: %+v", node)
-	//
-	//		nodeAddr, err := net.ResolveUDPAddr("udp", node.String())
-	//		if err != nil {
-	//			continue
-	//		}
-	//
-	//		// Convert krpc.NodeInfo to dht.Addr
-	//		addr := dht.NewAddr(&net.UDPAddr{
-	//			IP:   nodeAddr.IP,
-	//			Port: nodeAddr.Port,
-	//		})
-	//
-	//		getResult = server.Get(ctx, addr, target, &seq, dht.QueryRateLimiting{})
-	//		if getResult.Err == nil && getResult.Reply.R.Bep44Return.V != nil {
-	//			t.Logf("Got result: %+v", getResult)
-	//			result = getResult
-	//			break
-	//		}
-	//	}
-	//}
+	var decodedValue []byte
+	err = bencode.Unmarshal(retrievedValue, &decodedValue)
+	require.NoError(t, err)
+	t.Logf("Got result: %+v", decodedValue)
 
 	// 8. Verify the result
 	foundRelay := sync.NostrRelay{}
-	//err = json.Unmarshal(result.Reply.R.Bep44Return.V, &foundRelay)
-	err = json.Unmarshal(result.V, &foundRelay)
+	err = json.Unmarshal(decodedValue, &foundRelay)
 	require.NoError(t, err)
 
 	if sampleRelay.URL != foundRelay.URL {
@@ -304,12 +198,37 @@ func verifyConnections(t *testing.T, servers []*dht.Server) {
 	}
 }
 
-func doPut(t *testing.T, server *dht.Server, key bep44.Target, value []byte, salt []byte) {
+func doPut(t *testing.T, server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) krpc.ID {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	stats, err := getput.Put(ctx, key, server, salt, func(seq int64) bep44.Put {
-		return bep44.Put{V: value, Salt: salt}
+	var target krpc.ID
+	if privKey == nil {
+		target = sync.CreateTarget(value)
+		t.Logf("Derived immutable target %x from %x", target, value)
+	} else {
+		target = sync.CreateMutableTarget(*pubKey, salt)
+		t.Logf("Derived mutable target %x from %x and %x", target, pubKey, salt)
+	}
+
+	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
+		put := bep44.Put{
+			V:    value,
+			Salt: salt,
+			Seq:  seq,
+		}
+
+		if privKey != nil {
+			var pub [32]byte
+			copy(pub[:], *pubKey)
+			put.K = &pub
+			err := sync.SignPut(&put, *privKey)
+			require.NoError(t, err)
+		}
+
+		t.Logf("Put created %+v", put)
+
+		return put
 	})
 
 	t.Logf("Put stats %v", stats)
@@ -323,6 +242,8 @@ func doPut(t *testing.T, server *dht.Server, key bep44.Target, value []byte, sal
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		t.Fatalf("Put operation timed out")
 	}
+
+	return target
 }
 
 func doGet(t *testing.T, server *dht.Server, key bep44.Target, salt []byte) ([]byte, error) {
@@ -342,7 +263,7 @@ func doGet(t *testing.T, server *dht.Server, key bep44.Target, salt []byte) ([]b
 	return result.V, nil
 }
 
-func TestPutAndGetLocal(t *testing.T) {
+func TestPutGetLocal(t *testing.T) {
 	nodeCount := 5
 	servers := setupLocalDHTNetwork(t, nodeCount)
 	defer func() {
@@ -355,9 +276,11 @@ func TestPutAndGetLocal(t *testing.T) {
 	t.Logf("Using server with ID %x for put operation", putServer.ID())
 
 	value := []byte("test value")
-	target := sync.CreateTarget(value)
 
-	doPut(t, putServer, target, value, []byte{})
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+
+	target := doPut(t, putServer, value, []byte{}, &pubKey, &privKey)
 
 	// Wait for value to propagate
 	time.Sleep(10 * time.Second)
