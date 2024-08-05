@@ -29,11 +29,28 @@ type RelayStore struct {
 }
 
 type KeyPair struct {
-	privKey []byte
-	pubKey  []byte
+	PrivKey []byte
+	PubKey  []byte
 }
 
-var HardcodedKey = KeyPair{privKey: []byte{}, pubKey: []byte{}}
+var HardcodedKey = KeyPair{
+	PrivKey: []byte{
+		0x51, 0x8d, 0x31, 0x74, 0x5e, 0x17, 0x14, 0x28,
+		0xf4, 0xbc, 0x5e, 0x2c, 0x88, 0xae, 0x2f, 0x36,
+		0x37, 0x7a, 0xc2, 0xf4, 0xd3, 0xe1, 0x38, 0x68,
+		0xac, 0xc6, 0x9f, 0x3f, 0x88, 0x99, 0x2b, 0xdb,
+		0x6b, 0x9f, 0x74, 0x78, 0x36, 0x89, 0x4f, 0xc2,
+		0xc6, 0xcd, 0xbe, 0x8d, 0xce, 0x52, 0xc1, 0xaf,
+		0xc1, 0xc9, 0x48, 0xb5, 0x72, 0xf0, 0xc6, 0x62,
+		0x3a, 0x07, 0xcf, 0x77, 0xb5, 0xb8, 0xf8, 0x7f,
+	},
+	PubKey: []byte{
+		0x6b, 0x9f, 0x74, 0x78, 0x36, 0x89, 0x4f, 0xc2,
+		0xc6, 0xcd, 0xbe, 0x8d, 0xce, 0x52, 0xc1, 0xaf,
+		0xc1, 0xc9, 0x48, 0xb5, 0x72, 0xf0, 0xc6, 0x62,
+		0x3a, 0x07, 0xcf, 0x77, 0xb5, 0xb8, 0xf8, 0x7f,
+	},
+}
 
 const MaxRelays = 10
 
@@ -77,7 +94,7 @@ func (rs *RelayStore) periodicUpload() {
 	for {
 		select {
 		case <-rs.uploadTicker.C:
-			relays, unoccupied := searchForRelays(rs.dhtServer, MaxRelays)
+			relays, unoccupied := SearchForRelays(rs.dhtServer, MaxRelays, 0, MaxRelays)
 			for _, relay := range relays {
 				rs.AddRelay(relay)
 			}
@@ -92,7 +109,7 @@ func (rs *RelayStore) periodicUpload() {
 	}
 }
 
-func searchForRelays(d *dht.Server, maxRelays int) ([]NostrRelay, []int) {
+func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]NostrRelay, []int) {
 	type result struct {
 		index int
 		relay NostrRelay
@@ -101,18 +118,19 @@ func searchForRelays(d *dht.Server, maxRelays int) ([]NostrRelay, []int) {
 
 	var relays []NostrRelay
 	var unoccupiedSlots []int
-	ch := make(chan result, maxRelays*2)
+	ch := make(chan result, maxIndex-minIndex)
 
 	// Create a context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Start multiple goroutines to search in parallel
-	for i := 0; i < maxRelays*2; i++ {
+	for i := minIndex; i < maxIndex; i++ {
 		go func(i int) {
 			// Create salt
 			salt := []byte(fmt.Sprintf("nostr:relay:%d", i))
-			target := createMutableTarget(HardcodedKey.pubKey, salt)
+			target := createMutableTarget(HardcodedKey.PubKey, salt)
+			fmt.Printf("get target %d: %x salt: %x\n", i, target, salt)
 
 			// Perform DHT get operation
 			data, err := DoGet(d, target, salt)
@@ -124,11 +142,15 @@ func searchForRelays(d *dht.Server, maxRelays int) ([]NostrRelay, []int) {
 			foundRelay := NostrRelay{}
 			err = json.Unmarshal(data, &foundRelay)
 			if err != nil {
+				fmt.Printf("Could not unmarshall into NostrRelay %x : %v\n", data, err)
+				ch <- result{index: i, found: false}
 				return
 			}
 
 			err = foundRelay.CheckSig()
 			if err != nil {
+				fmt.Printf("Signature verification failed %+v : %v\n", foundRelay, err)
+				ch <- result{index: i, found: false}
 				return
 			}
 
@@ -138,13 +160,16 @@ func searchForRelays(d *dht.Server, maxRelays int) ([]NostrRelay, []int) {
 
 	// Collect results
 	foundCount := 0
-	for i := 0; i < maxRelays*2; i++ {
+	for i := 0; i < maxIndex-minIndex; i++ {
+		//fmt.Printf("waiting for %d\n", i)
 		select {
 		case res := <-ch:
 			if res.found { // Check if a relay was found
+				//fmt.Printf("found %d\n", i)
 				relays = append(relays, res.relay)
 				foundCount++
 			} else {
+				//fmt.Printf("not found %d\n", i)
 				unoccupiedSlots = append(unoccupiedSlots, res.index)
 			}
 			if foundCount >= maxRelays && len(unoccupiedSlots) > 0 {
@@ -169,7 +194,7 @@ func (rs *RelayStore) uploadToDHT(freeSlot int) error {
 		return err
 	}
 
-	target := DoPut(rs.dhtServer, relayBytes, salt, (*ed25519.PublicKey)(&HardcodedKey.pubKey), (*ed25519.PrivateKey)(&HardcodedKey.privKey))
+	target := DoPut(rs.dhtServer, relayBytes, salt, (*ed25519.PublicKey)(&HardcodedKey.PubKey), (*ed25519.PrivateKey)(&HardcodedKey.PrivKey))
 
 	log.Printf("Successfully uploaded self relay to DHT at target %x", target)
 	return nil

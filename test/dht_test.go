@@ -10,6 +10,7 @@ import (
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/exts/getput"
 	"github.com/anacrolix/dht/v2/krpc"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/stretchr/testify/require"
 	"math/rand"
 	"net"
@@ -231,4 +232,67 @@ func TestPutGetLocal(t *testing.T) {
 	}
 
 	require.True(t, retrieved, "Failed to retrieve the correct value from any server")
+}
+
+func TestPutAndSearchDHT(t *testing.T) {
+	config := dht.NewDefaultServerConfig()
+	server, err := dht.NewServer(config)
+	require.NoError(t, err)
+	defer server.Close()
+
+	t.Log("Starting DHT bootstrap")
+	_, err = server.Bootstrap()
+	require.NoError(t, err)
+
+	//Wait for nodes to be added to the routing table
+	for i := 0; i < 30; i++ {
+		stats := server.Stats()
+		t.Logf("DHT stats: %+v", stats)
+		if stats.GoodNodes > 0 {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// 2. Create a sample relay
+	maxRelays := 3000
+	randomInt := rand.Intn(maxRelays)
+	// Generate a new private key
+	nostrPriv, err := btcec.NewPrivateKey()
+	if err != nil {
+		panic(err)
+	}
+
+	// Get the corresponding public key
+	nostrPub := nostrPriv.PubKey()
+	sampleRelay := sync.NostrRelay{
+		URL:           "wss://example.com",
+		Name:          fmt.Sprintf("Test Relay: %d", randomInt),
+		PublicKey:     nostrPub.SerializeCompressed(),
+		SupportedNIPs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	err = sampleRelay.SignRelay(nostrPriv)
+	require.NoError(t, err)
+	relayBytes, err := sync.MarshalRelay(sampleRelay)
+	require.NoError(t, err)
+
+	saltStr := fmt.Sprintf("nostr:relay:%d", randomInt)
+	salt := []byte(saltStr)
+	t.Logf("salt: %s", saltStr)
+	pubKey := ed25519.PublicKey(sync.HardcodedKey.PubKey)
+	privKey := ed25519.PrivateKey(sync.HardcodedKey.PrivKey)
+
+	target := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	t.Logf("put target %d: %x salt: %x", randomInt, target, salt)
+
+	// Wait a bit for the value to propagate
+	time.Sleep(5 * time.Second)
+
+	relays, unoccupied := sync.SearchForRelays(server, maxRelays, randomInt-2, randomInt+2)
+
+	t.Logf("found %d unoccupied slots: %v and %d relays: %v", len(unoccupied), unoccupied, len(relays), relays)
+
+	require.True(t, len(relays) == 1)
+	require.True(t, sampleRelay.Equals(&relays[0]))
+
 }

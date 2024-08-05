@@ -1,7 +1,8 @@
 package sync
 
 import (
-	"crypto/sha1"
+	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -10,14 +11,14 @@ import (
 )
 
 type NostrRelay struct {
-	URL           string   `json:"url"`
-	Name          string   `json:"name"`
-	PublicKey     [32]byte `json:"public_key"`
-	Signature     []byte   `json:"signature"`
-	SupportedNIPs []int    `json:"supported_nips"`
+	URL           string `json:"url"`
+	Name          string `json:"name"`
+	PublicKey     []byte `json:"public_key"`
+	Signature     []byte `json:"signature"`
+	SupportedNIPs []int  `json:"supported_nips"`
 }
 
-func CreateSelfRelay(url string, name string, pubKey [32]byte, privKey *btcec.PrivateKey, supportedNIPs []int) (*NostrRelay, error) {
+func CreateSelfRelay(url string, name string, pubKey []byte, privKey *btcec.PrivateKey, supportedNIPs []int) (*NostrRelay, error) {
 	self := &NostrRelay{
 		URL:           url,
 		Name:          name,
@@ -25,16 +26,16 @@ func CreateSelfRelay(url string, name string, pubKey [32]byte, privKey *btcec.Pr
 		SupportedNIPs: supportedNIPs,
 	}
 
-	err := SignRelay(self, privKey)
+	err := self.SignRelay(privKey)
 	if err != nil {
 		return nil, err
 	}
 	return self, nil
 }
 
-func SignRelay(relay *NostrRelay, privKey *btcec.PrivateKey) error {
+func (relay *NostrRelay) SignRelay(privKey *btcec.PrivateKey) error {
 	relayBytes := relay.PackBytes()
-	hash := sha1.Sum(relayBytes)
+	hash := sha256.Sum256(relayBytes)
 
 	signature, err := schnorr.Sign(privKey, hash[:])
 	if err != nil {
@@ -72,7 +73,7 @@ func (nr *NostrRelay) PackBytes() []byte {
 
 func (relay *NostrRelay) CheckSig() error {
 	packedBytes := relay.PackBytes()
-	hash := sha1.Sum(packedBytes)
+	hash := sha256.Sum256(packedBytes)
 
 	// Parse the public key
 	pubKey, err := btcec.ParsePubKey(relay.PublicKey[:])
@@ -92,4 +93,43 @@ func (relay *NostrRelay) CheckSig() error {
 	}
 
 	return nil
+}
+
+func (nr *NostrRelay) Equals(other *NostrRelay) bool {
+	if nr == nil || other == nil {
+		return nr == other
+	}
+
+	// Compare URL
+	if nr.URL != other.URL {
+		return false
+	}
+
+	// Compare Name
+	if nr.Name != other.Name {
+		return false
+	}
+
+	// Compare PublicKey
+	if !bytes.Equal(nr.PublicKey, other.PublicKey) {
+		return false
+	}
+
+	// Compare Signature
+	if !bytes.Equal(nr.Signature, other.Signature) {
+		return false
+	}
+
+	// Compare SupportedNIPs
+	if len(nr.SupportedNIPs) != len(other.SupportedNIPs) {
+		return false
+	}
+	for i, nip := range nr.SupportedNIPs {
+		if nip != other.SupportedNIPs[i] {
+			return false
+		}
+	}
+
+	// All fields are equal
+	return true
 }
