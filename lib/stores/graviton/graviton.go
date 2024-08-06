@@ -1029,23 +1029,75 @@ func GetBucket(leaf *merkle_dag.DagLeaf) string {
 	}
 }
 
-func (store *GravitonStore) GetAllRoots() ([]string, error) {
-	roots := []string{}
-
-	snapshot, err := store.Database.LoadSnapshot(0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load snapshot: %v", err)
-	}
-
-	indexTree, err := snapshot.GetTree("mbl")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get index tree: %v", err)
-	}
-
-	cursor := indexTree.Cursor()
-	for k, _, err := cursor.First(); err == nil; k, _, err = cursor.Next() {
-		roots = append(roots, string(k))
-	}
-
-	return roots, nil
-}
+//type RootInfo struct {
+//	Hash      string
+//	Timestamp uint64
+//}
+//
+//func (store *GravitonStore) GetRoots(rootHashes []string) ([]RootInfo, error) {
+//	roots := []RootInfo{}
+//
+//	snapshot, err := store.Database.LoadSnapshot(0)
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+//	}
+//
+//	indexTree, err := snapshot.GetTree("mbl")
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to get index tree: %v", err)
+//	}
+//
+//	cursor := indexTree.Cursor()
+//	for k, v, err := cursor.First(); err == nil; k, v, err = cursor.Next() {
+//		if slices.Contains(rootHashes, string(k)) || len(rootHashes) == 0 {
+//			// TODO: WE NEED TO HAVE A TIMESTAMP HERE
+//			var timestamp uint64
+//			if err := cbor.Unmarshal(v, &timestamp); err != nil {
+//				return nil, fmt.Errorf("failed to unmarshal timestamp for root %s: %v", k, err)
+//			}
+//
+//			roots = append(roots, RootInfo{
+//				Hash:      string(k),
+//				Timestamp: timestamp,
+//			})
+//		}
+//
+//	}
+//
+//	return roots, nil
+//}
+//
+//// PutRoots stores multiple root hashes with their timestamps
+//func (store *GravitonStore) PutRoots(roots []RootInfo) error {
+//	snapshot, err := store.Database.LoadSnapshot(0)
+//	if err != nil {
+//		return fmt.Errorf("failed to load snapshot: %v", err)
+//	}
+//
+//	indexTree, err := snapshot.GetTree("mbl")
+//	if err != nil {
+//		return fmt.Errorf("failed to get index tree: %v", err)
+//	}
+//
+//	for _, root := range roots {
+//		// Serialize the RootInfo
+//		rootInfoBytes, err := cbor.Marshal(root)
+//		if err != nil {
+//			return fmt.Errorf("failed to marshal root info for %s: %v", root.Hash, err)
+//		}
+//
+//		// Store the serialized RootInfo in the index tree
+//		err = indexTree.Put([]byte(root.Hash), rootInfoBytes)
+//		if err != nil {
+//			return fmt.Errorf("failed to store root info for %s: %v", root.Hash, err)
+//		}
+//	}
+//
+//	// Commit the changes
+//	_, err = graviton.Commit(indexTree)
+//	if err != nil {
+//		return fmt.Errorf("failed to commit changes: %v", err)
+//	}
+//
+//	return nil
+//}
