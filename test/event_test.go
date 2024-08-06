@@ -384,8 +384,8 @@ func TestNegentropyEventSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sync.SetupNegentropyHandler(host1, "host1", store1)
-	sync.SetupNegentropyHandler(host2, "host2", store2)
+	sync.SetupNegentropyEventHandler(host1, "host1", store1)
+	sync.SetupNegentropyEventHandler(host2, "host2", store2)
 
 	// Open a stream to the peer
 	stream, err := host1.NewStream(ctx, host2.ID(), sync.NegentropyProtocol)
@@ -393,7 +393,7 @@ func TestNegentropyEventSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = sync.InitiateNegentropySync(stream, nostr.Filter{}, "host1", store1)
+	err = sync.InitiateEventSync(stream, nostr.Filter{}, "host1", store1)
 	if err != nil {
 		t.Fatal(err)
 	}

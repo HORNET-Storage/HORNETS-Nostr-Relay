@@ -16,14 +16,14 @@ import (
 	"strings"
 )
 
-func SetupNegentropyHandler(h host.Host, hostId string, db *stores_graviton.GravitonStore) {
+func SetupNegentropyEventHandler(h host.Host, hostId string, db *stores_graviton.GravitonStore) {
 	handler := func(stream network.Stream) {
-		handleIncomingNegentropyStream(stream, hostId, db)
+		handleIncomingNegentropyEventStream(stream, hostId, db)
 	}
 	h.SetStreamHandler(NegentropyProtocol, handler)
 }
 
-func handleIncomingNegentropyStream(stream network.Stream, hostId string, store *stores_graviton.GravitonStore) {
+func handleIncomingNegentropyEventStream(stream network.Stream, hostId string, store *stores_graviton.GravitonStore) {
 	defer stream.Close()
 
 	// Log the incoming connection (optional)
@@ -63,7 +63,7 @@ func LoadEventVector(events []*nostr.Event) (*negentropy.Vector, error) {
 	return vector, nil
 }
 
-func InitiateNegentropySync(stream network.Stream, filter nostr.Filter, hostId string, store *stores_graviton.GravitonStore) error {
+func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string, store *stores_graviton.GravitonStore) error {
 	log.Printf("Performing negentropy on %s", hostId)
 	events, err := store.QueryEvents(filter)
 	if err != nil {
