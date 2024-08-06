@@ -1028,3 +1028,24 @@ func GetBucket(leaf *merkle_dag.DagLeaf) string {
 		}
 	}
 }
+
+func (store *GravitonStore) GetAllRoots() ([]string, error) {
+	roots := []string{}
+
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	indexTree, err := snapshot.GetTree("mbl")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get index tree: %v", err)
+	}
+
+	cursor := indexTree.Cursor()
+	for k, _, err := cursor.First(); err == nil; k, _, err = cursor.Next() {
+		roots = append(roots, string(k))
+	}
+
+	return roots, nil
+}
