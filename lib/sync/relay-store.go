@@ -8,11 +8,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/exts/getput"
 	"github.com/anacrolix/dht/v2/krpc"
 	"github.com/anacrolix/torrent/bencode"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/nbd-wtf/go-nostr"
 	"log"
 	"reflect"
 	"sort"
@@ -22,6 +27,9 @@ import (
 
 type RelayStore struct {
 	relays       map[string]NostrRelay
+	selfRelay    NostrRelay
+	libp2pHost   host.Host
+	eventStore   *stores_graviton.GravitonStore
 	mutex        sync.RWMutex
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
@@ -52,25 +60,27 @@ var HardcodedKey = KeyPair{
 	},
 }
 
-const MaxRelays = 10
+const MaxRelays = 4
 
-func NewRelayStore(dhtServer *dht.Server, uploadInterval time.Duration, self *NostrRelay) *RelayStore {
+func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, self *NostrRelay) *RelayStore {
 	rs := &RelayStore{
 		relays:       make(map[string]NostrRelay),
+		selfRelay:    *self,
+		libp2pHost:   host,
+		eventStore:   eventStore,
 		dhtServer:    dhtServer,
 		uploadTicker: time.NewTicker(uploadInterval),
 		stopChan:     make(chan struct{}),
 	}
 
-	rs.AddRelay(*self)
-	go rs.periodicUpload()
+	go rs.periodicSearchUploadSync()
 	return rs
 }
 
 func (rs *RelayStore) AddRelay(relay NostrRelay) {
 	rs.mutex.Lock()
 	defer rs.mutex.Unlock()
-	rs.relays[relay.URL] = relay
+	rs.relays[relay.ID] = relay
 }
 
 func (rs *RelayStore) GetRelays() []NostrRelay {
@@ -86,21 +96,23 @@ func (rs *RelayStore) GetRelays() []NostrRelay {
 func (rs *RelayStore) GetSelfRelay() NostrRelay {
 	rs.mutex.RLock()
 	defer rs.mutex.RUnlock()
-	// TODO fix this
-	return rs.relays["localhost"]
+	return rs.selfRelay
 }
 
-func (rs *RelayStore) periodicUpload() {
+func (rs *RelayStore) periodicSearchUploadSync() {
 	for {
 		select {
 		case <-rs.uploadTicker.C:
 			relays, unoccupied := SearchForRelays(rs.dhtServer, MaxRelays, 0, MaxRelays)
+			if len(unoccupied) > 0 {
+				err := rs.uploadToDHT(unoccupied[0])
+				if err != nil {
+					log.Printf("Error uploading to DHT: %v", err)
+				}
+			}
 			for _, relay := range relays {
 				rs.AddRelay(relay)
-			}
-			err := rs.uploadToDHT(unoccupied[0])
-			if err != nil {
-				return
+				rs.SyncWithRelay(&relay)
 			}
 		case <-rs.stopChan:
 			rs.uploadTicker.Stop()
@@ -109,7 +121,46 @@ func (rs *RelayStore) periodicUpload() {
 	}
 }
 
+func (rs *RelayStore) SyncWithRelay(relay *NostrRelay) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	addrs := []ma.Multiaddr{}
+	for _, addr := range relay.Addrs {
+		multiAddr, err := ma.NewMultiaddr(addr)
+		if err == nil {
+			addrs = append(addrs, multiAddr)
+		} else {
+			log.Printf("Error creating multiaddr from %v: %v", addr, err)
+		}
+	}
+
+	target := peer.AddrInfo{ID: peer.ID(relay.ID), Addrs: addrs}
+	if err := rs.libp2pHost.Connect(ctx, target); err != nil {
+		log.Printf("Error connecting to %+v: %v", target, err)
+	}
+
+	// Open a stream to the peer
+	stream, err := rs.libp2pHost.NewStream(ctx, target.ID, NegentropyProtocol)
+	if err != nil {
+		log.Printf("Error creating stream to %+v: %v", target, err)
+	}
+
+	err = InitiateEventSync(stream, nostr.Filter{}, target.ID.String(), rs.eventStore)
+	if err != nil {
+		log.Printf("Error syncing events with %+v: %v", target, err)
+	}
+
+	err = stream.Close()
+	if err != nil {
+		log.Printf("Failed to close stream: %v", err)
+		return
+	}
+
+}
+
 func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]NostrRelay, []int) {
+	log.Printf("Searching for relays from %d to %d", minIndex, maxIndex)
 	type result struct {
 		index int
 		relay NostrRelay

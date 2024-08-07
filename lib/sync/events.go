@@ -254,6 +254,10 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				return err
 			}
 			for _, event := range newEvents {
+				if event.Kind == 97 {
+					// do leaf sync
+
+				}
 				err := store.StoreEvent(event)
 				if err != nil {
 					return err

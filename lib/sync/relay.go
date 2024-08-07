@@ -7,20 +7,28 @@ import (
 	"errors"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	ma "github.com/multiformats/go-multiaddr"
 	"sort"
 )
 
 type NostrRelay struct {
-	URL           string `json:"url"`
-	Name          string `json:"name"`
-	PublicKey     []byte `json:"public_key"`
-	Signature     []byte `json:"signature"`
-	SupportedNIPs []int  `json:"supported_nips"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Addrs         []string `json:"addrs"`
+	PublicKey     []byte   `json:"public_key"`
+	Signature     []byte   `json:"signature"`
+	SupportedNIPs []int    `json:"supported_nips"`
 }
 
-func CreateSelfRelay(url string, name string, pubKey []byte, privKey *btcec.PrivateKey, supportedNIPs []int) (*NostrRelay, error) {
+func CreateSelfRelay(id string, multiAddrs []ma.Multiaddr, name string, pubKey []byte, privKey *btcec.PrivateKey, supportedNIPs []int) (*NostrRelay, error) {
+	addrStrings := []string{}
+	for _, multiAddr := range multiAddrs {
+		addrStrings = append(addrStrings, multiAddr.String())
+	}
+
 	self := &NostrRelay{
-		URL:           url,
+		ID:            id,
+		Addrs:         addrStrings,
 		Name:          name,
 		PublicKey:     pubKey,
 		SupportedNIPs: supportedNIPs,
