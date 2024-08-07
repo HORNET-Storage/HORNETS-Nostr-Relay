@@ -58,6 +58,7 @@ func main() {
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
+	// TODO: can graviton handle multiple simultaneous applications in the same db
 	err := store.InitStore("gravitondb", queryCache)
 	if err != nil {
 		log.Fatal(err)

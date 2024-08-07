@@ -50,8 +50,9 @@ func TestPutGetDHT(t *testing.T) {
 	// 2. Create a sample relay
 	randomInt := rand.Intn(100000)
 	sampleRelay := sync.NostrRelay{
-		URL:  "wss://example.com",
-		Name: fmt.Sprintf("Test Relay: %d", randomInt),
+		ID:    "wss://example.com",
+		Addrs: []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
+		Name:  fmt.Sprintf("Test Relay: %d", randomInt),
 	}
 	relayBytes, err := sync.MarshalRelay(sampleRelay)
 	require.NoError(t, err)
@@ -76,12 +77,10 @@ func TestPutGetDHT(t *testing.T) {
 	err = json.Unmarshal(decodedValue, &foundRelay)
 	require.NoError(t, err)
 
-	if sampleRelay.URL != foundRelay.URL {
-		t.Fatalf("Sample and found relay urls do not match %v", err)
+	if sampleRelay.Equals(&foundRelay) == false {
+		t.Fatalf("Sample and found relays do not match %v", err)
 	}
-	if sampleRelay.Name != foundRelay.Name {
-		t.Fatalf("Sample and found relay names do not match %v", err)
-	}
+
 }
 
 func setupLocalDHTNetwork(t *testing.T, nodeCount int) []*dht.Server {
@@ -266,8 +265,8 @@ func TestPutAndSearchDHT(t *testing.T) {
 	// Get the corresponding public key
 	nostrPub := nostrPriv.PubKey()
 	sampleRelay := sync.NostrRelay{
-		URL:           "wss://example.com",
-		Name:          fmt.Sprintf("Test Relay: %d", randomInt),
+		ID:            "wss://example.com",
+		Addrs:         []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
 		PublicKey:     nostrPub.SerializeCompressed(),
 		SupportedNIPs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}

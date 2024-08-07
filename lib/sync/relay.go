@@ -57,13 +57,20 @@ func (relay *NostrRelay) SignRelay(privKey *btcec.PrivateKey) error {
 func (nr *NostrRelay) PackBytes() []byte {
 	var packed []byte
 
-	// Pack URL
-	packed = append(packed, []byte(nr.URL)...)
+	// Pack ID
+	packed = append(packed, []byte(nr.ID)...)
 	packed = append(packed, 0) // null terminator
 
 	// Pack Name
 	packed = append(packed, []byte(nr.Name)...)
 	packed = append(packed, 0) // null terminator
+
+	// Pack Addrs
+	for _, addr := range nr.Addrs {
+		packed = append(packed, []byte(addr)...)
+		packed = append(packed, 0) // null terminator
+	}
+	packed = append(packed, 0) // double null terminator to indicate end of Addrs
 
 	// Pack PublicKey
 	packed = append(packed, nr.PublicKey[:]...)
@@ -108,9 +115,18 @@ func (nr *NostrRelay) Equals(other *NostrRelay) bool {
 		return nr == other
 	}
 
-	// Compare URL
-	if nr.URL != other.URL {
+	// Compare ID
+	if nr.ID != other.ID {
 		return false
+	}
+
+	if len(nr.Addrs) != len(other.Addrs) {
+		return false
+	}
+	for i, addr := range nr.Addrs {
+		if addr != other.Addrs[i] {
+			return false
+		}
 	}
 
 	// Compare Name
