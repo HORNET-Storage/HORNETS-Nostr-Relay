@@ -2,19 +2,30 @@ package sync
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/illuzen/go-negentropy"
+	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/nbd-wtf/go-nostr"
 	"io"
 	"log"
 	"strings"
+	"time"
 )
+
+// TODO: where is this supposed to come from? config file?
+const hornetNpub string = "npub1c25aedfd38f9fed72b383f6eefaea9f21dd58ec2c9989e0cc275cb5296adec17"
 
 func SetupNegentropyEventHandler(h host.Host, hostId string, db *stores_graviton.GravitonStore) {
 	handler := func(stream network.Stream) {
@@ -94,6 +105,77 @@ func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string
 
 	err = listenNegentropy(neg, stream, hostId, store, true)
 	return nil
+}
+
+func GetScionicRoot(event *nostr.Event) (string, bool) {
+	for _, tag := range event.Tags {
+		if len(tag) == 2 && tag[0] == "scionic_root" {
+			return tag[1], true
+		}
+	}
+	return "", false
+}
+
+func DownloadDag(root string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	// Connect to a hornet storage node
+	publicKey, err := signing.DeserializePublicKey(hornetNpub)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	libp2pPubKey, err := signing.ConvertPubKeyToLibp2pPubKey(publicKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	peerId, err := peer.IDFromPublicKey(*libp2pPubKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conMgr := connmgr.NewGenericConnectionManager()
+
+	err = conMgr.ConnectWithLibp2p(ctx, "default", fmt.Sprintf("/ip4/127.0.0.1/udp/9000/quic-v1/p2p/%s", peerId.String()), libp2p.Transport(libp2pquic.NewTransport))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	progressChan := make(chan lib.DownloadProgress)
+
+	go func() {
+		for progress := range progressChan {
+			if progress.Error != nil {
+				fmt.Printf("Error uploading to %s: %v\n", progress.ConnectionID, progress.Error)
+			} else {
+				fmt.Printf("Progress for %s: %d leafs downloaded\n", progress.ConnectionID, progress.LeafsRetreived)
+			}
+		}
+	}()
+
+	// Upload the dag to the hornet storage node
+	_, dag, err := connmgr.DownloadDag(ctx, conMgr, "default", root, nil, nil, nil, progressChan)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	close(progressChan)
+
+	// Verify the entire dag
+	err = dag.Verify()
+	if err != nil {
+		log.Fatalf("Error: %s", err)
+	}
+
+	log.Println("Dag verified correctly")
+
+	// Disconnect client as we no longer need it
+	err = conMgr.Disconnect("default")
+	if err != nil {
+		log.Printf("Could not disconnect from hornet storage: %v", err)
+	}
 }
 
 func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId string, store *stores_graviton.GravitonStore, initiator bool) error {
@@ -254,13 +336,20 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				return err
 			}
 			for _, event := range newEvents {
-				if event.Kind == 97 {
-					// do leaf sync
-
-				}
 				err := store.StoreEvent(event)
 				if err != nil {
-					return err
+					log.Printf("Could not store event %+v skipping", event)
+					continue
+				}
+				if event.Kind == 117 {
+					// do leaf sync
+					root, found := GetScionicRoot(event)
+					if found == false {
+						log.Printf("Event of type 117 with no 'scionic_root' tag, skipping tree download %+v", event)
+						continue
+					}
+					
+					DownloadDag(root)
 				}
 			}
 			if final {

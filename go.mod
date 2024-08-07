@@ -3,6 +3,7 @@ module github.com/HORNET-Storage/hornet-storage
 go 1.22.1
 
 require (
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20240727220204-7da57d9ad146
 	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
@@ -10,10 +11,11 @@ require (
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.6.0
-	github.com/gofiber/contrib/websocket v1.3.1
+	github.com/gofiber/contrib/websocket v1.3.2
 	github.com/illuzen/go-negentropy v0.0.0-20240715064232-a46d8ae31fc0
 	github.com/json-iterator/go v1.1.12
-	github.com/libp2p/go-libp2p v0.35.0
+	github.com/libp2p/go-libp2p v0.35.1
+	github.com/multiformats/go-multiaddr v0.12.4
 	github.com/nbd-wtf/go-nostr v0.32.0
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
 	github.com/spf13/viper v1.19.0
@@ -87,7 +89,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/multiformats/go-multiaddr v0.12.4 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.3.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multistream v0.5.0 // indirect
@@ -97,7 +98,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/pion/datachannel v1.5.6 // indirect
 	github.com/pion/dtls/v2 v2.2.11 // indirect
-	github.com/pion/ice/v2 v2.3.24 // indirect
+	github.com/pion/ice/v2 v2.3.25 // indirect
 	github.com/pion/interceptor v0.1.29 // indirect
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/mdns v0.0.12 // indirect
@@ -156,10 +157,10 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.3
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
-	github.com/gofiber/fiber/v2 v2.52.4
+	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.1 // indirect
+	github.com/gorilla/websocket v1.5.2 // indirect
 	github.com/ipfs/go-cid v0.4.1
 	github.com/klauspost/compress v1.17.8 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
