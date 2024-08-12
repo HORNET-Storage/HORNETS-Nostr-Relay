@@ -62,6 +62,8 @@ var HardcodedKey = KeyPair{
 
 const MaxRelays = 4
 
+var Store *RelayStore
+
 func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, self *NostrRelay) *RelayStore {
 	rs := &RelayStore{
 		relays:       make(map[string]NostrRelay),
@@ -72,9 +74,15 @@ func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_gra
 		uploadTicker: time.NewTicker(uploadInterval),
 		stopChan:     make(chan struct{}),
 	}
+	Store = rs
 
-	go rs.periodicSearchUploadSync()
+	// TODO: decide what are the syncing conditions
+	//go rs.periodicSearchUploadSync()
 	return rs
+}
+
+func GetRelayStore() *RelayStore {
+	return Store
 }
 
 func (rs *RelayStore) AddRelay(relay NostrRelay) {

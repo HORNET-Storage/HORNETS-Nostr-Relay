@@ -348,7 +348,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 						log.Printf("Event of type 117 with no 'scionic_root' tag, skipping tree download %+v", event)
 						continue
 					}
-					
+
 					DownloadDag(root)
 				}
 			}
