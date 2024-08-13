@@ -8,6 +8,7 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
+	"github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/bencode"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -37,6 +38,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Check relay settings for allowed events whilst also verifying signatures and kind number
 		success := lib_nostr.ValidateEvent(write, env, 11011)
 		if !success {
+			log.Printf("Could not validate event")
 			return
 		}
 
@@ -47,13 +49,15 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		relayURLs, err := getURLs(payload, pubkey, sig)
-		if success == false {
+		if err != nil {
+			log.Printf("Error parsing relay URLs: %v", err)
 			write("NOTICE", "Error parsing URLs from tags.")
 			return
 		}
 
 		relayStore := sync.GetRelayStore()
 		if relayStore == nil {
+			log.Println("relay store has not been initialized")
 			write("NOTICE", "Relay store has not be initialized")
 			return
 		}
@@ -67,6 +71,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Store the event
 		if err := store.StoreEvent(&env.Event); err != nil {
+			log.Printf("failed to store event: %v", err)
 			write("NOTICE", "Failed to store the event")
 			return
 		}
@@ -84,18 +89,14 @@ func getDHTPayloadPubkeySig(event *nostr.Event) (string, string, string, bool) {
 		if len(tag) == 2 && tag[0] == "dht_sig" {
 			signature = tag[1]
 		}
-	}
-	for _, tag := range event.Tags {
-		if len(tag) == 2 && tag[0] == "dht_payload" {
-			payload = tag[1]
-		}
-	}
-	for _, tag := range event.Tags {
 		if len(tag) == 2 && tag[0] == "dht_pubkey" {
 			pubKey = tag[1]
 		}
 	}
 
+	payload = event.Content
+
+	log.Printf("payload: %s, pubkey: %s, signature: %s", payload, pubKey, signature)
 	return payload, pubKey, signature, true
 }
 
