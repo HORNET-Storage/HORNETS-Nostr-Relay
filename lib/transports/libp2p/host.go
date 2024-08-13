@@ -26,31 +26,35 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 )
 
+func generateKey() *string {
+	privGen, err := signing.GeneratePrivateKey()
+	if err != nil {
+		log.Fatal("No private key provided and unable to make one from scratch. Exiting.")
+	}
+	serializedPriv, err := signing.SerializePrivateKey(privGen)
+	if err != nil {
+		log.Fatal("Unable to serialize private key. Exiting.")
+	}
+
+	pub := privGen.PubKey()
+	serializedPub, err := signing.SerializePublicKeyBech32(pub)
+	if err != nil {
+		log.Fatal("Unable to serialize public key. Exiting.")
+	}
+
+	// TODO: should this not go here?
+	viper.Set("relay_pub_key", serializedPub)
+	viper.Set("relay_priv_key", serializedPriv)
+	log.Println("Generated public/private key pair: ", *serializedPub, "/", *serializedPriv)
+	log.Println("Please copy the private key into your config.json file if you want to re-use it")
+
+	return serializedPriv
+}
+
 func GetHost(priv string) host.Host {
 	key := priv
 	if priv == "" {
-		privGen, err := signing.GeneratePrivateKey()
-		if err != nil {
-			log.Fatal("No private key provided and unable to make one from scratch. Exiting.")
-		}
-		serializedPriv, err := signing.SerializePrivateKey(privGen)
-		if err != nil {
-			log.Fatal("Unable to serialize private key. Exiting.")
-		}
-
-		pub := privGen.PubKey()
-		serializedPub, err := signing.SerializePublicKeyBech32(pub)
-		if err != nil {
-			log.Fatal("Unable to serialize public key. Exiting.")
-		}
-
-		// TODO: should this not go here?
-		viper.Set("relay_pub_key", serializedPub)
-		viper.Set("relay_priv_key", serializedPriv)
-		log.Println("Generated public/private key pair: ", *serializedPub, "/", *serializedPriv)
-		log.Println("Please copy the private key into your config.json file if you want to re-use it")
-
-		key = *serializedPriv
+		key = *generateKey()
 	}
 
 	decodedKey, err := signing.DecodeKey(key)
@@ -139,25 +143,7 @@ func (n *connectionNotifier) ListenClose(net network.Network, multiaddr multiadd
 func GetHostOnPort(priv string, port string) host.Host {
 	key := priv
 	if priv == "" {
-		privGen, err := signing.GeneratePrivateKey()
-		if err != nil {
-			log.Fatal("No private key provided and unable to make one from scratch. Exiting.")
-		}
-		serializedPriv, err := signing.SerializePrivateKey(privGen)
-		if err != nil {
-			log.Fatal("Unable to serialize private key. Exiting.")
-		}
-
-		pub := privGen.PubKey()
-		serializedPub, err := signing.SerializePublicKeyBech32(pub)
-		if err != nil {
-			log.Fatal("Unable to serialize public key. Exiting.")
-		}
-
-		log.Println("Generated public/private key pair: ", *serializedPub, "/", *serializedPriv)
-		log.Println("Please copy the private key into your config.json file if you want to re-use it")
-
-		key = *serializedPriv
+		key = *generateKey()
 	}
 
 	decodedKey, err := signing.DecodeKey(key)

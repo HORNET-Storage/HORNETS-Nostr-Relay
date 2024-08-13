@@ -292,6 +292,7 @@ func main() {
 
 	negentropy.SetupNegentropyEventHandler(host, "host", store)
 	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("relay_priv_key"))
+	//log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -304,10 +305,13 @@ func main() {
 		privKey,
 		viper.GetIntSlice("supported_nips"),
 	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// this periodically searches dht for other relays, stores them, attempts to sync with them, and uploads self to dht
 	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Minute*1, selfRelay)
 	log.Printf("Created relay store: %+v", relayStore)
-	
+
 	wg.Wait()
 }
