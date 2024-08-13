@@ -1,10 +1,13 @@
 package blossom
 
 import (
-	"time"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 type Server struct {
@@ -16,72 +19,61 @@ func NewServer(store stores.Store) *Server {
 }
 
 func (s *Server) SetupRoutes(app *fiber.App) {
-	app.Get("/blossom/:sha256", s.getBlob)
-	app.Head("/blossom/:sha256", s.hasBlob)
+	app.Get("/blossom/:hash", s.getBlob)
 	app.Put("/blossom/upload", s.uploadBlob)
-	app.Get("/blossom/list/:pubkey", s.listBlobs)
-	app.Delete("/blossom/:sha256", s.deleteBlob)
 }
 
 func (s *Server) getBlob(c *fiber.Ctx) error {
-	sha256 := c.Params("sha256")
-	data, contentType, err := s.storage.GetBlob(sha256)
+	hash := c.Params("hash")
+	data, err := s.storage.GetBlob(hash)
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"message": "Blob not found"})
 	}
-	c.Set("Content-Type", *contentType)
 	return c.Send(data)
 }
 
-func (s *Server) hasBlob(c *fiber.Ctx) error {
-	sha256 := c.Params("sha256")
-	_, _, err := s.storage.GetBlob(sha256)
-	if err != nil {
-		return c.SendStatus(fiber.StatusNotFound)
-	}
-	return c.SendStatus(fiber.StatusOK)
-}
-
 func (s *Server) uploadBlob(c *fiber.Ctx) error {
-	// TODO: Implement authorization check
-
-	// Replace this with the public key from the nostr auth event when nip-42 is implemented
-	pubkey := c.Params("pubkey")
+	pubkey := c.Query("pubkey")
 
 	data := c.Body()
-	contentType := c.Get("Content-Type")
 
-	descriptor, err := s.storage.StoreBlob(data, contentType, pubkey)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "Failed to store blob"})
+	checkHash := sha256.Sum256(data)
+	encodedHash := hex.EncodeToString(checkHash[:])
+
+	filter := nostr.Filter{
+		Kinds:   []int{117},
+		Authors: []string{pubkey},
+		Tags:    nostr.TagMap{"blossom_hash": []string{encodedHash}},
 	}
 
-	return c.JSON(descriptor)
-}
+	fmt.Println("Recieved a blossom blob")
 
-func (s *Server) listBlobs(c *fiber.Ctx) error {
-	// TODO: Implement authorization check
-
-	pubkey := c.Params("pubkey")
-	since := c.QueryInt("since", 0)
-	until := c.QueryInt("until", int(time.Now().Unix()))
-
-	blobs, err := s.storage.ListBlobs(pubkey, int64(since), int64(until))
+	events, err := s.storage.QueryEvents(filter)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "Failed to list blobs"})
+		return err
 	}
 
-	return c.JSON(blobs)
-}
-
-func (s *Server) deleteBlob(c *fiber.Ctx) error {
-	// TODO: Implement authorization check
-
-	sha256 := c.Params("sha256")
-	err := s.storage.DeleteBlob(sha256)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "Failed to delete blob"})
+	var event *nostr.Event
+	if len(events) <= 0 {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "no events match this file upload"})
 	}
+
+	event = events[0]
+
+	fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
+
+	// Check the submitted hash matches the data being submitted
+	if encodedHash != fileHash.Value() {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "submitted hex encoded hash does not match hex encoded hash of data"})
+	}
+
+	// Store the blob
+	err = s.storage.StoreBlob(data, checkHash[:], pubkey)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to store blob"})
+	}
+
+	fmt.Println("Finished a blossom blob")
 
 	return c.SendStatus(fiber.StatusOK)
 }

@@ -1,14 +1,12 @@
 package memory
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"reflect"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/deroproject/graviton"
 	"github.com/fxamacker/cbor/v2"
@@ -400,67 +398,36 @@ func (store *GravitonMemoryStore) DeleteEvent(eventID string) error {
 	return nil
 }
 
-func (store *GravitonMemoryStore) StoreBlob(data []byte, contentType string, publicKey string) (*types.BlobDescriptor, error) {
+func (store *GravitonMemoryStore) StoreBlob(data []byte, hash []byte, publicKey string) error {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
-	hash := sha256.Sum256(data)
-	sha256Str := hex.EncodeToString(hash[:])
-
-	descriptor := types.BlobDescriptor{
-		URL:      fmt.Sprintf("/%s", sha256Str),
-		SHA256:   sha256Str,
-		Size:     int64(len(data)),
-		Type:     contentType,
-		Uploaded: time.Now().Unix(),
-	}
-
-	serializedDescriptor, err := cbor.Marshal(descriptor)
-	if err != nil {
-		return nil, err
-	}
-
-	blossomTree.Put(hash[:], serializedDescriptor)
 	contentTree.Put(hash[:], data)
 
-	graviton.Commit(blossomTree, contentTree)
+	graviton.Commit(contentTree)
 
-	return &descriptor, nil
+	return nil
 }
 
-func (store *GravitonMemoryStore) GetBlob(hash string) ([]byte, *string, error) {
+func (store *GravitonMemoryStore) GetBlob(hash string) ([]byte, error) {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
 	hashBytes, err := hex.DecodeString(hash)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	serializedDescriptor, err := blossomTree.Get(hashBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var descriptor types.BlobDescriptor
-	err = cbor.Unmarshal(serializedDescriptor, &descriptor)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	content, err := contentTree.Get(hashBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return content, &descriptor.Type, nil
+	return content, nil
 }
 
 func (store *GravitonMemoryStore) DeleteBlob(hash string) error {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
 	hashBytes, err := hex.DecodeString(hash)
@@ -468,39 +435,11 @@ func (store *GravitonMemoryStore) DeleteBlob(hash string) error {
 		return err
 	}
 
-	blossomTree.Delete(hashBytes)
 	contentTree.Delete(hashBytes)
 
+	graviton.Commit(contentTree)
+
 	return nil
-}
-
-func (store *GravitonMemoryStore) ListBlobs(pubkey string, since, until int64) ([]types.BlobDescriptor, error) {
-	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
-	cursor := blossomTree.Cursor()
-
-	results := []types.BlobDescriptor{}
-
-	_, value, cursorErr := cursor.First()
-	for {
-		if cursorErr == nil {
-			break
-		}
-
-		var descriptor types.BlobDescriptor
-		err := cbor.Unmarshal(value, &descriptor)
-		if err != nil {
-			return nil, err
-		}
-
-		if descriptor.Uploaded >= since && descriptor.Uploaded <= until {
-			results = append(results, descriptor)
-		}
-
-		_, value, cursorErr = cursor.Next()
-	}
-
-	return results, nil
 }
 
 func GetBucket(leaf *merkle_dag.DagLeaf) string {

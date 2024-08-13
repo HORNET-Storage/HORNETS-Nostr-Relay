@@ -1,11 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
+	"github.com/anacrolix/dht/v2"
 	"log"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
@@ -17,9 +25,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
-	//"github.com/libp2p/go-libp2p/p2p/security/noise"
-	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	fiber_websocket "github.com/gofiber/contrib/websocket"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
@@ -85,6 +93,8 @@ func init() {
 }
 
 func main() {
+	ctx := context.Background()
+
 	wg := new(sync.WaitGroup)
 
 	// Private key
@@ -103,7 +113,7 @@ func main() {
 		return true
 	})
 
-	upload.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+	canUpload := func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		decodedSignature, err := hex.DecodeString(*signature)
 		if err != nil {
 			return false
@@ -126,7 +136,11 @@ func main() {
 
 		err = signing.VerifyCIDSignature(parsedSignature, cid, publicKey)
 		return err == nil
-	}, func(dag *merkle_dag.Dag, pubKey *string) {})
+	}
+
+	handleUpload := func(dag *merkle_dag.Dag, pubKey *string) {}
+
+	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
 
 	query.AddQueryHandler(host, store)
 
@@ -155,6 +169,7 @@ func main() {
 		nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
 		nostr.RegisterHandler("kind/10001", kind10001.BuildKind10001Handler(store))
 		nostr.RegisterHandler("kind/10002", kind10002.BuildKind10002Handler(store))
+		nostr.RegisterHandler("kind/11011", kind11011.BuildKind11011Handler(store))
 		nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
 		nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
@@ -198,7 +213,7 @@ func main() {
 			stream.Close()
 		}
 
-		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), wrapper)
+		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), middleware.SessionMiddleware(host)(wrapper))
 	}
 
 	// Web Panel
@@ -225,7 +240,11 @@ func main() {
 		fmt.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			err := websocket.StartServer(store)
+			app := websocket.BuildServer(store)
+
+			app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
+
+			err := websocket.StartServer(app)
 
 			if err != nil {
 				fmt.Println("Fatal error occurred in web server")
@@ -235,8 +254,60 @@ func main() {
 		}()
 	}
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+
+		os.Exit(0)
+	}()
+
 	fmt.Printf("Host started with id: %s\n", host.ID())
 	fmt.Printf("Host started with address: %s\n", host.Addrs())
 
+	// start dht server
+	config := dht.NewDefaultServerConfig()
+	dhtServer, err := dht.NewServer(config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dhtServer.Close()
+
+	log.Printf("Starting DHT bootstrap")
+	_, err = dhtServer.Bootstrap()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//Wait for nodes to be added to the routing table
+	for i := 0; i < 30; i++ {
+		stats := dhtServer.Stats()
+		log.Printf("DHT stats: %+v", stats)
+		if stats.GoodNodes > 0 {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	negentropy.SetupNegentropyEventHandler(host, "host", store)
+	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("relay_priv_key"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	selfRelay, err := negentropy.CreateSelfRelay(
+		host.ID().String(),
+		host.Addrs(),
+		viper.GetString("relay_name"),
+		pubKey.SerializeCompressed(),
+		privKey,
+		viper.GetIntSlice("supported_nips"),
+	)
+
+	// this periodically searches dht for other relays, stores them, attempts to sync with them, and uploads self to dht
+	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Minute*1, selfRelay)
+	log.Printf("Created relay store: %+v", relayStore)
+	
 	wg.Wait()
 }
