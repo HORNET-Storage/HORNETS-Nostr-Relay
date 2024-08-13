@@ -44,7 +44,7 @@ func generateKey() *string {
 
 	// TODO: should this not go here?
 	viper.Set("relay_pub_key", serializedPub)
-	viper.Set("relay_priv_key", serializedPriv)
+	viper.Set("key", serializedPriv)
 	log.Println("Generated public/private key pair: ", *serializedPub, "/", *serializedPriv)
 	log.Println("Please copy the private key into your config.json file if you want to re-use it")
 

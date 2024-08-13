@@ -26,7 +26,7 @@ func init() {
 	viper.SetDefault("query_cache", map[string]string{})
 	viper.SetDefault("service_tag", "hornet-storage-service")
 	viper.SetDefault("relay_name", fmt.Sprintf("hornet-storage-%d", rand.Intn(1000000)))
-	viper.SetDefault("relay_priv_key", "")
+	viper.SetDefault("key", "")
 	viper.SetDefault("relay_pub_key", "")
 	viper.SetDefault("supported_nips", []int{0, 1, 3, 5, 6, 7, 8, 97, 1984, 9735, 9372, 9373, 9802, 10000, 10001, 10002, 30000, 30008, 30009, 30023, 30079})
 
@@ -50,7 +50,7 @@ func main() {
 	wg := new(sync.WaitGroup)
 
 	// Private key
-	key := viper.GetString("relay_priv_key")
+	key := viper.GetString("key")
 
 	host := libp2p.GetHost(key)
 
@@ -97,7 +97,7 @@ func main() {
 
 	negentropy.SetupNegentropyEventHandler(host, "host", store)
 	log.Printf("setup negentropy event handler")
-	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("relay_priv_key"))
+	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("key"))
 	log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
 	if err != nil {
 		log.Fatal(err)

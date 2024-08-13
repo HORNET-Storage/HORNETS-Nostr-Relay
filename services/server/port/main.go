@@ -291,7 +291,7 @@ func main() {
 	}
 
 	negentropy.SetupNegentropyEventHandler(host, "host", store)
-	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("relay_priv_key"))
+	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("key"))
 	//log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
 	if err != nil {
 		log.Fatal(err)
