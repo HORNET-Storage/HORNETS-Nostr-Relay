@@ -1,7 +1,9 @@
 package web
 
 import (
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -42,7 +44,8 @@ func handleTransactions(c *fiber.Ctx) error {
 			continue
 		}
 
-		date, err := time.Parse("2006-01-02 15:04:05", dateStr)
+		// Correct format for ISO 8601 datetime string with timezone
+		date, err := time.Parse(time.RFC3339, dateStr)
 		if err != nil {
 			log.Printf("Error parsing date: %v", err)
 			continue
@@ -54,14 +57,20 @@ func handleTransactions(c *fiber.Ctx) error {
 			continue
 		}
 
-		value, ok := transaction["value"].(string)
+		valueStr, ok := transaction["value"].(string)
 		if !ok {
 			log.Printf("Invalid value format: %v", transaction["value"])
 			continue
 		}
 
+		value, err := strconv.ParseFloat(valueStr, 64)
+		if err != nil {
+			log.Printf("Error parsing value to float64: %v", err)
+			continue
+		}
+
 		var existingTransaction types.WalletTransactions
-		result := db.Where("address = ? AND date = ? AND output = ? AND value = ?", address, date, output, value).First(&existingTransaction)
+		result := db.Where("address = ? AND date = ? AND output = ? AND value = ?", address, date, output, valueStr).First(&existingTransaction)
 
 		if result.Error == nil {
 			// Transaction already exists, skip it
@@ -79,7 +88,7 @@ func handleTransactions(c *fiber.Ctx) error {
 			Address: address,
 			Date:    date,
 			Output:  output,
-			Value:   value,
+			Value:   fmt.Sprintf("%.8f", value),
 		}
 		if err := db.Create(&newTransaction).Error; err != nil {
 			log.Printf("Error saving new transaction: %v", err)
