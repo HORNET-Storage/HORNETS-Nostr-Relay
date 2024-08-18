@@ -5,6 +5,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 )
 
 func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState) {
@@ -57,6 +58,12 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
+	err = sessions.CreateSession(env.Event.PubKey)
+	if err != nil {
+		write("NOTICE", "Failed to create session")
+		return
+	}
+
 	err = AuthenticateConnection(c)
 	if err != nil {
 		write("OK", env.Event.ID, false, "Error authorizing connection")
@@ -64,6 +71,13 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	}
 
 	state.authenticated = true
+
+	if state.authenticated {
+		// Authenticating user session.
+		userSession := sessions.GetSession(env.Event.PubKey)
+		userSession.Signature = &env.Event.Sig
+		userSession.Authenticated = true
+	}
 
 	write("OK", env.Event.ID, true, "")
 }
