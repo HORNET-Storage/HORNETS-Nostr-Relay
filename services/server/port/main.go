@@ -65,7 +65,7 @@ import (
 )
 
 func init() {
-	viper.SetDefault("key", "37ce94dba2bf15b63a8b93d385fa7a92e8a3da0bb5293bc1df18a313a68c6c4a")
+	viper.SetDefault("key", "")
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
@@ -100,6 +100,8 @@ func main() {
 	ctx := context.Background()
 
 	wg := new(sync.WaitGroup)
+
+	viper.Set("key", os.Getenv("NOSTR_PUBLIC_KEY"))
 
 	// Private key
 	key := viper.GetString("key")
