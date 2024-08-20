@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"github.com/anacrolix/dht/v2"
@@ -86,7 +85,7 @@ func init() {
 	}
 
 	viper.OnConfigChange(func(e fsnotify.Event) {
-		fmt.Println("Config file changed:", e.Name)
+		log.Println("Config file changed:", e.Name)
 	})
 
 	viper.WatchConfig()
@@ -152,8 +151,10 @@ func main() {
 
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
+		log.Println("Using universal stream handler")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	} else if settings.Mode == "smart" {
+		log.Println("Using specific stream handlers")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
@@ -175,6 +176,8 @@ func main() {
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
 		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
+	} else {
+		log.Fatal("Unknown settings mode, exiting")
 	}
 
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
@@ -220,13 +223,13 @@ func main() {
 	if viper.GetBool("web") {
 		wg.Add(1)
 
-		fmt.Println("Starting with web server enabled")
+		log.Println("Starting with web server enabled")
 
 		go func() {
 			err := web.StartServer()
 
 			if err != nil {
-				fmt.Println("Fatal error occurred in web server")
+				log.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
@@ -237,7 +240,7 @@ func main() {
 	if viper.GetBool("proxy") {
 		wg.Add(1)
 
-		fmt.Println("Starting with legacy nostr proxy web server enabled")
+		log.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
 			app := websocket.BuildServer(store)
@@ -247,7 +250,7 @@ func main() {
 			err := websocket.StartServer(app)
 
 			if err != nil {
-				fmt.Println("Fatal error occurred in web server")
+				log.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
@@ -263,8 +266,8 @@ func main() {
 		os.Exit(0)
 	}()
 
-	fmt.Printf("Host started with id: %s\n", host.ID())
-	fmt.Printf("Host started with address: %s\n", host.Addrs())
+	log.Printf("Host started with id: %s\n", host.ID())
+	log.Printf("Host started with address: %s\n", host.Addrs())
 
 	// start dht server
 	config := dht.NewDefaultServerConfig()

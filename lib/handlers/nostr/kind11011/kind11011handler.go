@@ -1,6 +1,7 @@
 package kind11011
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,7 @@ import (
 // BuildKind11011Handler constructs and returns a handler function for kind 10000 (Mute List) events.
 func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+		log.Printf("Handling kind 11011")
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 		// Read data from the stream.
@@ -103,19 +105,23 @@ func getDHTPayloadPubkeySig(event *nostr.Event) (string, string, string, bool) {
 // payload should be something like 4:salt6:foobar3:seqi4e1:v12:Hello world!
 func getURLs(payload string, signature string, pubKey string) ([]string, error) {
 	//putString := string(put)
-	decoder := bencode.NewDecoder(strings.NewReader(payload))
+	payloadBytes, err := hex.DecodeString(payload)
+	if err != nil {
+		return nil, err
+	}
+	decoder := bencode.NewDecoder(bytes.NewReader(payloadBytes))
 
 	var decoded map[string]interface{}
 
-	err := decoder.Decode(&decoded)
+	err = decoder.Decode(&decoded)
 	if err != nil {
-		fmt.Println("Error decoding:", err)
+		log.Println("Error decoding:", err)
 		return nil, err
 	}
 
-	fmt.Printf("salt: %s\n", decoded["salt"])
-	fmt.Printf("seq: %d\n", decoded["seq"])
-	fmt.Printf("v: %s\n", decoded["v"])
+	log.Printf("salt: %s\n", decoded["salt"])
+	log.Printf("seq: %d\n", decoded["seq"])
+	log.Printf("v: %s\n", decoded["v"])
 
 	// Decode the hex string into a byte slice
 	pubKeyBytes, err := hex.DecodeString(pubKey)
@@ -124,18 +130,13 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 	}
 
 	// Check if the decoded byte slice has the correct length for an Ed25519 public key
-	if len(pubKeyBytes) != ed25519.PublicKeySize {
-		str := fmt.Sprintf("Invalid public key length. Expected %d bytes, got %d", ed25519.PublicKeySize, len(pubKeyBytes))
-		return nil, errors.New(str)
-	}
+	//if len(pubKeyBytes) != ed25519.PublicKeySize {
+	//	str := fmt.Sprintf("Invalid public key length. Expected %d bytes, got %d", ed25519.PublicKeySize, len(pubKeyBytes))
+	//	return nil, errors.New(str)
+	//}
 
 	// Create an Ed25519 public key from the byte slice
 	key := ed25519.PublicKey(pubKeyBytes)
-
-	payloadBytes, err := hex.DecodeString(payload)
-	if err != nil {
-		return nil, err
-	}
 
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil {
@@ -144,9 +145,9 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 
 	// Verify the signature
 	if ed25519.Verify(key, payloadBytes, sigBytes) {
-		fmt.Println("Signature is valid!")
+		log.Println("Signature is valid!")
 	} else {
-		fmt.Println("Signature is invalid!")
+		log.Println("Signature is invalid!")
 		return nil, errors.New("signature is invalid")
 	}
 
@@ -170,7 +171,7 @@ func parseURLs(input string) []string {
 		if err == nil {
 			multiAddrs = append(multiAddrs, multi)
 		} else {
-			fmt.Printf("Warning: Invalid URL skipped: %s\n", urlString)
+			log.Printf("Warning: Invalid URL skipped: %s\n", urlString)
 		}
 	}
 
