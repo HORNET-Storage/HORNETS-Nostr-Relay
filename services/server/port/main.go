@@ -151,10 +151,10 @@ func main() {
 
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
-		log.Println("Using universal stream handler")
+		log.Println("Using universal stream handler because Mode set to 'unlimited'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	} else if settings.Mode == "smart" {
-		log.Println("Using specific stream handlers")
+		log.Println("Using specific stream handlers because Mode set to 'smart'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
@@ -177,7 +177,7 @@ func main() {
 		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
 	} else {
-		log.Fatal("Unknown settings mode, exiting")
+		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
 	}
 
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))

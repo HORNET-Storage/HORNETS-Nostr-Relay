@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
@@ -50,7 +51,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		relayURLs, err := getURLs(payload, pubkey, sig)
+		relayURLs, err := getURLs(payload, sig, pubkey)
 		if err != nil {
 			log.Printf("Error parsing relay URLs: %v", err)
 			write("NOTICE", "Error parsing URLs from tags.")
@@ -129,12 +130,6 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 		return nil, err
 	}
 
-	// Check if the decoded byte slice has the correct length for an Ed25519 public key
-	//if len(pubKeyBytes) != ed25519.PublicKeySize {
-	//	str := fmt.Sprintf("Invalid public key length. Expected %d bytes, got %d", ed25519.PublicKeySize, len(pubKeyBytes))
-	//	return nil, errors.New(str)
-	//}
-
 	// Create an Ed25519 public key from the byte slice
 	key := ed25519.PublicKey(pubKeyBytes)
 
@@ -155,8 +150,13 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 }
 
 func parseURLs(input string) []string {
-	// Split the input string by commas
-	urlStrings := strings.Split(input, ",")
+
+	var urlStrings []string
+	err := json.Unmarshal([]byte(input), &urlStrings)
+	if err != nil {
+		log.Println("Error parsing JSON:", err)
+		return []string{}
+	}
 
 	// Create a slice to store valid URLs
 	var multiAddrs []string
