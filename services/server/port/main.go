@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
-	"github.com/anacrolix/dht/v2"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -149,6 +149,32 @@ func main() {
 		return
 	}
 
+	log.Printf("Host started with id: %s\n", host.ID())
+	log.Printf("Host started with address: %s\n", host.Addrs())
+
+	negentropy.SetupNegentropyEventHandler(host, "host", store)
+	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("key"))
+	//log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	viper.Set("LibP2PID", host.ID().String())
+	viper.Set("LibP2PAddrs", host.Addrs())
+	selfRelay := ws.GetRelayInfo()
+	err = negentropy.SignRelay(&selfRelay, privKey)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dhtServer := negentropy.DefaultDHTServer()
+	defer dhtServer.Close()
+
+	// this periodically searches dht for other relays, stores them, attempts to sync with them, and uploads self to dht
+	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Minute*1, &selfRelay)
+	log.Printf("Created relay store: %+v", relayStore)
+
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
 		log.Println("Using universal stream handler because Mode set to 'unlimited'")
@@ -257,64 +283,14 @@ func main() {
 		}()
 	}
 
+	// Handle kill signals
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigs
-
 		os.Exit(0)
 	}()
-
-	log.Printf("Host started with id: %s\n", host.ID())
-	log.Printf("Host started with address: %s\n", host.Addrs())
-
-	// start dht server
-	config := dht.NewDefaultServerConfig()
-	dhtServer, err := dht.NewServer(config)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer dhtServer.Close()
-
-	log.Printf("Starting DHT bootstrap")
-	_, err = dhtServer.Bootstrap()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	//Wait for nodes to be added to the routing table
-	for i := 0; i < 30; i++ {
-		stats := dhtServer.Stats()
-		log.Printf("DHT stats: %+v", stats)
-		if stats.GoodNodes > 0 {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	negentropy.SetupNegentropyEventHandler(host, "host", store)
-	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("key"))
-	//log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	selfRelay, err := negentropy.CreateSelfRelay(
-		host.ID().String(),
-		host.Addrs(),
-		viper.GetString("relay_name"),
-		pubKey.SerializeCompressed(),
-		privKey,
-		viper.GetIntSlice("supported_nips"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// this periodically searches dht for other relays, stores them, attempts to sync with them, and uploads self to dht
-	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Minute*1, selfRelay)
-	log.Printf("Created relay store: %+v", relayStore)
 
 	wg.Wait()
 }

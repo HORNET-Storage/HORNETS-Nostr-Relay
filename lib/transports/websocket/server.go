@@ -75,7 +75,7 @@ func handleRelayInfoRequests(c *fiber.Ctx) error {
 }
 
 func GetRelayInfo() NIP11RelayInfo {
-	return NIP11RelayInfo{
+	relayInfo := NIP11RelayInfo{
 		Name:          viper.GetString("RelayName"),
 		Description:   viper.GetString("RelayDescription"),
 		Pubkey:        viper.GetString("RelayPubkey"),
@@ -84,6 +84,17 @@ func GetRelayInfo() NIP11RelayInfo {
 		Software:      viper.GetString("RelaySoftware"),
 		Version:       viper.GetString("RelayVersion"),
 	}
+
+	libp2pId := viper.GetString("LibP2PID")
+	libp2pAddrs := viper.GetStringSlice("LibP2PAddrs")
+	if libp2pId != "" && len(libp2pAddrs) > 0 {
+		relayInfo.HornetExtension = &HornetExtension{
+			LibP2PID:    libp2pId,
+			LibP2PAddrs: libp2pAddrs,
+		}
+	}
+
+	return relayInfo
 }
 
 func handleWebSocketConnections(c *websocket.Conn) {

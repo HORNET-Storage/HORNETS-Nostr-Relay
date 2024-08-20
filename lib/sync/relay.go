@@ -39,7 +39,7 @@ func CreateSelfRelay(id string, multiAddrs []ma.Multiaddr, name string, pubKey [
 }
 
 func SignRelay(relay *ws.NIP11RelayInfo, privKey *btcec.PrivateKey) error {
-	relayBytes := PackBytes(relay)
+	relayBytes := PackRelayForSig(relay)
 	hash := sha256.Sum256(relayBytes)
 
 	signature, err := schnorr.Sign(privKey, hash[:])
@@ -47,27 +47,25 @@ func SignRelay(relay *ws.NIP11RelayInfo, privKey *btcec.PrivateKey) error {
 		return err
 	}
 
+	if relay.HornetExtension == nil {
+		relay.HornetExtension = &ws.HornetExtension{}
+	}
+
 	relay.HornetExtension.Signature = hex.EncodeToString(signature.Serialize())
 	return nil
 }
 
-func PackBytes(nr *ws.NIP11RelayInfo) []byte {
+func PackRelayForSig(nr *ws.NIP11RelayInfo) []byte {
 	var packed []byte
 
-	// Pack ID
-	packed = append(packed, []byte(nr.HornetExtension.LibP2PID)...)
-	packed = append(packed, 0) // null terminator
-
+	// TODO: include all fields here
 	// Pack Name
 	packed = append(packed, []byte(nr.Name)...)
 	packed = append(packed, 0) // null terminator
 
-	// Pack Addrs
-	for _, addr := range nr.HornetExtension.LibP2PAddrs {
-		packed = append(packed, []byte(addr)...)
-		packed = append(packed, 0) // null terminator
-	}
-	packed = append(packed, 0) // double null terminator to indicate end of Addrs
+	// Pack Description
+	packed = append(packed, []byte(nr.Description)...)
+	packed = append(packed, 0)
 
 	// Pack PublicKey
 	pubkeyBytes, err := hex.DecodeString(nr.Pubkey)
@@ -77,6 +75,10 @@ func PackBytes(nr *ws.NIP11RelayInfo) []byte {
 		packed = append(packed, pubkeyBytes...)
 	}
 
+	// Pack Contact
+	packed = append(packed, []byte(nr.Contact)...)
+	packed = append(packed, 0)
+
 	// Pack SupportedNIPs (sorted)
 	sort.Ints(nr.SupportedNIPs)
 	for _, nip := range nr.SupportedNIPs {
@@ -85,11 +87,38 @@ func PackBytes(nr *ws.NIP11RelayInfo) []byte {
 		packed = append(packed, nipBytes...)
 	}
 
+	// Pack Software
+	packed = append(packed, []byte(nr.Software)...)
+	packed = append(packed, 0)
+
+	// Pack Version
+	packed = append(packed, []byte(nr.Version)...)
+	packed = append(packed, 0)
+
+	if nr.HornetExtension != nil {
+		// Pack ID
+		packed = append(packed, []byte(nr.HornetExtension.LibP2PID)...)
+		packed = append(packed, 0) // null terminator
+
+		// Pack Addrs
+		for _, addr := range nr.HornetExtension.LibP2PAddrs {
+			packed = append(packed, []byte(addr)...)
+			packed = append(packed, 0) // null terminator
+		}
+		packed = append(packed, 0) // double null terminator to indicate end of Addrs
+
+		// Pack LastUpdated
+		unixTime := nr.HornetExtension.LastUpdated.Unix()
+		timeBytes := make([]byte, 8) // Use 8 bytes for int64
+		binary.BigEndian.PutUint64(timeBytes, uint64(unixTime))
+		packed = append(packed, timeBytes...)
+	}
+
 	return packed
 }
 
 func CheckSig(relay *ws.NIP11RelayInfo) error {
-	packedBytes := PackBytes(relay)
+	packedBytes := PackRelayForSig(relay)
 	hash := sha256.Sum256(packedBytes)
 
 	// Parse the public key

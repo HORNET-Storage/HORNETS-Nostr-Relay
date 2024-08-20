@@ -95,10 +95,10 @@ func GetRelayStore() *RelayStore {
 	return store
 }
 
-func (rs *RelayStore) AddRelay(relay ws.NIP11RelayInfo) {
+func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
 	rs.mutex.Lock()
 	defer rs.mutex.Unlock()
-	rs.relays[relay.HornetExtension.LibP2PID] = relay
+	rs.relays[relay.Pubkey] = *relay
 }
 
 func (rs *RelayStore) GetRelays() []ws.NIP11RelayInfo {
@@ -129,7 +129,7 @@ func (rs *RelayStore) periodicSearchUploadSync() {
 				}
 			}
 			for _, relay := range relays {
-				rs.AddRelay(relay)
+				rs.AddRelay(&relay)
 				rs.SyncWithRelay(&relay)
 			}
 		case <-rs.stopChan:
