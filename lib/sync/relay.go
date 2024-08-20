@@ -1,48 +1,45 @@
 package sync
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/gofiber/fiber/v2/log"
 	ma "github.com/multiformats/go-multiaddr"
 	"sort"
+	"time"
 )
 
-type NostrRelay struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Addrs         []string `json:"addrs"`
-	PublicKey     []byte   `json:"public_key"`
-	Signature     []byte   `json:"signature"`
-	SupportedNIPs []int    `json:"supported_nips"`
-}
-
-func CreateSelfRelay(id string, multiAddrs []ma.Multiaddr, name string, pubKey []byte, privKey *btcec.PrivateKey, supportedNIPs []int) (*NostrRelay, error) {
+func CreateSelfRelay(id string, multiAddrs []ma.Multiaddr, name string, pubKey []byte, privKey *btcec.PrivateKey, supportedNIPs []int) (*ws.NIP11RelayInfo, error) {
 	addrStrings := []string{}
 	for _, multiAddr := range multiAddrs {
 		addrStrings = append(addrStrings, multiAddr.String())
 	}
 
-	self := &NostrRelay{
-		ID:            id,
-		Addrs:         addrStrings,
+	self := &ws.NIP11RelayInfo{
 		Name:          name,
-		PublicKey:     pubKey,
+		Pubkey:        hex.EncodeToString(pubKey),
 		SupportedNIPs: supportedNIPs,
+		HornetExtension: &ws.HornetExtension{
+			LibP2PID:    id,
+			LibP2PAddrs: addrStrings,
+			LastUpdated: time.Now().UTC(),
+		},
 	}
 
-	err := self.SignRelay(privKey)
+	err := SignRelay(self, privKey)
 	if err != nil {
 		return nil, err
 	}
 	return self, nil
 }
 
-func (relay *NostrRelay) SignRelay(privKey *btcec.PrivateKey) error {
-	relayBytes := relay.PackBytes()
+func SignRelay(relay *ws.NIP11RelayInfo, privKey *btcec.PrivateKey) error {
+	relayBytes := PackBytes(relay)
 	hash := sha256.Sum256(relayBytes)
 
 	signature, err := schnorr.Sign(privKey, hash[:])
@@ -50,15 +47,15 @@ func (relay *NostrRelay) SignRelay(privKey *btcec.PrivateKey) error {
 		return err
 	}
 
-	relay.Signature = signature.Serialize()
+	relay.HornetExtension.Signature = hex.EncodeToString(signature.Serialize())
 	return nil
 }
 
-func (nr *NostrRelay) PackBytes() []byte {
+func PackBytes(nr *ws.NIP11RelayInfo) []byte {
 	var packed []byte
 
 	// Pack ID
-	packed = append(packed, []byte(nr.ID)...)
+	packed = append(packed, []byte(nr.HornetExtension.LibP2PID)...)
 	packed = append(packed, 0) // null terminator
 
 	// Pack Name
@@ -66,14 +63,19 @@ func (nr *NostrRelay) PackBytes() []byte {
 	packed = append(packed, 0) // null terminator
 
 	// Pack Addrs
-	for _, addr := range nr.Addrs {
+	for _, addr := range nr.HornetExtension.LibP2PAddrs {
 		packed = append(packed, []byte(addr)...)
 		packed = append(packed, 0) // null terminator
 	}
 	packed = append(packed, 0) // double null terminator to indicate end of Addrs
 
 	// Pack PublicKey
-	packed = append(packed, nr.PublicKey[:]...)
+	pubkeyBytes, err := hex.DecodeString(nr.Pubkey)
+	if err != nil {
+		log.Warnf("Skipping packing invalid pubkey %s", nr.Pubkey)
+	} else {
+		packed = append(packed, pubkeyBytes...)
+	}
 
 	// Pack SupportedNIPs (sorted)
 	sort.Ints(nr.SupportedNIPs)
@@ -86,18 +88,26 @@ func (nr *NostrRelay) PackBytes() []byte {
 	return packed
 }
 
-func (relay *NostrRelay) CheckSig() error {
-	packedBytes := relay.PackBytes()
+func CheckSig(relay *ws.NIP11RelayInfo) error {
+	packedBytes := PackBytes(relay)
 	hash := sha256.Sum256(packedBytes)
 
 	// Parse the public key
-	pubKey, err := btcec.ParsePubKey(relay.PublicKey[:])
+	pubKeyBytes, err := hex.DecodeString(relay.Pubkey)
+	if err != nil {
+		return errors.New("failed to decode public key to bytes")
+	}
+	pubKey, err := btcec.ParsePubKey(pubKeyBytes)
 	if err != nil {
 		return errors.New("failed to parse public key")
 	}
 
 	// Parse the signature
-	sig, err := schnorr.ParseSignature(relay.Signature)
+	sigBytes, err := hex.DecodeString(relay.HornetExtension.Signature)
+	if err != nil {
+		return errors.New("failed to decode public key")
+	}
+	sig, err := schnorr.ParseSignature(sigBytes)
 	if err != nil {
 		return errors.New("failed to parse signature")
 	}
@@ -110,21 +120,21 @@ func (relay *NostrRelay) CheckSig() error {
 	return nil
 }
 
-func (nr *NostrRelay) Equals(other *NostrRelay) bool {
+func Equals(nr *ws.NIP11RelayInfo, other *ws.NIP11RelayInfo) bool {
 	if nr == nil || other == nil {
 		return nr == other
 	}
 
 	// Compare ID
-	if nr.ID != other.ID {
+	if nr.HornetExtension.LibP2PID != other.HornetExtension.LibP2PID {
 		return false
 	}
 
-	if len(nr.Addrs) != len(other.Addrs) {
+	if len(nr.HornetExtension.LibP2PAddrs) != len(other.HornetExtension.LibP2PAddrs) {
 		return false
 	}
-	for i, addr := range nr.Addrs {
-		if addr != other.Addrs[i] {
+	for i, addr := range nr.HornetExtension.LibP2PAddrs {
+		if addr != other.HornetExtension.LibP2PAddrs[i] {
 			return false
 		}
 	}
@@ -135,12 +145,12 @@ func (nr *NostrRelay) Equals(other *NostrRelay) bool {
 	}
 
 	// Compare PublicKey
-	if !bytes.Equal(nr.PublicKey, other.PublicKey) {
+	if nr.Pubkey != other.Pubkey {
 		return false
 	}
 
 	// Compare Signature
-	if !bytes.Equal(nr.Signature, other.Signature) {
+	if nr.HornetExtension.Signature != other.HornetExtension.Signature {
 		return false
 	}
 

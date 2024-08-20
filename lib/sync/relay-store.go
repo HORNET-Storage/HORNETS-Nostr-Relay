@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/exts/getput"
@@ -21,13 +22,14 @@ import (
 	"log"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
 type RelayStore struct {
-	relays       map[string]NostrRelay
-	selfRelay    NostrRelay
+	relays       map[string]ws.NIP11RelayInfo
+	selfRelay    ws.NIP11RelayInfo
 	libp2pHost   host.Host
 	eventStore   *stores_graviton.GravitonStore
 	mutex        sync.RWMutex
@@ -67,9 +69,9 @@ var (
 	storeMutex sync.RWMutex
 )
 
-func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, self *NostrRelay) *RelayStore {
+func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, self *ws.NIP11RelayInfo) *RelayStore {
 	rs := &RelayStore{
-		relays:       make(map[string]NostrRelay),
+		relays:       make(map[string]ws.NIP11RelayInfo),
 		selfRelay:    *self,
 		libp2pHost:   host,
 		eventStore:   eventStore,
@@ -93,23 +95,23 @@ func GetRelayStore() *RelayStore {
 	return store
 }
 
-func (rs *RelayStore) AddRelay(relay NostrRelay) {
+func (rs *RelayStore) AddRelay(relay ws.NIP11RelayInfo) {
 	rs.mutex.Lock()
 	defer rs.mutex.Unlock()
-	rs.relays[relay.ID] = relay
+	rs.relays[relay.HornetExtension.LibP2PID] = relay
 }
 
-func (rs *RelayStore) GetRelays() []NostrRelay {
+func (rs *RelayStore) GetRelays() []ws.NIP11RelayInfo {
 	rs.mutex.RLock()
 	defer rs.mutex.RUnlock()
-	relays := make([]NostrRelay, 0, len(rs.relays))
+	relays := make([]ws.NIP11RelayInfo, 0, len(rs.relays))
 	for _, relay := range rs.relays {
 		relays = append(relays, relay)
 	}
 	return relays
 }
 
-func (rs *RelayStore) GetSelfRelay() NostrRelay {
+func (rs *RelayStore) GetSelfRelay() ws.NIP11RelayInfo {
 	rs.mutex.RLock()
 	defer rs.mutex.RUnlock()
 	return rs.selfRelay
@@ -137,12 +139,12 @@ func (rs *RelayStore) periodicSearchUploadSync() {
 	}
 }
 
-func (rs *RelayStore) SyncWithRelay(relay *NostrRelay) {
+func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	addrs := []ma.Multiaddr{}
-	for _, addr := range relay.Addrs {
+	for _, addr := range relay.HornetExtension.LibP2PAddrs {
 		multiAddr, err := ma.NewMultiaddr(addr)
 		if err == nil {
 			addrs = append(addrs, multiAddr)
@@ -151,7 +153,7 @@ func (rs *RelayStore) SyncWithRelay(relay *NostrRelay) {
 		}
 	}
 
-	target := peer.AddrInfo{ID: peer.ID(relay.ID), Addrs: addrs}
+	target := peer.AddrInfo{ID: peer.ID(relay.HornetExtension.LibP2PID), Addrs: addrs}
 	if err := rs.libp2pHost.Connect(ctx, target); err != nil {
 		log.Printf("Error connecting to %+v: %v", target, err)
 	}
@@ -175,15 +177,15 @@ func (rs *RelayStore) SyncWithRelay(relay *NostrRelay) {
 
 }
 
-func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]NostrRelay, []int) {
+func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]ws.NIP11RelayInfo, []int) {
 	log.Printf("Searching for relays from %d to %d", minIndex, maxIndex)
 	type result struct {
 		index int
-		relay NostrRelay
+		relay ws.NIP11RelayInfo
 		found bool
 	}
 
-	var relays []NostrRelay
+	var relays []ws.NIP11RelayInfo
 	var unoccupiedSlots []int
 	ch := make(chan result, maxIndex-minIndex)
 
@@ -206,7 +208,7 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 				return
 			}
 
-			foundRelay := NostrRelay{}
+			foundRelay := ws.NIP11RelayInfo{}
 			err = json.Unmarshal(data, &foundRelay)
 			if err != nil {
 				fmt.Printf("Could not unmarshall into NostrRelay %x : %v\n", data, err)
@@ -214,7 +216,7 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 				return
 			}
 
-			err = foundRelay.CheckSig()
+			err = CheckSig(&foundRelay)
 			if err != nil {
 				fmt.Printf("Signature verification failed %+v : %v\n", foundRelay, err)
 				ch <- result{index: i, found: false}
@@ -326,11 +328,9 @@ func createMutableTarget(pubKey []byte, salt []byte) krpc.ID {
 	return sha1.Sum(append(pubKey[:], salt...))
 }
 
-func MarshalRelay(nr NostrRelay) ([]byte, error) {
-	// Create a map to hold our data
+func MarshalRelay(nr ws.NIP11RelayInfo) ([]byte, error) {
 	m := make(map[string]interface{})
 
-	// Use reflection to get all fields
 	v := reflect.ValueOf(nr)
 	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
@@ -338,7 +338,18 @@ func MarshalRelay(nr NostrRelay) ([]byte, error) {
 		value := v.Field(i).Interface()
 		jsonTag := field.Tag.Get("json")
 		if jsonTag != "" && jsonTag != "-" {
-			m[jsonTag] = value
+			// Split the json tag to get just the field name
+			parts := strings.Split(jsonTag, ",")
+			key := parts[0]
+
+			// Only add non-empty values if "omitempty" is specified
+			if len(parts) > 1 && parts[1] == "omitempty" {
+				if !reflect.ValueOf(value).IsZero() {
+					m[key] = value
+				}
+			} else {
+				m[key] = value
+			}
 		}
 	}
 

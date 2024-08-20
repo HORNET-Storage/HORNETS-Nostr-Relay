@@ -3,9 +3,11 @@ package test
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/exts/getput"
@@ -49,10 +51,12 @@ func TestPutGetDHT(t *testing.T) {
 
 	// 2. Create a sample relay
 	randomInt := rand.Intn(100000)
-	sampleRelay := sync.NostrRelay{
-		ID:    "wss://example.com",
-		Addrs: []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
-		Name:  fmt.Sprintf("Test Relay: %d", randomInt),
+	sampleRelay := ws.NIP11RelayInfo{
+		Name: fmt.Sprintf("Test Relay: %d", randomInt),
+		HornetExtension: &ws.HornetExtension{
+			LibP2PID:    "wss://example.com",
+			LibP2PAddrs: []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
+		},
 	}
 	relayBytes, err := sync.MarshalRelay(sampleRelay)
 	require.NoError(t, err)
@@ -72,12 +76,16 @@ func TestPutGetDHT(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("Got result: %+v", decodedValue)
 
+	var prettyJSON bytes.Buffer
+	json.Indent(&prettyJSON, decodedValue, "", "  ")
+	t.Logf("Received JSON:\n%s", prettyJSON.String())
+
 	// 8. Verify the result
-	foundRelay := sync.NostrRelay{}
+	foundRelay := ws.NIP11RelayInfo{}
 	err = json.Unmarshal(decodedValue, &foundRelay)
 	require.NoError(t, err)
 
-	if sampleRelay.Equals(&foundRelay) == false {
+	if sync.Equals(&sampleRelay, &foundRelay) == false {
 		t.Fatalf("Sample and found relays do not match %v", err)
 	}
 
@@ -264,13 +272,15 @@ func TestPutAndSearchDHT(t *testing.T) {
 
 	// Get the corresponding public key
 	nostrPub := nostrPriv.PubKey()
-	sampleRelay := sync.NostrRelay{
-		ID:            "wss://example.com",
-		Addrs:         []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
-		PublicKey:     nostrPub.SerializeCompressed(),
+	sampleRelay := ws.NIP11RelayInfo{
+		Pubkey:        hex.EncodeToString(nostrPub.SerializeCompressed()),
 		SupportedNIPs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
+		HornetExtension: &ws.HornetExtension{
+			LibP2PID:    "wss://example.com",
+			LibP2PAddrs: []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
+		},
 	}
-	err = sampleRelay.SignRelay(nostrPriv)
+	err = sync.SignRelay(&sampleRelay, nostrPriv)
 	require.NoError(t, err)
 	relayBytes, err := sync.MarshalRelay(sampleRelay)
 	require.NoError(t, err)
@@ -292,6 +302,6 @@ func TestPutAndSearchDHT(t *testing.T) {
 	t.Logf("found %d unoccupied slots: %v and %d relays: %v", len(unoccupied), unoccupied, len(relays), relays)
 
 	require.True(t, len(relays) == 1)
-	require.True(t, sampleRelay.Equals(&relays[0]))
+	require.True(t, sync.Equals(&sampleRelay, &relays[0]))
 
 }

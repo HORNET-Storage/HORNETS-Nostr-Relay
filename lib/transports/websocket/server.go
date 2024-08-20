@@ -67,15 +67,15 @@ func StartServer(app *fiber.App) error {
 
 func handleRelayInfoRequests(c *fiber.Ctx) error {
 	if c.Method() == "GET" && c.Get("Accept") == "application/nostr+json" {
-		relayInfo := getRelayInfo()
+		relayInfo := GetRelayInfo()
 		c.Set("Access-Control-Allow-Origin", "*")
 		return c.JSON(relayInfo)
 	}
 	return c.Next()
 }
 
-func getRelayInfo() nip11RelayInfo {
-	return nip11RelayInfo{
+func GetRelayInfo() NIP11RelayInfo {
+	return NIP11RelayInfo{
 		Name:          viper.GetString("RelayName"),
 		Description:   viper.GetString("RelayDescription"),
 		Pubkey:        viper.GetString("RelayPubkey"),
