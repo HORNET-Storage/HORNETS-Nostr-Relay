@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
@@ -22,8 +23,14 @@ import (
 	"github.com/spf13/viper"
 )
 
-const envFile = ".env"
-const nostrPrivateKeyVar = "NOSTR_PRIVATE_KEY"
+// Address status constants
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+	AddressStatusUsed      = "used"
+	envFile                = ".env"
+	nostrPrivateKeyVar     = "NOSTR_PRIVATE_KEY"
+)
 
 type RelayInfo struct {
 	Name          string `json:"name"`
@@ -231,25 +238,7 @@ func generateAndSaveNostrPrivateKey() error {
 	return nil
 }
 
-type SubscriptionTier struct {
-	DataLimit string
-	Price     string
-}
-
-type Address struct {
-	Index       uint
-	Address     string
-	Status      string
-	AllocatedAt *time.Time
-}
-
-const (
-	AddressStatusAvailable = "available"
-	AddressStatusAllocated = "allocated"
-	AddressStatusUsed      = "used"
-)
-
-func allocateAddress(store *stores_graviton.GravitonStore) (*Address, error) {
+func allocateAddress(store *stores_graviton.GravitonStore) (*types.Address, error) {
 	ss, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
@@ -262,7 +251,7 @@ func allocateAddress(store *stores_graviton.GravitonStore) (*Address, error) {
 
 	cursor := addressTree.Cursor()
 	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
-		var addr Address
+		var addr types.Address
 		if err := json.Unmarshal(v, &addr); err != nil {
 			return nil, err
 		}
@@ -275,7 +264,7 @@ func allocateAddress(store *stores_graviton.GravitonStore) (*Address, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := addressTree.Put([]byte(fmt.Sprintf("%d", addr.Index)), value); err != nil {
+			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
 				return nil, err
 			}
 			if _, err := graviton.Commit(addressTree); err != nil {
@@ -289,10 +278,10 @@ func allocateAddress(store *stores_graviton.GravitonStore) (*Address, error) {
 }
 
 func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *stores_graviton.GravitonStore) (*nostr.Event, error) {
-	subscriptionTiers := []SubscriptionTier{
-		{"1 GB per month", "10,000 sats"},
-		{"5 GB per month", "40,000 sats"},
-		{"10 GB per month", "70,000 sats"},
+	subscriptionTiers := []types.SubscriptionTier{
+		{DataLimit: "1 GB per month", Price: "10,000 sats"},
+		{DataLimit: "5 GB per month", Price: "40,000 sats"},
+		{DataLimit: "10 GB per month", Price: "70,000 sats"},
 	}
 
 	// Allocate a new address for this subscription

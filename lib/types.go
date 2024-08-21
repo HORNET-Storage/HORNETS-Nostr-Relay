@@ -223,6 +223,15 @@ type User struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
 
+// Address structure to be stored in Graviton
+type Address struct {
+	Index       string     `json:"index"`
+	Address     string     `json:"address"`
+	WalletName  string     `json:"wallet_name"`
+	Status      string     `json:"status,omitempty"`
+	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
+}
+
 // type User struct {
 // 	ID        uint `gorm:"primaryKey"`
 // 	FirstName string
@@ -280,6 +289,11 @@ type JWTClaims struct {
 type Libp2pStream struct {
 	Stream network.Stream
 	Ctx    context.Context
+}
+
+type SubscriptionTier struct {
+	DataLimit string
+	Price     string
 }
 
 func (ls *Libp2pStream) Read(msg []byte) (int, error) {

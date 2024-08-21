@@ -146,21 +146,6 @@ func main() {
 		return
 	}
 
-	// serializedPubKey, err := signing.SerializePublicKey(pubKey)
-	// if err != nil {
-	// 	log.Printf("Failed to serialize public key %s", err)
-	// }
-
-	// TODO: implement subscription event processing
-	// Create NIP88 subscription event
-	// nip88Event, err := createNIP88Event(privKey, *serializedPubKey, store)
-	// if err != nil {
-	// 	log.Printf("Failed to create NIP88 event: %v", err)
-
-	// }
-
-	// log.Println("this is the generated event: ", nip88Event)
-
 	// Stream Handlers
 	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		return true
