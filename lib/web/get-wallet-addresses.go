@@ -6,13 +6,15 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/gofiber/fiber/v2"
+	"github.com/spf13/viper"
 	"gorm.io/gorm"
 )
 
 // Address represents the structure of the address data
 type Address struct {
-	Index   string `json:"index"`
-	Address string `json:"address"`
+	Index      string `json:"index"`
+	Address    string `json:"address"`
+	WalletName string `json:"wallet_name"` // Add wallet name to the Address struct
 }
 
 func handleAddresses(c *fiber.Ctx) error {
@@ -33,8 +35,22 @@ func handleAddresses(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
+	// Get the expected wallet name from the configuration
+	expectedWalletName := viper.GetString("wallet_name")
+
+	if expectedWalletName == "" {
+		log.Println("No expected wallet name set in configuration.")
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+	}
+
 	// Process each address
 	for _, addr := range addresses {
+		// Check if the wallet name matches the expected one
+		if addr.WalletName != expectedWalletName {
+			log.Printf("Address from unknown wallet: %s, skipping.", addr.WalletName)
+			continue
+		}
+
 		var existingAddress types.WalletAddress
 		result := db.Where("address = ?", addr.Address).First(&existingAddress)
 

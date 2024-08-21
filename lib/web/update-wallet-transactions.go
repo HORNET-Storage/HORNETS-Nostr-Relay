@@ -6,11 +6,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/spf13/viper"
+	"gorm.io/gorm"
+
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	"github.com/gofiber/fiber/v2"
-	"gorm.io/gorm"
-	// Import the package for InitGorm
 )
 
 func handleTransactions(c *fiber.Ctx) error {
@@ -24,14 +25,38 @@ func handleTransactions(c *fiber.Ctx) error {
 		})
 	}
 
-	// Initialize the Gorm database
-	db, err := graviton.InitGorm()
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+	// Get the expected wallet name from the configuration
+	expectedWalletName := viper.GetString("wallet_name")
+
+	// If the expected wallet name is not set, set it using the first transaction's wallet name
+	if expectedWalletName == "" && len(transactions) > 0 {
+		firstTransaction := transactions[0]
+		walletName, ok := firstTransaction["wallet_name"].(string)
+		if !ok {
+			log.Println("Wallet name missing or invalid in the first transaction")
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Wallet name missing or invalid",
+			})
+		}
+
+		// Set the expected wallet name in Viper
+		viper.Set("wallet_name", walletName)
+		expectedWalletName = walletName
+		log.Printf("Setting wallet name in configuration: %s", expectedWalletName)
+
+		// Optionally save the updated configuration to a file
+		if err := viper.WriteConfig(); err != nil {
+			log.Printf("Error saving updated configuration: %v", err)
+		}
 	}
 
 	for _, transaction := range transactions {
+		walletName, ok := transaction["wallet_name"].(string)
+		if !ok || walletName != expectedWalletName {
+			log.Printf("Transaction from unknown wallet: %v", walletName)
+			continue // Skip processing if wallet name doesn't match
+		}
+
 		address, ok := transaction["address"].(string)
 		if !ok {
 			log.Printf("Invalid address format: %v", transaction["address"])
@@ -67,6 +92,13 @@ func handleTransactions(c *fiber.Ctx) error {
 		if err != nil {
 			log.Printf("Error parsing value to float64: %v", err)
 			continue
+		}
+
+		// Initialize the Gorm database
+		db, err := graviton.InitGorm()
+		if err != nil {
+			log.Printf("Failed to connect to the database: %v", err)
+			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 		}
 
 		var existingTransaction types.WalletTransactions

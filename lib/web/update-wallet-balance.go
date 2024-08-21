@@ -8,6 +8,7 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/gofiber/fiber/v2"
+	"github.com/spf13/viper"
 	"gorm.io/gorm"
 )
 
@@ -24,6 +25,23 @@ func handleBalance(c *fiber.Ctx) error {
 
 	// Print the received data
 	log.Println("Received data:", data)
+
+	// Get the expected wallet name from the configuration
+	expectedWalletName := viper.GetString("wallet_name")
+
+	if expectedWalletName == "" {
+		log.Println("No expected wallet name set in configuration.")
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+	}
+
+	// Check if the wallet name in the request matches the expected wallet name
+	walletName, ok := data["wallet_name"].(string)
+	if !ok || walletName != expectedWalletName {
+		log.Printf("Received balance update from unknown wallet: %v", walletName)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid or missing wallet name",
+		})
+	}
 
 	// Extract and convert balance to string
 	balanceRaw, ok := data["balance"]

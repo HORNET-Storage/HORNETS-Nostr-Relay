@@ -97,6 +97,13 @@ func init() {
 }
 
 func main() {
+
+	err := godotenv.Load(envFile)
+	if err != nil {
+		log.Printf("error loading .env file: %s", err)
+		return
+	}
+
 	ctx := context.Background()
 
 	wg := new(sync.WaitGroup)
@@ -115,23 +122,17 @@ func main() {
 	store.InitStore(queryCache)
 
 	// generate server priv key if it does not exist
-	err := generateAndSaveNostrPrivateKey()
+	err = generateAndSaveNostrPrivateKey()
 	if err != nil {
 		log.Printf("error generating or saving server private key")
 	}
-
-	err = godotenv.Load(envFile)
-	if err != nil {
-		log.Printf("error loading .env file: %s", err)
-		return
-	}
-
 	// load keys from environment for signing kind 411
 	privKey, pubKey, err := loadSecp256k1Keys()
 	if err != nil {
 		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
 		return
 	}
+	// TODO: We need to only generate it once. When it does not exist.
 	// Create dht key for using relay private key and set it on viper.
 	_, _, err = generateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
 	if err != nil {
@@ -144,6 +145,21 @@ func main() {
 		log.Printf("Failed to create kind 411 event: %v", err)
 		return
 	}
+
+	// serializedPubKey, err := signing.SerializePublicKey(pubKey)
+	// if err != nil {
+	// 	log.Printf("Failed to serialize public key %s", err)
+	// }
+
+	// TODO: implement subscription event processing
+	// Create NIP88 subscription event
+	// nip88Event, err := createNIP88Event(privKey, *serializedPubKey, store)
+	// if err != nil {
+	// 	log.Printf("Failed to create NIP88 event: %v", err)
+
+	// }
+
+	// log.Println("this is the generated event: ", nip88Event)
 
 	// Stream Handlers
 	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
