@@ -24,7 +24,7 @@ import (
 	"github.com/deroproject/graviton"
 )
 
-var session_state bool
+// var session_state bool
 
 const envFile = ".env"
 
@@ -78,44 +78,65 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
+	// Initialize the Graviton store
+	store := &stores_graviton.GravitonStore{}
+	err = store.InitStore()
+	if err != nil {
+		log.Printf("Failed to initialize the Graviton store: %v", err)
+		write("NOTICE", "Failed to initialize the Graviton store: %v", err)
+		return
+	}
+
+	// Retrieve the subscriber using their npub
+	subscriber, err := store.GetSubscriber(env.Event.PubKey)
+	if err != nil {
+		log.Printf("Subscriber not found or error retrieving subscriber: %v", err)
+		state.authenticated = false
+		// Proceed to create and send the NIP-88 event even if the subscriber is not found
+	}
+
+	// Check if the subscription is still active
+	if subscriber != nil && time.Now().After(subscriber.EndDate) {
+		log.Printf("Subscriber %s subscription expired on %s", subscriber.Npub, subscriber.EndDate)
+		state.authenticated = false
+		// Proceed to create and send the NIP-88 event even if the subscription has expired
+	} else {
+		// If the subscription is valid, set authenticated to true
+		state.authenticated = true
+		return
+	}
+
+	// Create session regardless of subscription status
 	err = sessions.CreateSession(env.Event.PubKey)
 	if err != nil {
 		write("NOTICE", "Failed to create session")
 		return
 	}
 
-	err = AuthenticateConnection(c)
-	if err != nil {
-		write("OK", env.Event.ID, false, "Error authorizing connection")
-		return
-	}
-
-	state.authenticated = false // This is where we would update the access for the subscribers.
-
-	session_state = true
-
-	if session_state {
-		// Authenticating user session.
-		userSession := sessions.GetSession(env.Event.PubKey)
-		userSession.Signature = &env.Event.Sig
-		userSession.Authenticated = true
-	}
+	userSession := sessions.GetSession(env.Event.PubKey)
+	userSession.Signature = &env.Event.Sig
+	userSession.Authenticated = true
 
 	err = godotenv.Load(envFile)
 	if err != nil {
 		log.Printf("error loading .env file: %s", err)
-		return
-	}
-	// load keys from environment for signing kind 411
-	privKey, _, err := loadSecp256k1Keys()
-	if err != nil {
-		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
+		write("NOTICE", "error loading .env file: %s", err)
 		return
 	}
 
-	nip88Event, err := CreateNIP88Event(privKey, env.Event.PubKey, &stores_graviton.GravitonStore{})
+	// Load keys from environment for signing kind 411
+	privKey, _, err := loadSecp256k1Keys()
+	if err != nil {
+		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
+		write("NOTICE", "error loading keys from environment. check if you have the key in the environment: %s", err)
+		return
+	}
+
+	// Allocate the address to the user (npub)
+	nip88Event, err := CreateNIP88Event(privKey, env.Event.PubKey, store)
 	if err != nil {
 		log.Printf("Failed to create NIP-88 event: %v", err)
+		write("NOTICE", "Failed to create NIP-88 event: %v", err)
 		return
 	}
 
@@ -123,13 +144,20 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	nip88EventJSON, err := json.Marshal(nip88Event)
 	if err != nil {
 		log.Fatalf("Failed to marshal NIP-88 event to JSON: %v", err)
+		write("NOTICE", "Failed to marshal NIP-88 event to JSON: %v", err)
+		return
 	}
 
 	// Convert the JSON byte slice to a string
 	nip88EventString := string(nip88EventJSON)
 
 	// Use the JSON string in the write function
-	write("OK", env.Event.ID, true, nip88EventString)
+	write("OK", env.Event.ID, state.authenticated, nip88EventString)
+
+	if !state.authenticated {
+		log.Printf("Session established but subscription expired or subscriber not found for %s", env.Event.PubKey)
+		write("NOTICE", "Session established but subscription expired or subscriber not found. Renew to continue access.")
+	}
 }
 
 type Address struct {
@@ -137,6 +165,7 @@ type Address struct {
 	Address     string
 	Status      string
 	AllocatedAt *time.Time
+	Npub        string // Associate the address with an Npub
 }
 
 const (
@@ -145,7 +174,8 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func allocateAddress(store *stores_graviton.GravitonStore) (*Address, error) {
+// Allocate the address to a specific npub (subscriber)
+func allocateAddress(store *stores_graviton.GravitonStore, npub string) (*Address, error) {
 	ss, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
@@ -166,6 +196,7 @@ func allocateAddress(store *stores_graviton.GravitonStore) (*Address, error) {
 			now := time.Now()
 			addr.Status = AddressStatusAllocated
 			addr.AllocatedAt = &now
+			addr.Npub = npub
 
 			value, err := json.Marshal(addr)
 			if err != nil {
@@ -192,9 +223,24 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *
 	}
 
 	// Allocate a new address for this subscription
-	addr, err := allocateAddress(store)
+	addr, err := allocateAddress(store, userPubKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate address: %v", err)
+	}
+
+	// Create a new subscriber
+	subscriber := &types.Subscriber{
+		Npub:      userPubKey,
+		Address:   addr.Address,
+		Tier:      "",          // This will be set after payment
+		StartDate: time.Time{}, // Will be set after payment
+		EndDate:   time.Time{}, // Will be set after payment
+	}
+
+	// Save the subscriber to the Graviton store
+	err = store.SaveSubscriber(subscriber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save subscriber: %v", err)
 	}
 
 	tags := []nostr.Tag{

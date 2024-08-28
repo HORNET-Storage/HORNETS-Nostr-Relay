@@ -50,6 +50,14 @@ func handleTransactions(c *fiber.Ctx) error {
 		}
 	}
 
+	// Initialize the Graviton store
+	store := &graviton.GravitonStore{}
+	err := store.InitStore()
+	if err != nil {
+		log.Printf("Failed to initialize the Graviton store: %v", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+	}
+
 	for _, transaction := range transactions {
 		walletName, ok := transaction["wallet_name"].(string)
 		if !ok || walletName != expectedWalletName {
@@ -60,6 +68,12 @@ func handleTransactions(c *fiber.Ctx) error {
 		address, ok := transaction["address"].(string)
 		if !ok {
 			log.Printf("Invalid address format: %v", transaction["address"])
+			continue
+		}
+
+		// Check if the transaction matches a subscriber's address and update the subscription
+		if err := processSubscriptionPayment(store, address, transaction); err != nil {
+			log.Printf("Error processing subscription payment: %v", err)
 			continue
 		}
 
@@ -133,4 +147,86 @@ func handleTransactions(c *fiber.Ctx) error {
 		"status":  "success",
 		"message": "Transactions received and processed successfully",
 	})
+}
+
+// processSubscriptionPayment checks if a transaction corresponds to a valid subscription payment
+func processSubscriptionPayment(store *graviton.GravitonStore, address string, transaction map[string]interface{}) error {
+	// Retrieve the subscription tiers from Viper
+	var subscriptionTiers []types.SubscriptionTier
+	err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers)
+	if err != nil {
+		return fmt.Errorf("failed to fetch subscription tiers: %v", err)
+	}
+
+	// Retrieve the subscriber associated with the address by finding their npub
+	subscriber, err := store.GetSubscriberByAddress(address)
+	if err != nil {
+		return fmt.Errorf("subscriber not found: %v", err)
+	}
+
+	// Parse the transaction ID and value
+	transactionID, ok := transaction["transaction_id"].(string)
+	if !ok {
+		return fmt.Errorf("transaction ID missing or invalid")
+	}
+
+	// Check if this transaction has already been processed
+	if subscriber.LastTransactionID == transactionID {
+		log.Printf("Transaction ID %s has already been processed for subscriber %s", transactionID, subscriber.Npub)
+		return nil // Skip processing to avoid duplicate subscription updates
+	}
+
+	valueStr, ok := transaction["value"].(string)
+	if !ok {
+		return fmt.Errorf("transaction value missing or invalid")
+	}
+
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return fmt.Errorf("error parsing transaction value: %v", err)
+	}
+
+	// Check if the transaction value matches any subscription tier
+	var matchedTier *types.SubscriptionTier
+	for _, tier := range subscriptionTiers {
+		// Convert tier.Price to float64
+		tierPrice, err := strconv.ParseFloat(tier.Price, 64)
+		if err != nil {
+			return fmt.Errorf("error parsing tier price to float64: %v", err)
+		}
+
+		if value >= tierPrice {
+			matchedTier = &tier
+			break
+		}
+	}
+
+	if matchedTier == nil {
+		log.Printf("Transaction value %v does not match any subscription tier for address: %s", value, address)
+		return nil // Payment too low or doesn't match any tier, skip
+	}
+
+	// Calculate the new subscription end date
+	var newEndDate time.Time
+	if time.Now().Before(subscriber.EndDate) {
+		// If the current subscription is still active, extend from the current end date
+		newEndDate = subscriber.EndDate.AddDate(0, 1, 0) // Extend by 1 month from the current end date
+	} else {
+		// If the subscription has expired, start from now
+		newEndDate = time.Now().AddDate(0, 1, 0) // Set end date 1 month from now
+	}
+
+	// Update subscriber's subscription details
+	subscriber.Tier = matchedTier.DataLimit
+	subscriber.StartDate = time.Now()            // Update the start date to now
+	subscriber.EndDate = newEndDate              // Set the new calculated end date
+	subscriber.LastTransactionID = transactionID // Store the transaction ID to prevent duplicate processing
+
+	err = store.SaveSubscriber(subscriber)
+	if err != nil {
+		return fmt.Errorf("failed to update subscriber: %v", err)
+	}
+
+	log.Printf("Subscriber %s activated/extended on tier %s with transaction ID %s. New end date: %v", subscriber.Npub, matchedTier.DataLimit, transactionID, newEndDate)
+	return nil
 }

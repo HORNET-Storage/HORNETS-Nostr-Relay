@@ -79,6 +79,20 @@ func init() {
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")
 	viper.SetDefault("RelayDHTkey", "")
+	viper.SetDefault("subscription_tiers", []map[string]interface{}{
+		{
+			"data_limit": "1 GB per month",
+			"price":      10000, // in sats
+		},
+		{
+			"data_limit": "5 GB per month",
+			"price":      40000, // in sats
+		},
+		{
+			"data_limit": "10 GB per month",
+			"price":      70000, // in sats
+		},
+	})
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")

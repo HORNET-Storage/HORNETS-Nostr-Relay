@@ -243,6 +243,15 @@ type Address struct {
 // 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 // }
 
+type Subscriber struct {
+	Npub              string    `json:"npub"`                // The unique public key of the subscriber
+	Tier              string    `json:"tier"`                // The subscription tier the user has selected
+	StartDate         time.Time `json:"start_date"`          // When the subscription started
+	EndDate           time.Time `json:"end_date"`            // When the subscription ends
+	Address           string    `json:"address"`             // The address associated with the subscription
+	LastTransactionID string    `json:"last_transaction_id"` // The ID of the last processed transaction
+}
+
 type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
 	UserID    uint   `gorm:"index"`
