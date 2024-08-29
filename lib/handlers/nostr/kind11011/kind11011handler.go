@@ -15,7 +15,7 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +26,7 @@ import (
 func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		log.Printf("Handling kind 11011")
-		var json = jsoniter.ConfigCompatibleWithStandardLibrary
+		var j = jsoniter.ConfigCompatibleWithStandardLibrary
 
 		// Read data from the stream.
 		data, err := read()
@@ -37,7 +37,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Unmarshal the received data into a Nostr event
 		var env nostr.EventEnvelope
-		if err := json.Unmarshal(data, &env); err != nil {
+		if err := j.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
@@ -74,10 +74,13 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			if relay != nil {
 				relayStore.AddRelay(relay)
 				if relay.HornetExtension != nil {
-					relayStore.SyncWithRelay(relay)
+					filter := nostr.Filter{Authors: []string{env.Event.PubKey}}
+					relayStore.SyncWithRelay(relay, filter)
 				}
 			}
 		}
+
+		relayStore.AddUploadable(payload, pubkey, sig, true)
 
 		// Store the event
 		if err := store.StoreEvent(&env.Event); err != nil {
@@ -126,7 +129,7 @@ func performNIP11Request(url string) *ws.NIP11RelayInfo {
 	}
 
 	// Read the response body
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("Error reading response body: %v", err)
 		return nil

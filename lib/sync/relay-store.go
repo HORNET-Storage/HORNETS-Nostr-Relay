@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,12 @@ import (
 	"time"
 )
 
+type Uploadable struct {
+	payload   []byte
+	pubkey    []byte
+	signature [64]byte
+}
+
 type RelayStore struct {
 	relays       map[string]ws.NIP11RelayInfo
 	selfRelay    ws.NIP11RelayInfo
@@ -35,6 +42,7 @@ type RelayStore struct {
 	mutex        sync.RWMutex
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
+	uploadables  *[]Uploadable
 	stopChan     chan struct{}
 }
 
@@ -117,20 +125,74 @@ func (rs *RelayStore) GetSelfRelay() ws.NIP11RelayInfo {
 	return rs.selfRelay
 }
 
-func (rs *RelayStore) periodicSearchUploadSync() {
+func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) *Uploadable {
+	payloadBytes, err := hex.DecodeString(payload)
+	if err != nil {
+		return nil
+	}
+	pubkeyBytes, err := hex.DecodeString(pubkey)
+	if err != nil {
+		return nil
+	}
+	sigBytes, err := hex.DecodeString(signature)
+	if err != nil {
+		return nil
+	}
+
+	rs.mutex.Lock()
+	uploadable := Uploadable{
+		payload:   payloadBytes,
+		pubkey:    pubkeyBytes,
+		signature: [64]byte(sigBytes),
+	}
+
+	*rs.uploadables = append(*rs.uploadables, uploadable)
+	if uploadNow {
+		target, err := rs.doPutDelegated(uploadable)
+		if err != nil {
+			log.Printf("Error uploading %v: %v", uploadable.payload, err)
+		} else {
+			log.Printf("Successfully uploaded %v to %x", uploadable.payload, target)
+		}
+	}
+	rs.mutex.Unlock()
+
+	return &uploadable
+}
+
+//func (rs *RelayStore) periodicSearchUploadSync() {
+//	for {
+//		select {
+//		case <-rs.uploadTicker.C:
+//			relays, unoccupied := SearchForRelays(rs.dhtServer, MaxRelays, 0, MaxRelays)
+//			if len(unoccupied) > 0 {
+//				err := rs.uploadToDHTSlot(unoccupied[0])
+//				if err != nil {
+//					log.Printf("Error uploading to DHT: %v", err)
+//				}
+//			}
+//			for _, relay := range relays {
+//				rs.AddRelay(&relay)
+//				rs.SyncWithRelay(&relay, nostr.Filter{})
+//			}
+//		case <-rs.stopChan:
+//			rs.uploadTicker.Stop()
+//			return
+//		}
+//	}
+//}
+
+func (rs *RelayStore) periodicUpload() {
 	for {
 		select {
 		case <-rs.uploadTicker.C:
-			relays, unoccupied := SearchForRelays(rs.dhtServer, MaxRelays, 0, MaxRelays)
-			if len(unoccupied) > 0 {
-				err := rs.uploadToDHT(unoccupied[0])
+			for _, uploadable := range *rs.uploadables {
+				target, err := rs.doPutDelegated(uploadable)
 				if err != nil {
-					log.Printf("Error uploading to DHT: %v", err)
+					log.Printf("Error uploading %v: %v", uploadable.payload, err)
+				} else {
+					log.Printf("Successfully uploaded %v to %x", uploadable.payload, target)
 				}
-			}
-			for _, relay := range relays {
-				rs.AddRelay(&relay)
-				rs.SyncWithRelay(&relay)
 			}
 		case <-rs.stopChan:
 			rs.uploadTicker.Stop()
@@ -139,7 +201,7 @@ func (rs *RelayStore) periodicSearchUploadSync() {
 	}
 }
 
-func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo) {
+func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filter) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
@@ -164,7 +226,7 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo) {
 		log.Printf("Error creating stream to %+v: %v", target, err)
 	}
 
-	err = InitiateEventSync(stream, nostr.Filter{}, target.ID.String(), rs.eventStore)
+	err = InitiateEventSync(stream, filter, target.ID.String(), rs.eventStore)
 	if err != nil {
 		log.Printf("Error syncing events with %+v: %v", target, err)
 	}
@@ -253,7 +315,7 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 	return relays[:foundCount], unoccupiedSlots
 }
 
-func (rs *RelayStore) uploadToDHT(freeSlot int) error {
+func (rs *RelayStore) uploadToDHTSlot(freeSlot int) error {
 	// Create a target for the DHT (you might want to use a more sophisticated key)
 	salt := []byte(fmt.Sprintf("nostr:relay:%d", freeSlot))
 
@@ -370,6 +432,45 @@ func MarshalRelay(nr ws.NIP11RelayInfo) ([]byte, error) {
 	return json.Marshal(sorted)
 }
 
+func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var target krpc.ID
+	emptySalt := []byte{}
+	target = createMutableTarget(uploadable.pubkey, emptySalt)
+	log.Printf("Derived mutable target %x from %x", target, uploadable.pubkey)
+
+	stats, err := getput.Put(ctx, target, rs.dhtServer, emptySalt, func(seq int64) bep44.Put {
+		put := bep44.Put{
+			V:   uploadable.payload,
+			Seq: seq,
+			Sig: uploadable.signature,
+		}
+
+		log.Printf("Put created %+v", put)
+
+		return put
+	})
+
+	log.Printf("Put stats %v", stats)
+
+	if err != nil {
+		log.Printf("Put operation failed: %v", err)
+		return target, errors.New("put operation failed")
+	} else {
+		log.Printf("Put operation successful")
+	}
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		log.Printf("Put operation timed out")
+		return target, errors.New("put operation timed out")
+	}
+
+	return target, nil
+
+}
+
+// TODO: put an error on this badboy
 func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) krpc.ID {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

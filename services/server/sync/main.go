@@ -115,8 +115,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// this periodically searches dht for other relays, stores them, attempts to sync with them, and uploads self to dht
-	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Minute*1, selfRelay)
+	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Hour*2, selfRelay)
 	log.Printf("Created relay store: %+v", relayStore)
 
 	wg.Wait()

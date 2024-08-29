@@ -2,7 +2,9 @@ package kind1
 
 import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	jsoniter "github.com/json-iterator/go"
+	"log"
 
 	"github.com/nbd-wtf/go-nostr"
 
@@ -40,9 +42,39 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
+		var replyingToMissing *string = nil
+		var dhtKey *string = nil
+		for _, tag := range env.Event.Tags {
+			if tag[0] == "e" && len(tag) == 3 && tag[2] == "reply" {
+				missing := missingEvent(tag[1])
+				if missing {
+					replyingToMissing = &tag[1]
+				}
+			}
+			if tag[0] == "dht_key" && len(tag) == 2 {
+				dhtKey = &tag[1]
+			}
+		}
+
+		if replyingToMissing != nil && dhtKey != nil {
+			relayStore := sync.GetRelayStore()
+			if relayStore != nil {
+
+				filter := nostr.Filter{Authors: []string{env.Event.PubKey}}
+				relayStore.SyncWithRelay(relay, filter)
+			} else {
+				log.Println("relay store has not been initialized")
+				write("NOTICE", "Relay store has not be initialized")
+			}
+		}
+
 		// Successfully processed event
 		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler
+}
+
+func missingEvent(eventId string) bool {
+	return true
 }
