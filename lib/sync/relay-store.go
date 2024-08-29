@@ -20,7 +20,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/nbd-wtf/go-nostr"
+	"io"
 	"log"
+	"net/http"
 	"reflect"
 	"sort"
 	"strings"
@@ -199,6 +201,26 @@ func (rs *RelayStore) periodicUpload() {
 			return
 		}
 	}
+}
+
+func (rs *RelayStore) GetRelayListDHT(dhtKey *string) ([]*ws.NIP11RelayInfo, error) {
+	keyBytes, err := hex.DecodeString(*dhtKey)
+	if err != nil {
+		return nil, err
+	}
+	emptySalt := []byte{}
+	target := createMutableTarget(keyBytes, emptySalt)
+	data, err := DoGet(rs.dhtServer, target, emptySalt)
+	if err != nil {
+		return nil, err
+	}
+	urls := ParseURLs(data)
+	relays := []*ws.NIP11RelayInfo{}
+	for _, url := range urls {
+		relay := PerformNIP11Request(url)
+		relays = append(relays, relay)
+	}
+	return relays, nil
 }
 
 func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filter) {
@@ -542,4 +564,75 @@ func DoGet(server *dht.Server, target bep44.Target, salt []byte) ([]byte, error)
 	}
 
 	return decodedValue, nil
+}
+
+func ParseURLs(input []byte) []string {
+	var urlStrings []string
+	err := json.Unmarshal(input, &urlStrings)
+	if err != nil {
+		log.Println("Error parsing JSON:", err)
+		return []string{}
+	}
+
+	// Create a slice to store valid URLs
+	var urls []string
+
+	// Validate each URL
+	for _, urlString := range urlStrings {
+		// Trim any whitespace
+		urlString = strings.TrimSpace(urlString)
+		urls = append(urls, urlString)
+	}
+
+	return urls
+}
+
+func PerformNIP11Request(url string) *ws.NIP11RelayInfo {
+	httpURL := strings.Replace(url, "wss://", "https://", 1)
+
+	// Create a new request
+	req, err := http.NewRequest("GET", httpURL, nil)
+	if err != nil {
+		log.Printf("Error creating request: %v", err)
+		return nil
+	}
+
+	// Set the required headers for NIP-11
+	req.Header.Set("Accept", "application/nostr+json")
+
+	// Create a client with a timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Perform the request
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error performing request: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	// Check if the status code is 200 OK
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Error performing request, status: %d", resp.StatusCode)
+		return nil
+	}
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response body: %v", err)
+		return nil
+	}
+
+	// Unmarshal the JSON into NIP11RelayInfo struct
+	var relayInfo ws.NIP11RelayInfo
+	err = json.Unmarshal(body, &relayInfo)
+	if err != nil {
+		log.Printf("Error unmarshaling relay info: %v", err)
+		return nil
+	}
+
+	return &relayInfo
 }

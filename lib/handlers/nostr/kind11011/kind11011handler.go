@@ -4,22 +4,17 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
-	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/bencode"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // BuildKind11011Handler constructs and returns a handler function for kind 10000 (Mute List) events.
@@ -70,7 +65,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		for _, relayURL := range relayURLs {
-			relay := performNIP11Request(relayURL)
+			relay := sync.PerformNIP11Request(relayURL)
 			if relay != nil {
 				relayStore.AddRelay(relay)
 				if relay.HornetExtension != nil {
@@ -96,55 +91,6 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	return handler
 }
 
-func performNIP11Request(url string) *ws.NIP11RelayInfo {
-	httpURL := strings.Replace(url, "wss://", "https://", 1)
-
-	// Create a new request
-	req, err := http.NewRequest("GET", httpURL, nil)
-	if err != nil {
-		log.Printf("Error creating request: %v", err)
-		return nil
-	}
-
-	// Set the required headers for NIP-11
-	req.Header.Set("Accept", "application/nostr+json")
-
-	// Create a client with a timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// Perform the request
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Error performing request: %v", err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	// Check if the status code is 200 OK
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Error performing request, status: %d", resp.StatusCode)
-		return nil
-	}
-
-	// Read the response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Error reading response body: %v", err)
-		return nil
-	}
-
-	// Unmarshal the JSON into NIP11RelayInfo struct
-	var relayInfo ws.NIP11RelayInfo
-	err = json.Unmarshal(body, &relayInfo)
-	if err != nil {
-		log.Printf("Error unmarshaling relay info: %v", err)
-		return nil
-	}
-
-	return &relayInfo
-}
 func getDHTPayloadPubkeySig(event *nostr.Event) (string, string, string, bool) {
 	var payload, pubKey, signature string
 	for _, tag := range event.Tags {
@@ -205,36 +151,7 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 		return nil, errors.New("signature is invalid")
 	}
 
-	return parseURLs(decoded["v"].(string)), nil
-}
-
-func parseURLs(input string) []string {
-
-	var urlStrings []string
-	err := json.Unmarshal([]byte(input), &urlStrings)
-	if err != nil {
-		log.Println("Error parsing JSON:", err)
-		return []string{}
-	}
-
-	// Create a slice to store valid URLs
-	var urls []string
-
-	// Validate each URL
-	for _, urlString := range urlStrings {
-		// Trim any whitespace
-		urlString = strings.TrimSpace(urlString)
-		urls = append(urls, urlString)
-		//// Parse the URL
-		//multi, err := UrlStringToMultiaddr(urlString)
-		//if err == nil {
-		//	multiAddrs = append(multiAddrs, multi)
-		//} else {
-		//	log.Printf("Warning: Invalid URL skipped: %s\n", urlString)
-		//}
-	}
-
-	return urls
+	return sync.ParseURLs(decoded["v"].([]byte)), nil
 }
 
 func UrlStringToMultiaddr(urlStr string) (string, error) {

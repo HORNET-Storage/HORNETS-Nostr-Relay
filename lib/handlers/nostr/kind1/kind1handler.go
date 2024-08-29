@@ -59,9 +59,17 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		if replyingToMissing != nil && dhtKey != nil {
 			relayStore := sync.GetRelayStore()
 			if relayStore != nil {
-
-				filter := nostr.Filter{Authors: []string{env.Event.PubKey}}
-				relayStore.SyncWithRelay(relay, filter)
+				relays, err := relayStore.GetRelayListDHT(dhtKey)
+				if err != nil {
+					log.Printf("Failed to get relay list: %v", err)
+					write("NOTICE", "Failed to get relay list.")
+				} else {
+					filter := nostr.Filter{Authors: []string{env.Event.PubKey}}
+					// TODO: maybe this should be handled on a different thread
+					for _, relay := range relays {
+						relayStore.SyncWithRelay(relay, filter)
+					}
+				}
 			} else {
 				log.Println("relay store has not been initialized")
 				write("NOTICE", "Relay store has not be initialized")
