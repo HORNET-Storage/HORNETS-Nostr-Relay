@@ -282,7 +282,7 @@ func TestPutAndSearchDHT(t *testing.T) {
 			LibP2PAddrs: []string{fmt.Sprintf("127.0.0.1:%d", randomInt)},
 		},
 	}
-	err = sync.SignRelay(&sampleRelay, nostrPriv)
+	err = ws.SignRelay(&sampleRelay, nostrPriv)
 	require.NoError(t, err)
 	relayBytes, err := sync.MarshalRelay(sampleRelay)
 	require.NoError(t, err)
