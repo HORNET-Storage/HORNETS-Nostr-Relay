@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -48,6 +49,13 @@ type RelayStore struct {
 	uploadTicker *time.Ticker
 	uploadables  *[]Uploadable
 	stopChan     chan struct{}
+}
+
+// SerializableRelayStore is a struct that contains only the fields we can serialize
+type SerializableRelayStore struct {
+	Relays      map[string]ws.NIP11RelayInfo `json:"relays"`
+	SyncAuthors map[string]bool              `json:"sync_authors"`
+	SelfRelay   ws.NIP11RelayInfo            `json:"self_relay"`
 }
 
 type KeyPair struct {
@@ -82,7 +90,15 @@ var (
 	storeMutex sync.RWMutex
 )
 
-func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, syncInterval time.Duration, self *ws.NIP11RelayInfo) *RelayStore {
+func NewRelayStore(
+	dhtServer *dht.Server,
+	host host.Host,
+	eventStore *stores_graviton.GravitonStore,
+	uploadInterval time.Duration,
+	syncInterval time.Duration,
+	self *ws.NIP11RelayInfo,
+	jsonFilename string,
+) *RelayStore {
 	rs := &RelayStore{
 		relays:       make(map[string]ws.NIP11RelayInfo),
 		selfRelay:    *self,
@@ -93,6 +109,11 @@ func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_gra
 		uploadTicker: time.NewTicker(uploadInterval),
 		syncTicker:   time.NewTicker(syncInterval),
 		stopChan:     make(chan struct{}),
+	}
+
+	err := rs.RestoreFromJSON(jsonFilename)
+	if err != nil {
+		log.Printf("Error restoring RelayStore from JSON: %s", err)
 	}
 
 	storeMutex.Lock()
@@ -371,7 +392,51 @@ func (rs *RelayStore) uploadToDHTSlot(freeSlot int) error {
 	return nil
 }
 
-func (rs *RelayStore) Stop() {
+// SaveToJSON saves the serializable parts of RelayStore to a JSON file
+func (rs *RelayStore) SaveToJSON(filename string) error {
+	serializable := SerializableRelayStore{
+		Relays:      rs.relays,
+		SyncAuthors: rs.syncAuthors,
+		SelfRelay:   rs.selfRelay,
+	}
+
+	data, err := json.MarshalIndent(serializable, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filename, data, 0644)
+}
+
+// RestoreFromJSON restores the serializable parts of RelayStore from a JSON file
+func (rs *RelayStore) RestoreFromJSON(filename string) error {
+	rs.mutex.Lock()
+	defer rs.mutex.Unlock()
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	var serializable SerializableRelayStore
+	if err := json.Unmarshal(data, &serializable); err != nil {
+		return err
+	}
+
+	rs.relays = serializable.Relays
+	rs.syncAuthors = serializable.SyncAuthors
+	rs.selfRelay = serializable.SelfRelay
+
+	// Note: Other fields (syncTicker, libp2pHost, eventStore, etc.) need to be initialized separately
+
+	return nil
+}
+
+func (rs *RelayStore) Stop(jsonFilename string) {
+	err := rs.SaveToJSON(jsonFilename)
+	if err != nil {
+		log.Printf("Error saving relay store to json: %v", err)
+		log.Printf("%+v", rs)
+	}
 	close(rs.stopChan)
 }
 

@@ -171,8 +171,9 @@ func main() {
 	dhtServer := negentropy.DefaultDHTServer()
 	defer dhtServer.Close()
 
-	// this periodically searches dht for other relays, stores them, attempts to sync with them, and uploads self to dht
-	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Hour*2, &selfRelay)
+	// this periodically syncs with other relays, and uploads user keys to dht
+	relayStoreFilename := "relayStore.json"
+	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Hour*2, time.Hour*3, &selfRelay, relayStoreFilename)
 	log.Printf("Created relay store: %+v", relayStore)
 
 	// Register Our Nostr Stream Handlers
@@ -289,6 +290,7 @@ func main() {
 
 	go func() {
 		<-sigs
+		relayStore.Stop(relayStoreFilename)
 		os.Exit(0)
 	}()
 
