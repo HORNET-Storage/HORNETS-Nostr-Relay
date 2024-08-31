@@ -181,7 +181,7 @@ func main() {
 
 	// this periodically syncs with other relays, and uploads user keys to dht
 	relayStoreFilename := "relayStore.json"
-	uploadInterval := time.Second * 20
+	uploadInterval := time.Hour * 2
 	syncInterval := time.Hour * 6
 	relayStore := negentropy.NewRelayStore(dhtServer, host, store, uploadInterval, syncInterval, &selfRelay, relayStoreFilename)
 	log.Printf("Created relay store: %+v", relayStore)

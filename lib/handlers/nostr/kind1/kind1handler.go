@@ -44,6 +44,7 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 
 		var replyingToMissingID *string = nil
 		var dhtKey *string = nil
+		var parentAuthor *string = nil
 		for _, tag := range env.Event.Tags {
 			if tag[0] == "e" && len(tag) == 3 && tag[2] == "reply" {
 				missing := missingEvent(tag[1])
@@ -54,9 +55,12 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			if tag[0] == "dht_key" && len(tag) == 2 {
 				dhtKey = &tag[1]
 			}
+			if tag[0] == "p" && len(tag) == 2 {
+				parentAuthor = &tag[1]
+			}
 		}
 
-		if replyingToMissingID != nil && dhtKey != nil {
+		if replyingToMissingID != nil && dhtKey != nil && parentAuthor != nil {
 			relayStore := sync.GetRelayStore()
 			if relayStore != nil {
 				relays, err := relayStore.GetRelayListDHT(dhtKey)
@@ -64,18 +68,22 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 					log.Printf("Failed to get relay list: %v", err)
 					write("NOTICE", "Failed to get relay list.")
 				} else {
-					filter := nostr.Filter{IDs: []string{*replyingToMissingID}}
-					// TODO: maybe this should be handled on a different thread
-					// TODO: maybe we should sync more than just the one event we are missing
+					filter := nostr.Filter{Authors: []string{*parentAuthor}}
 					for _, relay := range relays {
-						relayStore.SyncWithRelay(relay, filter)
+						// TODO: maybe this should be handled on a different thread
 						//go relayStore.SyncWithRelay(relay, filter)
+						relayStore.SyncWithRelay(relay, filter)
+						relayStore.AddRelay(relay)
 					}
+					relayStore.AddAuthor(*parentAuthor)
 				}
 			} else {
 				log.Println("relay store has not been initialized")
 				write("NOTICE", "Relay store has not be initialized")
 			}
+		} else {
+			log.Println("event tags incomplete, cannot sync")
+			log.Printf("replyToMissingID: %s dhtKey: %s parentAuthor: %s", replyingToMissingID, dhtKey, parentAuthor)
 		}
 
 		// Successfully processed event
