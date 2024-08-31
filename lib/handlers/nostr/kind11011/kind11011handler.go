@@ -44,35 +44,12 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		payload, pubkey, sig, success := getDHTPayloadPubkeySig(&env.Event)
-		if success == false {
-			write("NOTICE", "Error parsing tags for event.")
-			return
-		}
-
-		relayURLs, err := getURLs(payload, sig, pubkey)
+		err = HandleRelayList(env.Event)
 		if err != nil {
-			log.Printf("Error parsing relay URLs: %v", err)
-			write("NOTICE", "Error parsing URLs from tags.")
-			return
+			write("NOTICE", "Failed to handle relay list:", err)
+			// TODO: abort processing?
+			//return
 		}
-
-		relayStore := sync.GetRelayStore()
-		if relayStore == nil {
-			log.Println("relay store has not been initialized")
-			write("NOTICE", "Relay store has not be initialized")
-			return
-		}
-
-		for _, relayURL := range relayURLs {
-			relay := sync.PerformNIP11Request(relayURL)
-			if relay != nil {
-				relayStore.AddRelay(relay)
-				relayStore.AddAuthor(env.Event.PubKey)
-			}
-		}
-
-		relayStore.AddUploadable(payload, pubkey, sig, true)
 
 		// Store the event
 		if err := store.StoreEvent(&env.Event); err != nil {
@@ -101,7 +78,7 @@ func getDHTPayloadPubkeySig(event *nostr.Event) (string, string, string, bool) {
 
 	payload = event.Content
 
-	log.Printf("payload: %s, pubkey: %s, signature: %s", payload, pubKey, signature)
+	log.Printf("received relay list from client -- payload: %s, pubkey: %s, signature: %s", payload, pubKey, signature)
 	return payload, pubKey, signature, true
 }
 
@@ -122,7 +99,11 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 		return nil, err
 	}
 
-	log.Printf("salt: %s\n", decoded["salt"])
+	if decoded["salt"] != nil {
+		log.Printf("salt: %x\n", decoded["salt"])
+	} else {
+		log.Printf("salt not provided by client")
+	}
 	log.Printf("seq: %d\n", decoded["seq"])
 	log.Printf("v: %s\n", decoded["v"])
 
@@ -148,7 +129,7 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 		return nil, errors.New("signature is invalid")
 	}
 
-	return sync.ParseURLs(decoded["v"].([]byte)), nil
+	return sync.ParseURLs([]byte(decoded["v"].(string))), nil
 }
 
 func UrlStringToMultiaddr(urlStr string) (string, error) {
@@ -193,4 +174,36 @@ func UrlStringToMultiaddr(urlStr string) (string, error) {
 
 	// Parse the resulting string into a multiaddr
 	return maStr.String(), nil
+}
+
+func HandleRelayList(event nostr.Event) error {
+	payload, pubkey, sig, success := getDHTPayloadPubkeySig(&event)
+	if success == false {
+		log.Printf("NOTICE", "Error parsing tags for event.")
+		return errors.New("error parsing tags for event")
+	}
+
+	relayURLs, err := getURLs(payload, sig, pubkey)
+	if err != nil {
+		log.Printf("Error parsing relay URLs: %v", err)
+		return errors.New("error parsing relay URLs")
+	}
+
+	relayStore := sync.GetRelayStore()
+	if relayStore == nil {
+		log.Println("relay store has not been initialized")
+		return errors.New("relay store has not been initialized")
+	}
+
+	for _, relayURL := range relayURLs {
+		relay := sync.PerformNIP11Request(relayURL)
+		if relay != nil {
+			relayStore.AddRelay(relay)
+			relayStore.AddAuthor(event.PubKey)
+		}
+	}
+
+	relayStore.AddUploadable(payload, pubkey, sig, true)
+
+	return nil
 }

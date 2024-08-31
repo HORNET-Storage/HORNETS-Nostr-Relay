@@ -32,9 +32,9 @@ import (
 )
 
 type Uploadable struct {
-	payload   []byte
-	pubkey    []byte
-	signature [64]byte
+	Payload   []byte
+	Pubkey    []byte
+	Signature [64]byte
 }
 
 type RelayStore struct {
@@ -47,7 +47,7 @@ type RelayStore struct {
 	mutex        sync.RWMutex
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
-	uploadables  *[]Uploadable
+	uploadables  map[string]Uploadable
 	stopChan     chan struct{}
 }
 
@@ -56,6 +56,7 @@ type SerializableRelayStore struct {
 	Relays      map[string]ws.NIP11RelayInfo `json:"relays"`
 	SyncAuthors map[string]bool              `json:"sync_authors"`
 	SelfRelay   ws.NIP11RelayInfo            `json:"self_relay"`
+	Uploadables []Uploadable                 `json:"uploadables"`
 }
 
 type KeyPair struct {
@@ -83,8 +84,6 @@ var HardcodedKey = KeyPair{
 	},
 }
 
-const MaxRelays = 4
-
 var (
 	store      *RelayStore
 	storeMutex sync.RWMutex
@@ -107,6 +106,7 @@ func NewRelayStore(
 		eventStore:   eventStore,
 		dhtServer:    dhtServer,
 		uploadTicker: time.NewTicker(uploadInterval),
+		uploadables:  make(map[string]Uploadable),
 		syncTicker:   time.NewTicker(syncInterval),
 		stopChan:     make(chan struct{}),
 	}
@@ -133,6 +133,7 @@ func GetRelayStore() *RelayStore {
 }
 
 func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
+	log.Printf("Adding relay to relay store: %+v", relay)
 	rs.mutex.Lock()
 	defer rs.mutex.Unlock()
 	// this dedupes
@@ -140,6 +141,7 @@ func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
 }
 
 func (rs *RelayStore) AddAuthor(authorPubkey string) {
+	log.Printf("Adding author to relay store: %s", authorPubkey)
 	rs.mutex.Lock()
 	defer rs.mutex.Unlock()
 	// this also dedupes
@@ -163,6 +165,7 @@ func (rs *RelayStore) GetSelfRelay() ws.NIP11RelayInfo {
 }
 
 func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) *Uploadable {
+	log.Printf("Adding uploadable to relay store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
 	payloadBytes, err := hex.DecodeString(payload)
 	if err != nil {
 		return nil
@@ -177,19 +180,22 @@ func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature str
 	}
 
 	rs.mutex.Lock()
+	var sigSlice [64]byte
+	copy(sigSlice[:], sigBytes)
+
 	uploadable := Uploadable{
-		payload:   payloadBytes,
-		pubkey:    pubkeyBytes,
-		signature: [64]byte(sigBytes),
+		Payload:   payloadBytes,
+		Pubkey:    pubkeyBytes,
+		Signature: sigSlice,
 	}
 
-	*rs.uploadables = append(*rs.uploadables, uploadable)
+	rs.uploadables[pubkey] = uploadable
 	if uploadNow {
 		target, err := rs.doPutDelegated(uploadable)
 		if err != nil {
-			log.Printf("Error uploading %v: %v", uploadable.payload, err)
+			log.Printf("Error uploading %v: %v", uploadable.Payload, err)
 		} else {
-			log.Printf("Successfully uploaded %v to %x", uploadable.payload, target)
+			log.Printf("Successfully uploaded %v to dht at target: %x", uploadable.Payload, target)
 		}
 	}
 	rs.mutex.Unlock()
@@ -201,6 +207,7 @@ func (rs *RelayStore) periodicSync() {
 	for {
 		select {
 		case <-rs.syncTicker.C:
+			log.Printf("Attempting sync with relays %v for authors %v", rs.relays, rs.syncAuthors)
 			for _, relay := range rs.relays {
 				authors := []string{}
 				for author := range rs.syncAuthors {
@@ -220,12 +227,13 @@ func (rs *RelayStore) periodicUpload() {
 	for {
 		select {
 		case <-rs.uploadTicker.C:
-			for _, uploadable := range *rs.uploadables {
+			log.Printf("Uploading %d user relay lists to dht", len(rs.uploadables))
+			for _, uploadable := range rs.uploadables {
 				target, err := rs.doPutDelegated(uploadable)
 				if err != nil {
-					log.Printf("Error uploading %v: %v", uploadable.payload, err)
+					log.Printf("Error uploading %v: %v", uploadable.Payload, err)
 				} else {
-					log.Printf("Successfully uploaded %v to %x", uploadable.payload, target)
+					log.Printf("Successfully uploaded %v to dht at target: %x", uploadable.Payload, target)
 				}
 			}
 		case <-rs.stopChan:
@@ -394,11 +402,17 @@ func (rs *RelayStore) uploadToDHTSlot(freeSlot int) error {
 
 // SaveToJSON saves the serializable parts of RelayStore to a JSON file
 func (rs *RelayStore) SaveToJSON(filename string) error {
+	uploadables := []Uploadable{}
+	for u := range rs.uploadables {
+		uploadables = append(uploadables, rs.uploadables[u])
+	}
 	serializable := SerializableRelayStore{
 		Relays:      rs.relays,
 		SyncAuthors: rs.syncAuthors,
 		SelfRelay:   rs.selfRelay,
+		Uploadables: uploadables,
 	}
+	log.Printf("Saving relay store %+v to json: %s", serializable, filename)
 
 	data, err := json.MarshalIndent(serializable, "", "  ")
 	if err != nil {
@@ -426,8 +440,14 @@ func (rs *RelayStore) RestoreFromJSON(filename string) error {
 	rs.syncAuthors = serializable.SyncAuthors
 	rs.selfRelay = serializable.SelfRelay
 
+	for _, u := range serializable.Uploadables {
+		pubkeyString := hex.EncodeToString(u.Pubkey)
+		rs.uploadables[pubkeyString] = u
+	}
+
 	// Note: Other fields (syncTicker, libp2pHost, eventStore, etc.) need to be initialized separately
 
+	log.Printf("Restored relay store %+v from json: %s", rs, filename)
 	return nil
 }
 
@@ -542,14 +562,14 @@ func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
 	defer cancel()
 	var target krpc.ID
 	emptySalt := []byte{}
-	target = createMutableTarget(uploadable.pubkey, emptySalt)
-	log.Printf("Derived mutable target %x from %x", target, uploadable.pubkey)
+	target = createMutableTarget(uploadable.Pubkey, emptySalt)
+	log.Printf("Derived mutable target %x from pubkey %x", target, uploadable.Pubkey)
 
 	stats, err := getput.Put(ctx, target, rs.dhtServer, emptySalt, func(seq int64) bep44.Put {
 		put := bep44.Put{
-			V:   uploadable.payload,
+			V:   uploadable.Payload,
 			Seq: seq,
-			Sig: uploadable.signature,
+			Sig: uploadable.Signature,
 		}
 
 		log.Printf("Put created %+v", put)
@@ -557,7 +577,7 @@ func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
 		return put
 	})
 
-	log.Printf("Put stats %v", stats)
+	log.Printf("DHT put stats %+v", stats)
 
 	if err != nil {
 		log.Printf("Put operation failed: %v", err)
@@ -585,7 +605,7 @@ func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.Public
 		log.Printf("Derived immutable target %x from %x", target, value)
 	} else {
 		target = createMutableTarget(*pubKey, salt)
-		log.Printf("Derived mutable target %x from %x and %x", target, pubKey, salt)
+		log.Printf("Derived mutable target %x from pubkey %x and salt %x", target, pubKey, salt)
 	}
 
 	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
@@ -610,7 +630,7 @@ func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.Public
 		return put
 	})
 
-	log.Printf("Put stats %v", stats)
+	log.Printf("DHT put stats %+v", stats)
 
 	if err != nil {
 		log.Printf("Put operation failed: %v", err)
@@ -691,7 +711,7 @@ func PerformNIP11Request(url string) *ws.NIP11RelayInfo {
 	// Perform the request
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Error performing request: %v", err)
+		log.Printf("Error performing NIP11 request: %v", err)
 		return nil
 	}
 	defer resp.Body.Close()

@@ -92,6 +92,8 @@ func GetRelayInfo() NIP11RelayInfo {
 			LibP2PID:    libp2pId,
 			LibP2PAddrs: libp2pAddrs,
 		}
+	} else {
+		log.Printf("Not advertising hornet extenstion because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
 	}
 
 	return relayInfo

@@ -105,7 +105,10 @@ func main() {
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
-	store.InitStore("gravitondb", queryCache)
+	err := store.InitStore("gravitondb", queryCache)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Stream Handlers
 	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
@@ -123,7 +126,7 @@ func main() {
 			return false
 		}
 
-		cid, err := cid.Parse(rootLeaf.Hash)
+		contentID, err := cid.Parse(rootLeaf.Hash)
 		if err != nil {
 			return false
 		}
@@ -133,7 +136,7 @@ func main() {
 			return false
 		}
 
-		err = signing.VerifyCIDSignature(parsedSignature, cid, publicKey)
+		err = signing.VerifyCIDSignature(parsedSignature, contentID, publicKey)
 		return err == nil
 	}
 
@@ -159,9 +162,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	libp2pAddrs := []string{}
+	for _, addr := range host.Addrs() {
+		libp2pAddrs = append(libp2pAddrs, addr.String())
+	}
 	viper.Set("LibP2PID", host.ID().String())
-	viper.Set("LibP2PAddrs", host.Addrs())
+	viper.Set("LibP2PAddrs", libp2pAddrs)
 	selfRelay := ws.GetRelayInfo()
+	log.Printf("Self Relay: %+v\n", selfRelay)
 	err = negentropy.SignRelay(&selfRelay, privKey)
 
 	if err != nil {
@@ -173,7 +181,9 @@ func main() {
 
 	// this periodically syncs with other relays, and uploads user keys to dht
 	relayStoreFilename := "relayStore.json"
-	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Hour*2, time.Hour*3, &selfRelay, relayStoreFilename)
+	uploadInterval := time.Second * 20
+	syncInterval := time.Hour * 6
+	relayStore := negentropy.NewRelayStore(dhtServer, host, store, uploadInterval, syncInterval, &selfRelay, relayStoreFilename)
 	log.Printf("Created relay store: %+v", relayStore)
 
 	// Register Our Nostr Stream Handlers
