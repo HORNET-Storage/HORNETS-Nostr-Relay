@@ -20,10 +20,10 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/nbd-wtf/go-nostr"
+	"gorm.io/gorm"
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -31,32 +31,15 @@ import (
 	"time"
 )
 
-type Uploadable struct {
-	Payload   []byte
-	Pubkey    []byte
-	Signature [64]byte
-}
-
 type RelayStore struct {
-	relays       map[string]ws.NIP11RelayInfo
-	syncAuthors  map[string]bool
+	db           *gorm.DB
 	syncTicker   *time.Ticker
-	selfRelay    ws.NIP11RelayInfo
 	libp2pHost   host.Host
 	eventStore   *stores_graviton.GravitonStore
 	mutex        sync.RWMutex
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
-	uploadables  map[string]Uploadable
 	stopChan     chan struct{}
-}
-
-// SerializableRelayStore is a struct that contains only the fields we can serialize
-type SerializableRelayStore struct {
-	Relays      map[string]ws.NIP11RelayInfo `json:"relays"`
-	SyncAuthors map[string]bool              `json:"sync_authors"`
-	SelfRelay   ws.NIP11RelayInfo            `json:"self_relay"`
-	Uploadables []Uploadable                 `json:"uploadables"`
 }
 
 type KeyPair struct {
@@ -90,30 +73,21 @@ var (
 )
 
 func NewRelayStore(
+	db *gorm.DB,
 	dhtServer *dht.Server,
 	host host.Host,
 	eventStore *stores_graviton.GravitonStore,
 	uploadInterval time.Duration,
 	syncInterval time.Duration,
-	self *ws.NIP11RelayInfo,
-	jsonFilename string,
 ) *RelayStore {
 	rs := &RelayStore{
-		relays:       make(map[string]ws.NIP11RelayInfo),
-		selfRelay:    *self,
-		syncAuthors:  make(map[string]bool),
+		db:           db,
 		libp2pHost:   host,
 		eventStore:   eventStore,
 		dhtServer:    dhtServer,
 		uploadTicker: time.NewTicker(uploadInterval),
-		uploadables:  make(map[string]Uploadable),
 		syncTicker:   time.NewTicker(syncInterval),
 		stopChan:     make(chan struct{}),
-	}
-
-	err := rs.RestoreFromJSON(jsonFilename)
-	if err != nil {
-		log.Printf("Error restoring RelayStore from JSON: %s", err)
 	}
 
 	storeMutex.Lock()
@@ -134,87 +108,75 @@ func GetRelayStore() *RelayStore {
 
 func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
 	log.Printf("Adding relay to relay store: %+v", relay)
-	rs.mutex.Lock()
-	defer rs.mutex.Unlock()
-	// this dedupes
-	rs.relays[relay.Pubkey] = *relay
+	err := PutSyncRelay(rs.db, relay.Pubkey, relay)
+	if err != nil {
+		log.Printf("Error adding relay to relay store: %v", err)
+	}
 }
 
 func (rs *RelayStore) AddAuthor(authorPubkey string) {
 	log.Printf("Adding author to relay store: %s", authorPubkey)
-	rs.mutex.Lock()
-	defer rs.mutex.Unlock()
-	// this also dedupes
-	rs.syncAuthors[authorPubkey] = true
-}
-
-func (rs *RelayStore) GetRelays() []ws.NIP11RelayInfo {
-	rs.mutex.RLock()
-	defer rs.mutex.RUnlock()
-	relays := make([]ws.NIP11RelayInfo, 0, len(rs.relays))
-	for _, relay := range rs.relays {
-		relays = append(relays, relay)
+	err := PutSyncAuthor(rs.db, authorPubkey)
+	if err != nil {
+		log.Printf("Error adding relay to relay store: %v", err)
 	}
-	return relays
 }
 
-func (rs *RelayStore) GetSelfRelay() ws.NIP11RelayInfo {
-	rs.mutex.RLock()
-	defer rs.mutex.RUnlock()
-	return rs.selfRelay
-}
+func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) error {
+	log.Printf("Adding uploadable to sync store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
 
-func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) *Uploadable {
-	log.Printf("Adding uploadable to relay store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
 	payloadBytes, err := hex.DecodeString(payload)
 	if err != nil {
-		return nil
+		return err
 	}
 	pubkeyBytes, err := hex.DecodeString(pubkey)
 	if err != nil {
-		return nil
+		return err
 	}
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil {
-		return nil
+		return err
 	}
 
-	rs.mutex.Lock()
-	var sigSlice [64]byte
-	copy(sigSlice[:], sigBytes)
-
-	uploadable := Uploadable{
-		Payload:   payloadBytes,
-		Pubkey:    pubkeyBytes,
-		Signature: sigSlice,
+	err = PutDHTUploadable(rs.db, payloadBytes, pubkeyBytes, sigBytes)
+	if err != nil {
+		return err
 	}
 
-	rs.uploadables[pubkey] = uploadable
-	if uploadNow {
-		target, err := rs.doPutDelegated(uploadable)
-		if err != nil {
-			log.Printf("Error uploading %v: %v", uploadable.Payload, err)
-		} else {
-			log.Printf("Successfully uploaded %v to dht at target: %x", uploadable.Payload, target)
-		}
-	}
-	rs.mutex.Unlock()
-
-	return &uploadable
+	return nil
 }
 
 func (rs *RelayStore) periodicSync() {
 	for {
 		select {
 		case <-rs.syncTicker.C:
-			log.Printf("Attempting sync with relays %v for authors %v", rs.relays, rs.syncAuthors)
-			for _, relay := range rs.relays {
-				authors := []string{}
-				for author := range rs.syncAuthors {
-					authors = append(authors, author)
+			syncAuthors, err := GetSyncAuthors(rs.db)
+			if err != nil {
+				log.Printf("Error getting relay authors: %v", err)
+				continue
+			}
+			var authorNpubs []string
+			for _, author := range syncAuthors {
+				authorNpubs = append(authorNpubs, author.PublicKey)
+			}
+
+			relays, err := GetSyncRelays(rs.db)
+			if err != nil {
+				log.Printf("Error getting relays: %v", err)
+				continue
+			}
+
+			log.Printf("Attempting sync with %d relays for %d authors", len(relays), len(syncAuthors))
+			for _, relay := range relays {
+				var relayInfo ws.NIP11RelayInfo
+				err := json.Unmarshal([]byte(relay.RelayInfo), &relayInfo)
+				if err != nil {
+					log.Printf("Error unmarshaling relay info: %v", err)
+					continue
 				}
-				filter := nostr.Filter{Authors: authors}
-				rs.SyncWithRelay(&relay, filter)
+
+				filter := nostr.Filter{Authors: authorNpubs}
+				rs.SyncWithRelay(&relayInfo, filter)
 			}
 		case <-rs.stopChan:
 			rs.syncTicker.Stop()
@@ -227,8 +189,13 @@ func (rs *RelayStore) periodicUpload() {
 	for {
 		select {
 		case <-rs.uploadTicker.C:
-			log.Printf("Uploading %d user relay lists to dht", len(rs.uploadables))
-			for _, uploadable := range rs.uploadables {
+			uploadables, err := GetDHTUploadables(rs.db)
+			if err != nil {
+				log.Printf("Error getting uploadables from DHT: %v", err)
+				continue
+			}
+			log.Printf("Uploading %d user relay lists to dht", len(uploadables))
+			for _, uploadable := range uploadables {
 				target, err := rs.doPutDelegated(uploadable)
 				if err != nil {
 					log.Printf("Error uploading %v: %v", uploadable.Payload, err)
@@ -381,85 +348,6 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 	return relays[:foundCount], unoccupiedSlots
 }
 
-func (rs *RelayStore) uploadToDHTSlot(freeSlot int) error {
-	// Create a target for the DHT (you might want to use a more sophisticated key)
-	salt := []byte(fmt.Sprintf("nostr:relay:%d", freeSlot))
-
-	selfRelay := rs.GetSelfRelay()
-	relayBytes, err := MarshalRelay(selfRelay)
-	if err != nil {
-		return err
-	}
-
-	target, err := DoPut(rs.dhtServer, relayBytes, salt, (*ed25519.PublicKey)(&HardcodedKey.PubKey), (*ed25519.PrivateKey)(&HardcodedKey.PrivKey))
-	if err != nil {
-		return err
-	}
-
-	log.Printf("Successfully uploaded self relay to DHT at target %x", target)
-	return nil
-}
-
-// SaveToJSON saves the serializable parts of RelayStore to a JSON file
-func (rs *RelayStore) SaveToJSON(filename string) error {
-	uploadables := []Uploadable{}
-	for u := range rs.uploadables {
-		uploadables = append(uploadables, rs.uploadables[u])
-	}
-	serializable := SerializableRelayStore{
-		Relays:      rs.relays,
-		SyncAuthors: rs.syncAuthors,
-		SelfRelay:   rs.selfRelay,
-		Uploadables: uploadables,
-	}
-	log.Printf("Saving relay store %+v to json: %s", serializable, filename)
-
-	data, err := json.MarshalIndent(serializable, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filename, data, 0644)
-}
-
-// RestoreFromJSON restores the serializable parts of RelayStore from a JSON file
-func (rs *RelayStore) RestoreFromJSON(filename string) error {
-	rs.mutex.Lock()
-	defer rs.mutex.Unlock()
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return err
-	}
-
-	var serializable SerializableRelayStore
-	if err := json.Unmarshal(data, &serializable); err != nil {
-		return err
-	}
-
-	rs.relays = serializable.Relays
-	rs.syncAuthors = serializable.SyncAuthors
-	rs.selfRelay = serializable.SelfRelay
-
-	for _, u := range serializable.Uploadables {
-		pubkeyString := hex.EncodeToString(u.Pubkey)
-		rs.uploadables[pubkeyString] = u
-	}
-
-	// Note: Other fields (syncTicker, libp2pHost, eventStore, etc.) need to be initialized separately
-
-	log.Printf("Restored relay store %+v from json: %s", rs, filename)
-	return nil
-}
-
-func (rs *RelayStore) Stop(jsonFilename string) {
-	err := rs.SaveToJSON(jsonFilename)
-	if err != nil {
-		log.Printf("Error saving relay store to json: %v", err)
-		log.Printf("%+v", rs)
-	}
-	close(rs.stopChan)
-}
-
 func SignPut(put *bep44.Put, privKey ed25519.PrivateKey) error {
 	if len(privKey) != ed25519.PrivateKeySize {
 		return fmt.Errorf("invalid private key size: expected %d, got %d", ed25519.PrivateKeySize, len(privKey))
@@ -557,7 +445,7 @@ func MarshalRelay(nr ws.NIP11RelayInfo) ([]byte, error) {
 	return json.Marshal(sorted)
 }
 
-func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
+func (rs *RelayStore) doPutDelegated(uploadable DHTUploadable) (krpc.ID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var target krpc.ID
@@ -565,11 +453,14 @@ func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
 	target = createMutableTarget(uploadable.Pubkey, emptySalt)
 	log.Printf("Derived mutable target %x from pubkey %x", target, uploadable.Pubkey)
 
+	sigBytes := [64]byte{}
+	copy(sigBytes[:], uploadable.Signature)
+
 	stats, err := getput.Put(ctx, target, rs.dhtServer, emptySalt, func(seq int64) bep44.Put {
 		put := bep44.Put{
 			V:   uploadable.Payload,
 			Seq: seq,
-			Sig: uploadable.Signature,
+			Sig: sigBytes,
 		}
 
 		log.Printf("Put created %+v", put)
@@ -592,7 +483,6 @@ func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
 	}
 
 	return target, nil
-
 }
 
 func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) (krpc.ID, error) {

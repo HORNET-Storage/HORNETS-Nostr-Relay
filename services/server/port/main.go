@@ -155,12 +155,12 @@ func main() {
 	log.Printf("Host started with id: %s\n", host.ID())
 	log.Printf("Host started with address: %s\n", host.Addrs())
 
-	negentropy.SetupNegentropyEventHandler(host, "host", store)
-	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("key"))
-	//log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
+	syncDB, err := negentropy.InitSyncDB("sync_store.db")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to connect database")
 	}
+
+	negentropy.SetupNegentropyEventHandler(host, "host", store)
 
 	libp2pAddrs := []string{}
 	for _, addr := range host.Addrs() {
@@ -170,20 +170,14 @@ func main() {
 	viper.Set("LibP2PAddrs", libp2pAddrs)
 	selfRelay := ws.GetRelayInfo()
 	log.Printf("Self Relay: %+v\n", selfRelay)
-	err = negentropy.SignRelay(&selfRelay, privKey)
-
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	dhtServer := negentropy.DefaultDHTServer()
 	defer dhtServer.Close()
 
 	// this periodically syncs with other relays, and uploads user keys to dht
-	relayStoreFilename := "relayStore.json"
 	uploadInterval := time.Hour * 2
-	syncInterval := time.Hour * 6
-	relayStore := negentropy.NewRelayStore(dhtServer, host, store, uploadInterval, syncInterval, &selfRelay, relayStoreFilename)
+	syncInterval := time.Hour * 3
+	relayStore := negentropy.NewRelayStore(syncDB, dhtServer, host, store, uploadInterval, syncInterval)
 	log.Printf("Created relay store: %+v", relayStore)
 
 	// Register Our Nostr Stream Handlers
@@ -300,7 +294,6 @@ func main() {
 
 	go func() {
 		<-sigs
-		relayStore.Stop(relayStoreFilename)
 		os.Exit(0)
 	}()
 

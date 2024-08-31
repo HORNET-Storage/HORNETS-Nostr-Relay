@@ -203,7 +203,11 @@ func HandleRelayList(event nostr.Event) error {
 		}
 	}
 
-	relayStore.AddUploadable(payload, pubkey, sig, true)
+	err = relayStore.AddUploadable(payload, pubkey, sig, true)
+	if err != nil {
+		log.Printf("Error adding uploadable to sync store: %v", err)
+		return errors.New("error adding upload to sync store")
+	}
 
 	return nil
 }

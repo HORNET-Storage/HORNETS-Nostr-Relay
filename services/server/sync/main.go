@@ -2,20 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
-	"github.com/anacrolix/dht/v2"
-	"log"
-	"math/rand"
-	"sync"
-	"time"
-
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
-
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
+	"math/rand"
 )
 
 func init() {
@@ -47,76 +36,4 @@ func init() {
 }
 
 func main() {
-	wg := new(sync.WaitGroup)
-
-	// Private key
-	key := viper.GetString("key")
-
-	host := libp2p.GetHost(key)
-
-	// Create and initialize database
-	store := &stores_graviton.GravitonStore{}
-
-	queryCache := viper.GetStringMapString("query_cache")
-	// TODO: can graviton handle multiple simultaneous applications in the same db
-	err := store.InitStore("gravitondb", queryCache)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	query.AddQueryHandler(host, store)
-
-	//settings, err := nostr.LoadRelaySettings()
-	//if err != nil {
-	//	log.Fatalf("Failed to load relay settings: %v", err)
-	//	return
-	//}
-
-	config := dht.NewDefaultServerConfig()
-	dhtServer, err := dht.NewServer(config)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer dhtServer.Close()
-
-	log.Printf("Starting DHT bootstrapa")
-	_, err = dhtServer.Bootstrap()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	//Wait for nodes to be added to the routing table
-	for i := 0; i < 30; i++ {
-		stats := dhtServer.Stats()
-		log.Printf("DHT stats: %+v", stats)
-		if stats.GoodNodes > 0 {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	negentropy.SetupNegentropyEventHandler(host, "host", store)
-	log.Printf("setup negentropy event handler")
-	privKey, pubKey, err := signing.DeserializePrivateKey(viper.GetString("key"))
-	log.Printf("pubkey: %x, privkey: %x", pubKey, privKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	selfRelay, err := negentropy.CreateSelfRelay(
-		host.ID().String(),
-		host.Addrs(),
-		viper.GetString("relay_name"),
-		pubKey.SerializeCompressed(),
-		privKey,
-		viper.GetIntSlice("supported_nips"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	relayStore := negentropy.NewRelayStore(dhtServer, host, store, time.Hour*2, selfRelay)
-	log.Printf("Created relay store: %+v", relayStore)
-
-	wg.Wait()
 }
