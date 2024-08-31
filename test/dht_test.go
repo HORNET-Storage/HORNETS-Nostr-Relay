@@ -66,7 +66,8 @@ func TestPutGetDHT(t *testing.T) {
 
 	salt := []byte(fmt.Sprintf("nostr:relay:%d", randomInt))
 
-	target := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	target, err := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	require.NoError(t, err)
 
 	// Wait a bit for the value to propagate
 	time.Sleep(5 * time.Second)
@@ -217,7 +218,8 @@ func TestPutGetLocal(t *testing.T) {
 	pubKey, privKey, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 
-	target := sync.DoPut(putServer, value, []byte{}, &pubKey, &privKey)
+	target, err := sync.DoPut(putServer, value, []byte{}, &pubKey, &privKey)
+	require.NoError(t, err)
 
 	// Wait for value to propagate
 	time.Sleep(10 * time.Second)
@@ -291,7 +293,8 @@ func TestPutAndSearchDHT(t *testing.T) {
 	pubKey := ed25519.PublicKey(sync.HardcodedKey.PubKey)
 	privKey := ed25519.PrivateKey(sync.HardcodedKey.PrivKey)
 
-	target := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	target, err := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	require.NoError(t, err)
 	t.Logf("put target %d: %x salt: %x", randomInt, target, salt)
 
 	// Wait a bit for the value to propagate

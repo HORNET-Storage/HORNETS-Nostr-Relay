@@ -68,10 +68,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			relay := sync.PerformNIP11Request(relayURL)
 			if relay != nil {
 				relayStore.AddRelay(relay)
-				if relay.HornetExtension != nil {
-					filter := nostr.Filter{Authors: []string{env.Event.PubKey}}
-					relayStore.SyncWithRelay(relay, filter)
-				}
+				relayStore.AddAuthor(env.Event.PubKey)
 			}
 		}
 

@@ -38,6 +38,8 @@ type Uploadable struct {
 
 type RelayStore struct {
 	relays       map[string]ws.NIP11RelayInfo
+	syncAuthors  map[string]bool
+	syncTicker   *time.Ticker
 	selfRelay    ws.NIP11RelayInfo
 	libp2pHost   host.Host
 	eventStore   *stores_graviton.GravitonStore
@@ -53,6 +55,7 @@ type KeyPair struct {
 	PubKey  []byte
 }
 
+// used for testing and keyless relay search (experimental)
 var HardcodedKey = KeyPair{
 	PrivKey: []byte{
 		0x51, 0x8d, 0x31, 0x74, 0x5e, 0x17, 0x14, 0x28,
@@ -79,14 +82,16 @@ var (
 	storeMutex sync.RWMutex
 )
 
-func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, self *ws.NIP11RelayInfo) *RelayStore {
+func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_graviton.GravitonStore, uploadInterval time.Duration, syncInterval time.Duration, self *ws.NIP11RelayInfo) *RelayStore {
 	rs := &RelayStore{
 		relays:       make(map[string]ws.NIP11RelayInfo),
 		selfRelay:    *self,
+		syncAuthors:  make(map[string]bool),
 		libp2pHost:   host,
 		eventStore:   eventStore,
 		dhtServer:    dhtServer,
 		uploadTicker: time.NewTicker(uploadInterval),
+		syncTicker:   time.NewTicker(syncInterval),
 		stopChan:     make(chan struct{}),
 	}
 
@@ -94,8 +99,9 @@ func NewRelayStore(dhtServer *dht.Server, host host.Host, eventStore *stores_gra
 	store = rs
 	storeMutex.Unlock()
 
-	// TODO: decide what are the syncing conditions
-	//go rs.periodicSearchUploadSync()
+	go rs.periodicUpload()
+	go rs.periodicSync()
+
 	return rs
 }
 
@@ -108,7 +114,15 @@ func GetRelayStore() *RelayStore {
 func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
 	rs.mutex.Lock()
 	defer rs.mutex.Unlock()
+	// this dedupes
 	rs.relays[relay.Pubkey] = *relay
+}
+
+func (rs *RelayStore) AddAuthor(authorPubkey string) {
+	rs.mutex.Lock()
+	defer rs.mutex.Unlock()
+	// this also dedupes
+	rs.syncAuthors[authorPubkey] = true
 }
 
 func (rs *RelayStore) GetRelays() []ws.NIP11RelayInfo {
@@ -162,27 +176,24 @@ func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature str
 	return &uploadable
 }
 
-//func (rs *RelayStore) periodicSearchUploadSync() {
-//	for {
-//		select {
-//		case <-rs.uploadTicker.C:
-//			relays, unoccupied := SearchForRelays(rs.dhtServer, MaxRelays, 0, MaxRelays)
-//			if len(unoccupied) > 0 {
-//				err := rs.uploadToDHTSlot(unoccupied[0])
-//				if err != nil {
-//					log.Printf("Error uploading to DHT: %v", err)
-//				}
-//			}
-//			for _, relay := range relays {
-//				rs.AddRelay(&relay)
-//				rs.SyncWithRelay(&relay, nostr.Filter{})
-//			}
-//		case <-rs.stopChan:
-//			rs.uploadTicker.Stop()
-//			return
-//		}
-//	}
-//}
+func (rs *RelayStore) periodicSync() {
+	for {
+		select {
+		case <-rs.syncTicker.C:
+			for _, relay := range rs.relays {
+				authors := []string{}
+				for author := range rs.syncAuthors {
+					authors = append(authors, author)
+				}
+				filter := nostr.Filter{Authors: authors}
+				rs.SyncWithRelay(&relay, filter)
+			}
+		case <-rs.stopChan:
+			rs.syncTicker.Stop()
+			return
+		}
+	}
+}
 
 func (rs *RelayStore) periodicUpload() {
 	for {
@@ -227,6 +238,11 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
+	if relay.HornetExtension == nil {
+		log.Printf("Cannot sync with non-hornet relays, skipping sync")
+		return
+	}
+
 	addrs := []ma.Multiaddr{}
 	for _, addr := range relay.HornetExtension.LibP2PAddrs {
 		multiAddr, err := ma.NewMultiaddr(addr)
@@ -258,7 +274,6 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 		log.Printf("Failed to close stream: %v", err)
 		return
 	}
-
 }
 
 func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]ws.NIP11RelayInfo, []int) {
@@ -347,7 +362,10 @@ func (rs *RelayStore) uploadToDHTSlot(freeSlot int) error {
 		return err
 	}
 
-	target := DoPut(rs.dhtServer, relayBytes, salt, (*ed25519.PublicKey)(&HardcodedKey.PubKey), (*ed25519.PrivateKey)(&HardcodedKey.PrivKey))
+	target, err := DoPut(rs.dhtServer, relayBytes, salt, (*ed25519.PublicKey)(&HardcodedKey.PubKey), (*ed25519.PrivateKey)(&HardcodedKey.PrivKey))
+	if err != nil {
+		return err
+	}
 
 	log.Printf("Successfully uploaded self relay to DHT at target %x", target)
 	return nil
@@ -492,8 +510,7 @@ func (rs *RelayStore) doPutDelegated(uploadable Uploadable) (krpc.ID, error) {
 
 }
 
-// TODO: put an error on this badboy
-func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) krpc.ID {
+func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) (krpc.ID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -538,9 +555,10 @@ func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.Public
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		log.Printf("Put operation timed out")
+		return target, errors.New("Put operation timed out")
 	}
 
-	return target
+	return target, nil
 }
 
 func DoGet(server *dht.Server, target bep44.Target, salt []byte) ([]byte, error) {
