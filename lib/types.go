@@ -227,6 +227,7 @@ type PendingTransaction struct {
 	ID        uint      `gorm:"primaryKey"`
 	TxID      string    `gorm:"not null;uniqueIndex"`
 	FeeRate   int       `gorm:"not null"`
+	Amount    float32   `gorm:"not null"`
 	Timestamp time.Time `gorm:"not null"`
 }
 

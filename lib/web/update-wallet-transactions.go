@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -71,12 +72,6 @@ func handleTransactions(c *fiber.Ctx) error {
 			continue
 		}
 
-		// Check if the transaction matches a subscriber's address and update the subscription
-		if err := processSubscriptionPayment(store, address, transaction); err != nil {
-			log.Printf("Error processing subscription payment: %v", err)
-			continue
-		}
-
 		dateStr, ok := transaction["date"].(string)
 		if !ok {
 			log.Printf("Invalid date format: %v", transaction["date"])
@@ -93,6 +88,12 @@ func handleTransactions(c *fiber.Ctx) error {
 		output, ok := transaction["output"].(string)
 		if !ok {
 			log.Printf("Invalid output format: %v", transaction["output"])
+			continue
+		}
+
+		// Check if the transaction matches a subscriber's address and update the subscription
+		if err := processSubscriptionPayment(store, output, transaction); err != nil {
+			log.Printf("Error processing subscription payment: %v", err)
 			continue
 		}
 
@@ -113,6 +114,30 @@ func handleTransactions(c *fiber.Ctx) error {
 		if err != nil {
 			log.Printf("Failed to connect to the database: %v", err)
 			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+		}
+
+		// Extract the TxID portion before the colon
+		txID := strings.Split(address, ":")[0]
+
+		log.Println("Transaction id for pending test: ", txID)
+
+		// TODO: get this working and update the variable names so that they match what they stand for.
+		var pendingTx types.PendingTransaction
+		unconfirmedResult := db.Where("tx_id = ?", txID).First(&pendingTx)
+
+		if unconfirmedResult.Error == nil {
+			// TxID found in PendingTransactions, delete it
+			if err := db.Delete(&pendingTx).Error; err != nil {
+				log.Printf("Error deleting pending transaction with TxID %s: %v", txID, err)
+				continue
+			}
+			log.Printf("Deleted pending transaction with TxID %s", txID)
+		} else if unconfirmedResult.Error == gorm.ErrRecordNotFound {
+			log.Printf("No pending transaction found with TxID %s", txID)
+		} else {
+			// If there was an error querying (other than not found), log it and continue
+			log.Printf("Error querying pending transaction with TxID %s: %v", txID, unconfirmedResult.Error)
+			continue
 		}
 
 		var existingTransaction types.WalletTransactions
