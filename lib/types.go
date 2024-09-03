@@ -223,6 +223,13 @@ type User struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
 
+type PendingTransaction struct {
+	ID        uint      `gorm:"primaryKey"`
+	TxID      string    `gorm:"not null;uniqueIndex"`
+	FeeRate   int       `gorm:"not null"`
+	Timestamp time.Time `gorm:"not null"`
+}
+
 // Address structure to be stored in Graviton
 type Address struct {
 	Index       string     `json:"index"`

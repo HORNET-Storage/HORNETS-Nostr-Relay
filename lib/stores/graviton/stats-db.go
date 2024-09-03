@@ -44,6 +44,7 @@ func InitGorm() (*gorm.DB, error) {
 			&types.WalletAddress{},
 			&types.UserChallenge{},
 			&types.Audio{},
+			&types.PendingTransaction{},
 		)
 		if err != nil {
 			log.Fatalf("Failed to migrate database schema: %v", err)

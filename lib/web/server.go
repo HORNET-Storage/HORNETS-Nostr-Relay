@@ -43,6 +43,8 @@ func StartServer() error {
 	app.Get("/user-exist", userExist)
 	app.Get("/api/kinds", handleKindData)
 	app.Get("/api/kind-trend/:kindNumber", handleKindTrendData)
+	app.Post("/pending-transactions", handlePendingTransaction)
+	app.Get("/pending-transactions", handleGetPendingTransactions)
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
