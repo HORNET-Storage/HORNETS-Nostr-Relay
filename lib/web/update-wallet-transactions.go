@@ -59,6 +59,13 @@ func handleTransactions(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
+	// Initialize the Gorm database
+	db, err := graviton.InitGorm()
+	if err != nil {
+		log.Printf("Failed to connect to the database: %v", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+	}
+
 	for _, transaction := range transactions {
 		walletName, ok := transaction["wallet_name"].(string)
 		if !ok || walletName != expectedWalletName {
@@ -94,7 +101,6 @@ func handleTransactions(c *fiber.Ctx) error {
 		// Check if the transaction matches a subscriber's address and update the subscription
 		if err := processSubscriptionPayment(store, output, transaction); err != nil {
 			log.Printf("Error processing subscription payment: %v", err)
-			continue
 		}
 
 		valueStr, ok := transaction["value"].(string)
@@ -107,13 +113,6 @@ func handleTransactions(c *fiber.Ctx) error {
 		if err != nil {
 			log.Printf("Error parsing value to float64: %v", err)
 			continue
-		}
-
-		// Initialize the Gorm database
-		db, err := graviton.InitGorm()
-		if err != nil {
-			log.Printf("Failed to connect to the database: %v", err)
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 		}
 
 		// Extract the TxID portion before the colon

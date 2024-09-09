@@ -218,17 +218,27 @@ type BarChartData struct {
 type User struct {
 	ID        uint      `gorm:"primaryKey"`
 	Password  string    // Store hashed passwords
-	Npub      string    `gorm:"uniqueIndex"` // Add this field
+	Npub      string    `gorm:"uniqueIndex"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
 
 type PendingTransaction struct {
-	ID        uint      `gorm:"primaryKey"`
-	TxID      string    `gorm:"not null;uniqueIndex"`
-	FeeRate   int       `gorm:"not null"`
-	Amount    float32   `gorm:"not null"`
-	Timestamp time.Time `gorm:"not null"`
+	ID               uint      `gorm:"primaryKey"`
+	TxID             string    `gorm:"not null;uniqueIndex" json:"txid"`
+	FeeRate          int       `gorm:"not null" json:"feeRate"`
+	Amount           int       `gorm:"not null" json:"amount"`
+	RecipientAddress string    `gorm:"not null" json:"recipient_address"`
+	Timestamp        time.Time `gorm:"not null" json:"timestamp"`
+	EnableRBF        bool      `gorm:"not null" json:"enable_rbf"` // New field for RBF
+}
+
+type ReplaceTransactionRequest struct {
+	OriginalTxID     string `json:"original_tx_id"`
+	NewTxID          string `json:"new_tx_id"`
+	NewFeeRate       int    `json:"new_fee_rate"`
+	Amount           int    `json:"amount"`
+	RecipientAddress string `json:"recipient_address"`
 }
 
 // Address structure to be stored in Graviton

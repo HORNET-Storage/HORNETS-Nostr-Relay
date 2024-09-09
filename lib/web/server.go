@@ -44,6 +44,7 @@ func StartServer() error {
 	app.Get("/api/kinds", handleKindData)
 	app.Get("/api/kind-trend/:kindNumber", handleKindTrendData)
 	app.Post("/pending-transactions", handlePendingTransaction)
+	app.Post("/replacement-transactions", handleReplaceTransaction)
 	app.Get("/pending-transactions", handleGetPendingTransactions)
 
 	port := viper.GetString("port")
