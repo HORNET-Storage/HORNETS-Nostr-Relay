@@ -133,26 +133,15 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	}
 
 	// Allocate the address to the user (npub)
-	nip88Event, err := CreateNIP88Event(privKey, env.Event.PubKey, store)
+	err = CreateNIP88Event(privKey, env.Event.PubKey, store)
 	if err != nil {
 		log.Printf("Failed to create NIP-88 event: %v", err)
 		write("NOTICE", "Failed to create NIP-88 event: %v", err)
 		return
 	}
 
-	// Marshal the NIP-88 event to JSON
-	nip88EventJSON, err := json.Marshal(nip88Event)
-	if err != nil {
-		log.Fatalf("Failed to marshal NIP-88 event to JSON: %v", err)
-		write("NOTICE", "Failed to marshal NIP-88 event to JSON: %v", err)
-		return
-	}
-
-	// Convert the JSON byte slice to a string
-	nip88EventString := string(nip88EventJSON)
-
 	// Use the JSON string in the write function
-	write("OK", env.Event.ID, state.authenticated, nip88EventString)
+	write("OK", env.Event.ID, true, "Kind 88 event successfully")
 
 	if !state.authenticated {
 		log.Printf("Session established but subscription expired or subscriber not found for %s", env.Event.PubKey)
@@ -175,7 +164,7 @@ const (
 )
 
 // Allocate the address to a specific npub (subscriber)
-func allocateAddress(store *stores_graviton.GravitonStore, npub string) (*Address, error) {
+func generateUniqueBitcoinAddress(store *stores_graviton.GravitonStore, npub string) (*Address, error) {
 	ss, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
@@ -215,40 +204,33 @@ func allocateAddress(store *stores_graviton.GravitonStore, npub string) (*Addres
 	return nil, fmt.Errorf("no available addresses")
 }
 
-func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *stores_graviton.GravitonStore) (*nostr.Event, error) {
+func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *stores_graviton.GravitonStore) error {
+	// Check if a NIP-88 event already exists for this user
+	existingEvent, err := getExistingNIP88Event(store, userPubKey)
+	if err != nil {
+		return fmt.Errorf("error checking existing NIP-88 event: %v", err)
+	}
+	if existingEvent != nil {
+		return nil // Event already exists, no need to create a new one
+	}
+
 	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10,000 sats"},
-		{DataLimit: "5 GB per month", Price: "40,000 sats"},
-		{DataLimit: "10 GB per month", Price: "70,000 sats"},
+		{DataLimit: "1 GB per month", Price: "10000"},
+		{DataLimit: "5 GB per month", Price: "40000"},
+		{DataLimit: "10 GB per month", Price: "70000"},
 	}
 
-	// Allocate a new address for this subscription
-	addr, err := allocateAddress(store, userPubKey)
+	uniqueAddress, err := generateUniqueBitcoinAddress(store, userPubKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate address: %v", err)
-	}
-
-	// Create a new subscriber
-	subscriber := &types.Subscriber{
-		Npub:      userPubKey,
-		Address:   addr.Address,
-		Tier:      "",          // This will be set after payment
-		StartDate: time.Time{}, // Will be set after payment
-		EndDate:   time.Time{}, // Will be set after payment
-	}
-
-	// Save the subscriber to the Graviton store
-	err = store.SaveSubscriber(subscriber)
-	if err != nil {
-		return nil, fmt.Errorf("failed to save subscriber: %v", err)
+		return fmt.Errorf("failed to generate unique Bitcoin address: %v", err)
 	}
 
 	tags := []nostr.Tag{
-		{"subscription-duration", "1 month"},
-		{"npub", userPubKey},
-		{"relay-bitcoin-address", addr.Address},
-		// Add Lightning invoice if applicable
-		{"relay-dht-key", viper.GetString("RelayDHTkey")},
+		{"subscription_duration", "1 month"},
+		{"p", userPubKey},
+		{"subscription_status", "inactive"},
+		{"relay_bitcoin_address", uniqueAddress.Address},
+		{"relay_dht_key", viper.GetString("RelayDHTkey")},
 	}
 
 	for _, tier := range subscriptionTiers {
@@ -263,15 +245,46 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *
 		Content:   "",
 	}
 
-	hash := sha256.Sum256(event.Serialize())
+	// Generate the event ID
+	serializedEvent := event.Serialize()
+	hash := sha256.Sum256(serializedEvent)
+	event.ID = hex.EncodeToString(hash[:])
+
+	// Sign the event
 	sig, err := schnorr.Sign(relayPrivKey, hash[:])
 	if err != nil {
-		return nil, fmt.Errorf("error signing event: %v", err)
+		return fmt.Errorf("error signing event: %v", err)
 	}
-	event.ID = hex.EncodeToString(hash[:])
 	event.Sig = hex.EncodeToString(sig.Serialize())
 
-	return event, nil
+	// Store the event
+	err = store.StoreEvent(event)
+	if err != nil {
+		return fmt.Errorf("failed to store NIP-88 event: %v", err)
+	}
+
+	return nil
+}
+
+func getExistingNIP88Event(store *stores_graviton.GravitonStore, userPubKey string) (*nostr.Event, error) {
+	filter := nostr.Filter{
+		Kinds: []int{88},
+		Tags: nostr.TagMap{
+			"p": []string{userPubKey},
+		},
+		Limit: 1,
+	}
+
+	events, err := store.QueryEvents(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(events) > 0 {
+		return events[0], nil
+	}
+
+	return nil, nil
 }
 
 func loadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
