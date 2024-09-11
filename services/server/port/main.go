@@ -110,13 +110,39 @@ func init() {
 	viper.WatchConfig()
 }
 
-func main() {
+func loadOrCreateEnvFile(envFile string) {
+	// Check if the .env file exists
+	if _, err := os.Stat(envFile); os.IsNotExist(err) {
+		// If the file doesn't exist, create it
+		f, err := os.Create(envFile)
+		if err != nil {
+			log.Fatalf("Error creating .env file: %s", err)
+		}
+		defer f.Close()
 
+		// Optionally, write default environment variables to the .env file
+		_, err = f.WriteString("KEY=default_value\n")
+		if err != nil {
+			log.Fatalf("Error writing to .env file: %s", err)
+		}
+
+		fmt.Printf(".env file created at %s\n", envFile)
+	}
+
+	// Load the .env file
 	err := godotenv.Load(envFile)
 	if err != nil {
-		log.Printf("error loading .env file: %s", err)
+		log.Printf("Error loading .env file: %s", err)
 		return
 	}
+
+	fmt.Printf(".env file loaded from %s\n", envFile)
+}
+
+func main() {
+
+	envFile := ".env"
+	loadOrCreateEnvFile(envFile)
 
 	ctx := context.Background()
 
@@ -136,7 +162,7 @@ func main() {
 	store.InitStore(queryCache)
 
 	// generate server priv key if it does not exist
-	err = generateAndSaveNostrPrivateKey()
+	err := generateAndSaveNostrPrivateKey()
 	if err != nil {
 		log.Printf("error generating or saving server private key")
 	}

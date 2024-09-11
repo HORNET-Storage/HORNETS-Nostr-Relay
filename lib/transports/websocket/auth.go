@@ -98,7 +98,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Check if the subscription is still active
 	if subscriber != nil && time.Now().After(subscriber.EndDate) {
 		log.Printf("Subscriber %s subscription expired on %s", subscriber.Npub, subscriber.EndDate)
-		state.authenticated = false
+		state.authenticated = true
 		// Proceed to create and send the NIP-88 event even if the subscription has expired
 	} else {
 		// If the subscription is valid, set authenticated to true
