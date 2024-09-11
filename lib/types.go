@@ -204,6 +204,12 @@ type UserProfile struct {
 	Timestamp     time.Time `gorm:"autoCreateTime"`
 }
 
+type ActiveToken struct {
+	UserID    uint   `gorm:"index"`
+	Token     string `gorm:"uniqueIndex"`
+	ExpiresAt time.Time
+}
+
 type ActivityData struct {
 	Month   string  `json:"month"`
 	TotalGB float64 `json:"total_gb"`

@@ -18,34 +18,44 @@ func StartServer() error {
 	go pullBitcoinPrice()
 
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowMethods: "GET, POST, OPTIONS",
 	}))
 
-	// Dedicated routes for each handler
-	app.Post("/relaycount", getRelayCount)
-	app.Post("/relay-settings", updateRelaySettings)
-	app.Get("/relay-settings", getRelaySettings)
-	app.Post("/timeseries", getProfilesTimeSeriesData)
-	app.Post("/activitydata", getMonthlyStorageStats)
-	app.Post("/barchartdata", getNotesMediaStorageData)
-	app.Post("/balance", updateWalletBalance) // Add the new route here
-	app.Post("/transactions", updateWalletTransactions)
-	app.Post("/updateRate", updateBitcoinRate)
-	app.Get("/balance/usd", getWalletBalanceUSD)
-	app.Get("/transactions/latest", getLatestWalletTransactions)
-	app.Get("/bitcoin-rates/last-30-days", getBitcoinRatesLast30Days)
-	app.Post("/addresses", saveWalletAddresses)
-	app.Get("/addresses", pullWalletAddresses)
-	app.Post("/signup", signUpUser)
-	app.Post("/login", loginUser) // Add the new login route
-	app.Post("/verify", verifyLoginSignature)
+	// Rate limited routes
+	app.Post("/signup", rateLimiterMiddleware(), signUpUser)
+	app.Post("/login", rateLimiterMiddleware(), loginUser)
+	app.Post("/verify", rateLimiterMiddleware(), verifyLoginSignature)
+
+	// Open routes
 	app.Get("/user-exist", checkUserExists)
-	app.Get("/api/kinds", getKindData)
-	app.Get("/api/kind-trend/:kindNumber", getKindTrendData)
-	app.Post("/pending-transactions", saveUnconfirmedTransaction)
-	app.Post("/replacement-transactions", replaceTransaction)
-	app.Get("/pending-transactions", getPendingTransactions)
+	app.Post("/logout", logoutUser)
+
+	secured := app.Group("/api")
+	secured.Use(jwtMiddleware)
+
+	// Dedicated routes for each handler
+	secured.Get("/relaycount", getRelayCount)
+	secured.Post("/relay-settings", updateRelaySettings)
+	secured.Get("/relay-settings", getRelaySettings)
+	secured.Get("/timeseries", getProfilesTimeSeriesData)
+	secured.Get("/activitydata", getMonthlyStorageStats)
+	secured.Get("/barchartdata", getNotesMediaStorageData)
+	secured.Post("/balance", updateWalletBalance)           // TODO: We need to handle this one slightly differently
+	secured.Post("/transactions", updateWalletTransactions) // TODO: We need to handle this one slightly differently
+	secured.Post("/updateRate", updateBitcoinRate)          // TODO: We need to handle this one slightly differently
+	secured.Get("/balance/usd", getWalletBalanceUSD)
+	secured.Get("/transactions/latest", getLatestWalletTransactions)
+	secured.Get("/bitcoin-rates/last-30-days", getBitcoinRatesLast30Days)
+	secured.Post("/addresses", saveWalletAddresses) // TODO: We need to handle this one slightly differently
+	secured.Get("/addresses", pullWalletAddresses)
+	secured.Get("/kinds", getKindData)
+	secured.Get("/kind-trend/:kindNumber", getKindTrendData)
+	secured.Post("/pending-transactions", saveUnconfirmedTransaction)
+	secured.Post("/replacement-transactions", replaceTransaction)
+	secured.Get("/pending-transactions", getPendingTransactions)
+	secured.Post("/refresh-token", refreshToken)
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
