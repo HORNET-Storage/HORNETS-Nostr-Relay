@@ -32,6 +32,13 @@ func StartServer() error {
 	app.Get("/user-exist", checkUserExists)
 	app.Post("/logout", logoutUser)
 
+	// Wallet-specific routes with API key authentication
+	walletRoutes := app.Group("/api/wallet")
+	walletRoutes.Use(apiKeyMiddleware)
+	walletRoutes.Post("/balance", updateWalletBalance)
+	walletRoutes.Post("/transactions", updateWalletTransactions)
+	walletRoutes.Post("/addresses", saveWalletAddresses) // Added this line
+
 	secured := app.Group("/api")
 	secured.Use(jwtMiddleware)
 
@@ -42,13 +49,10 @@ func StartServer() error {
 	secured.Get("/timeseries", getProfilesTimeSeriesData)
 	secured.Get("/activitydata", getMonthlyStorageStats)
 	secured.Get("/barchartdata", getNotesMediaStorageData)
-	secured.Post("/balance", updateWalletBalance)           // TODO: We need to handle this one slightly differently
-	secured.Post("/transactions", updateWalletTransactions) // TODO: We need to handle this one slightly differently
-	secured.Post("/updateRate", updateBitcoinRate)          // TODO: We need to handle this one slightly differently
+	secured.Post("/updateRate", updateBitcoinRate) // TODO: We need to handle this one slightly differently
 	secured.Get("/balance/usd", getWalletBalanceUSD)
 	secured.Get("/transactions/latest", getLatestWalletTransactions)
 	secured.Get("/bitcoin-rates/last-30-days", getBitcoinRatesLast30Days)
-	secured.Post("/addresses", saveWalletAddresses) // TODO: We need to handle this one slightly differently
 	secured.Get("/addresses", pullWalletAddresses)
 	secured.Get("/kinds", getKindData)
 	secured.Get("/kind-trend/:kindNumber", getKindTrendData)
