@@ -36,24 +36,30 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		}
 	}
 
+	log.Printf("Handling auth message for user with pubkey: %s", env.Event.PubKey)
+
 	if env.Event.Kind != 22242 {
+		log.Printf("Invalid auth event kind: %d", env.Event.Kind)
 		write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
 		return
 	}
 
 	isValid, errMsg := lib_nostr.AuthTimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !isValid {
+		log.Printf("Auth time check failed: %s", errMsg)
 		write("OK", env.Event.ID, false, errMsg)
 		return
 	}
 
 	success, err := env.Event.CheckSignature()
 	if err != nil {
+		log.Printf("Failed to check signature: %v", err)
 		write("NOTICE", "Failed to check signature")
 		return
 	}
 
 	if !success {
+		log.Printf("Signature verification failed for user: %s", env.Event.PubKey)
 		write("OK", env.Event.ID, false, "Signature failed to verify")
 		return
 	}
@@ -66,6 +72,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 			} else if tag[0] == "challenge" {
 				hasChallengeTag = true
 				if tag[1] != challenge {
+					log.Printf("Challenge mismatch for user %s. Expected: %s, Got: %s", env.Event.PubKey, challenge, tag[1])
 					write("OK", env.Event.ID, false, "Error checking session challenge")
 					return
 				}
@@ -74,6 +81,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	}
 
 	if !hasRelayTag || !hasChallengeTag {
+		log.Printf("Missing required tags for user %s. Has relay tag: %v, Has challenge tag: %v", env.Event.PubKey, hasRelayTag, hasChallengeTag)
 		write("OK", env.Event.ID, false, "Error event does not have required tags")
 		return
 	}
@@ -90,25 +98,38 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Retrieve the subscriber using their npub
 	subscriber, err := store.GetSubscriber(env.Event.PubKey)
 	if err != nil {
-		log.Printf("Subscriber not found or error retrieving subscriber: %v", err)
-		state.authenticated = false
-		// Proceed to create and send the NIP-88 event even if the subscriber is not found
+		log.Printf("Error retrieving subscriber for %s: %v", env.Event.PubKey, err)
+		// Create a new subscriber with default values
+		subscriber = &types.Subscriber{
+			Npub:      env.Event.PubKey,
+			Tier:      "",
+			StartDate: time.Time{},
+			EndDate:   time.Time{},
+		}
+		err = store.SaveSubscriber(subscriber)
+		if err != nil {
+			log.Printf("Failed to create new subscriber for %s: %v", env.Event.PubKey, err)
+			write("NOTICE", "Failed to create new subscriber")
+			return
+		}
+		log.Printf("Created new subscriber for %s", env.Event.PubKey)
+	} else {
+		log.Printf("Retrieved existing subscriber for %s", env.Event.PubKey)
 	}
 
-	// Check if the subscription is still active
-	if subscriber != nil && time.Now().After(subscriber.EndDate) {
-		log.Printf("Subscriber %s subscription expired on %s", subscriber.Npub, subscriber.EndDate)
+	// Check if the subscription is active
+	if subscriber.Tier != "" && time.Now().Before(subscriber.EndDate) {
+		log.Printf("Subscriber %s has an active subscription until %s", subscriber.Npub, subscriber.EndDate)
 		state.authenticated = true
-		// Proceed to create and send the NIP-88 event even if the subscription has expired
 	} else {
-		// If the subscription is valid, set authenticated to true
-		state.authenticated = true
-		return
+		log.Printf("Subscriber %s does not have an active subscription", subscriber.Npub)
+		state.authenticated = false
 	}
 
 	// Create session regardless of subscription status
 	err = sessions.CreateSession(env.Event.PubKey)
 	if err != nil {
+		log.Printf("Failed to create session for %s: %v", env.Event.PubKey, err)
 		write("NOTICE", "Failed to create session")
 		return
 	}
@@ -119,42 +140,42 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 
 	err = godotenv.Load(envFile)
 	if err != nil {
-		log.Printf("error loading .env file: %s", err)
-		write("NOTICE", "error loading .env file: %s", err)
+		log.Printf("Error loading .env file: %s", err)
+		write("NOTICE", "Error loading .env file: %s", err)
 		return
 	}
 
 	// Load keys from environment for signing kind 411
 	privKey, _, err := loadSecp256k1Keys()
 	if err != nil {
-		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
-		write("NOTICE", "error loading keys from environment. check if you have the key in the environment: %s", err)
+		log.Printf("Error loading keys from environment for %s: %s", env.Event.PubKey, err)
+		write("NOTICE", "Error loading keys from environment. Check if you have the key in the environment: %s", err)
 		return
 	}
 
-	// Allocate the address to the user (npub)
+	// Create or update NIP-88 event
 	err = CreateNIP88Event(privKey, env.Event.PubKey, store)
 	if err != nil {
-		log.Printf("Failed to create NIP-88 event: %v", err)
-		write("NOTICE", "Failed to create NIP-88 event: %v", err)
+		log.Printf("Failed to create/update NIP-88 event for %s: %v", env.Event.PubKey, err)
+		write("NOTICE", "Failed to create/update NIP-88 event: %v", err)
 		return
 	}
 
-	// Use the JSON string in the write function
-	write("OK", env.Event.ID, true, "Kind 88 event successfully")
+	log.Printf("Successfully created/updated NIP-88 event for %s", env.Event.PubKey)
+	write("OK", env.Event.ID, true, "NIP-88 event successfully created/updated")
 
 	if !state.authenticated {
-		log.Printf("Session established but subscription expired or subscriber not found for %s", env.Event.PubKey)
-		write("NOTICE", "Session established but subscription expired or subscriber not found. Renew to continue access.")
+		log.Printf("Session established but subscription inactive for %s", env.Event.PubKey)
+		write("NOTICE", "Session established but subscription inactive. Renew to continue access.")
 	}
 }
 
 type Address struct {
-	Index       uint
-	Address     string
-	Status      string
-	AllocatedAt *time.Time
-	Npub        string // Associate the address with an Npub
+	Index       uint       `json:"index,string"` // Use string tag to handle string-encoded integers
+	Address     string     `json:"address"`
+	Status      string     `json:"status"`
+	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
+	Npub        string     `json:"npub,omitempty"`
 }
 
 const (
@@ -179,7 +200,9 @@ func generateUniqueBitcoinAddress(store *stores_graviton.GravitonStore, npub str
 	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
 		var addr Address
 		if err := json.Unmarshal(v, &addr); err != nil {
-			return nil, err
+			// If unmarshaling fails, log the error and continue to the next address
+			log.Printf("Error unmarshaling address: %v. Skipping this address.", err)
+			continue
 		}
 		if addr.Status == AddressStatusAvailable {
 			now := time.Now()
@@ -189,13 +212,13 @@ func generateUniqueBitcoinAddress(store *stores_graviton.GravitonStore, npub str
 
 			value, err := json.Marshal(addr)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to marshal address: %v", err)
 			}
 			if err := addressTree.Put([]byte(fmt.Sprintf("%d", addr.Index)), value); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put address in tree: %v", err)
 			}
 			if _, err := graviton.Commit(addressTree); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to commit address tree: %v", err)
 			}
 			return &addr, nil
 		}
@@ -240,7 +263,7 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *
 	event := &nostr.Event{
 		PubKey:    hex.EncodeToString(relayPrivKey.PubKey().SerializeCompressed()),
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      88,
+		Kind:      764,
 		Tags:      tags,
 		Content:   "",
 	}

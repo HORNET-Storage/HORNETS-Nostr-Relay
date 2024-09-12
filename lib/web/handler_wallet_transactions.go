@@ -19,9 +19,8 @@ func getLatestWalletTransactions(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
-	// Get the latest 10 transactions
 	var transactions []types.WalletTransactions
-	result := db.Order("date desc").Limit(-1).Find(&transactions)
+	result := db.Order("date desc").Find(&transactions)
 
 	if result.Error != nil {
 		log.Printf("Error querying transactions: %v", result.Error)

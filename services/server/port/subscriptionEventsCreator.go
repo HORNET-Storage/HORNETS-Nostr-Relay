@@ -305,7 +305,7 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *
 	event := &nostr.Event{
 		PubKey:    hex.EncodeToString(relayPrivKey.PubKey().SerializeCompressed()),
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      88,
+		Kind:      764,
 		Tags:      tags,
 		Content:   "",
 	}
