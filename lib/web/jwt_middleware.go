@@ -6,19 +6,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/golang-jwt/jwt/v4"
-
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 func jwtMiddleware(c *fiber.Ctx) error {
+	log.Println("JWT Middleware: Starting token verification")
+
 	// Get the Authorization header
 	authHeader := c.Get("Authorization")
 
 	// Check if the header is empty or doesn't start with "Bearer "
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		log.Println("JWT Middleware: Missing or invalid Authorization header")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Missing or invalid Authorization header",
 		})
@@ -26,12 +28,12 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	// Extract the token
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-	log.Println("Token string from middleware: ", tokenString)
+	log.Printf("JWT Middleware: Token received: %s", tokenString[:10]) // Log first 10 chars for security
 
 	// Check if the token is in ActiveTokens
 	db, err := graviton.InitGorm()
 	if err != nil {
+		log.Printf("JWT Middleware: Database connection error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Internal server error",
 		})
@@ -39,10 +41,13 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	var activeToken types.ActiveToken
 	if err := db.Where("token = ? AND expires_at > ?", tokenString, time.Now()).First(&activeToken).Error; err != nil {
+		log.Printf("JWT Middleware: Token not found in ActiveTokens or expired: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired token",
 		})
 	}
+
+	log.Printf("JWT Middleware: Token found in ActiveTokens for user ID: %d", activeToken.UserID)
 
 	// Parse and validate the token
 	token, err := jwt.ParseWithClaims(tokenString, &types.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
@@ -54,6 +59,7 @@ func jwtMiddleware(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
+		log.Printf("JWT Middleware: Token parsing error: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired token",
 		})
@@ -61,11 +67,13 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	// Check if the token is valid
 	if claims, ok := token.Claims.(*types.JWTClaims); ok && token.Valid {
+		log.Printf("JWT Middleware: Valid token for user ID: %d", claims.UserID)
 		// Add the claims to the context for use in subsequent handlers
 		c.Locals("user", claims)
 		return c.Next()
 	}
 
+	log.Println("JWT Middleware: Invalid token claims")
 	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 		"error": "Invalid token claims",
 	})
