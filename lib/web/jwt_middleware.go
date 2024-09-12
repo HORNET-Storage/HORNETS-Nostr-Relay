@@ -13,7 +13,6 @@ import (
 )
 
 func jwtMiddleware(c *fiber.Ctx) error {
-	log.Println("JWT Middleware: Starting token verification")
 
 	// Get the Authorization header
 	authHeader := c.Get("Authorization")
@@ -28,7 +27,6 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	// Extract the token
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-	log.Printf("JWT Middleware: Token received: %s", tokenString[:10]) // Log first 10 chars for security
 
 	// Check if the token is in ActiveTokens
 	db, err := graviton.InitGorm()
@@ -46,8 +44,6 @@ func jwtMiddleware(c *fiber.Ctx) error {
 			"error": "Invalid or expired token",
 		})
 	}
-
-	log.Printf("JWT Middleware: Token found in ActiveTokens for user ID: %d", activeToken.UserID)
 
 	// Parse and validate the token
 	token, err := jwt.ParseWithClaims(tokenString, &types.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
