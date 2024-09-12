@@ -63,8 +63,6 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	// Check if the token is valid
 	if claims, ok := token.Claims.(*types.JWTClaims); ok && token.Valid {
-		log.Printf("JWT Middleware: Valid token for user ID: %d", claims.UserID)
-		// Add the claims to the context for use in subsequent handlers
 		c.Locals("user", claims)
 		return c.Next()
 	}
