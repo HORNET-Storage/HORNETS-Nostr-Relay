@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	// Extract the token
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+	log.Println("Token string from middleware: ", tokenString)
 
 	// Check if the token is in ActiveTokens
 	db, err := graviton.InitGorm()
