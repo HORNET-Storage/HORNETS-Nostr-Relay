@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -79,7 +80,14 @@ func init() {
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")
 	viper.SetDefault("RelayDHTkey", "")
-	viper.SetDefault("wallet_api_key", "")
+
+	// Generate a random wallet API key
+	apiKey, err := generateRandomAPIKey()
+	if err != nil {
+		log.Fatalf("Failed to generate wallet API key: %v", err)
+	}
+	viper.SetDefault("wallet_api_key", apiKey)
+
 	viper.SetDefault("subscription_tiers", []map[string]interface{}{
 		{
 			"data_limit": "1 GB per month",
@@ -109,6 +117,16 @@ func init() {
 	})
 
 	viper.WatchConfig()
+}
+
+// Helper function to generate a random 32-byte hexadecimal key
+func generateRandomAPIKey() (string, error) {
+	bytes := make([]byte, 32) // 32 bytes = 256 bits
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 func loadOrCreateEnvFile(envFile string) {
