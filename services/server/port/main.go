@@ -1,12 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"log"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -17,9 +24,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
-	//"github.com/libp2p/go-libp2p/p2p/security/noise"
-	//libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	fiber_websocket "github.com/gofiber/contrib/websocket"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
@@ -78,13 +85,15 @@ func init() {
 	}
 
 	viper.OnConfigChange(func(e fsnotify.Event) {
-		fmt.Println("Config file changed:", e.Name)
+		log.Println("Config file changed:", e.Name)
 	})
 
 	viper.WatchConfig()
 }
 
 func main() {
+	ctx := context.Background()
+
 	wg := new(sync.WaitGroup)
 
 	// Private key
@@ -96,14 +105,17 @@ func main() {
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
-	store.InitStore(queryCache)
+	err := store.InitStore("gravitondb", queryCache)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Stream Handlers
 	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		return true
 	})
 
-	upload.AddUploadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+	canUpload := func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		decodedSignature, err := hex.DecodeString(*signature)
 		if err != nil {
 			return false
@@ -114,7 +126,7 @@ func main() {
 			return false
 		}
 
-		cid, err := cid.Parse(rootLeaf.Hash)
+		contentID, err := cid.Parse(rootLeaf.Hash)
 		if err != nil {
 			return false
 		}
@@ -124,9 +136,13 @@ func main() {
 			return false
 		}
 
-		err = signing.VerifyCIDSignature(parsedSignature, cid, publicKey)
+		err = signing.VerifyCIDSignature(parsedSignature, contentID, publicKey)
 		return err == nil
-	}, func(dag *merkle_dag.Dag, pubKey *string) {})
+	}
+
+	handleUpload := func(dag *merkle_dag.Dag, pubKey *string) {}
+
+	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
 
 	query.AddQueryHandler(host, store)
 
@@ -136,10 +152,40 @@ func main() {
 		return
 	}
 
+	log.Printf("Host started with id: %s\n", host.ID())
+	log.Printf("Host started with address: %s\n", host.Addrs())
+
+	syncDB, err := negentropy.InitSyncDB("sync_store.db")
+	if err != nil {
+		log.Fatal("failed to connect database")
+	}
+
+	negentropy.SetupNegentropyEventHandler(host, "host", store)
+
+	libp2pAddrs := []string{}
+	for _, addr := range host.Addrs() {
+		libp2pAddrs = append(libp2pAddrs, addr.String())
+	}
+	viper.Set("LibP2PID", host.ID().String())
+	viper.Set("LibP2PAddrs", libp2pAddrs)
+	selfRelay := ws.GetRelayInfo()
+	log.Printf("Self Relay: %+v\n", selfRelay)
+
+	dhtServer := negentropy.DefaultDHTServer()
+	defer dhtServer.Close()
+
+	// this periodically syncs with other relays, and uploads user keys to dht
+	uploadInterval := time.Hour * 2
+	syncInterval := time.Hour * 3
+	relayStore := negentropy.NewRelayStore(syncDB, dhtServer, host, store, uploadInterval, syncInterval)
+	log.Printf("Created relay store: %+v", relayStore)
+
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
+		log.Println("Using universal stream handler because Mode set to 'unlimited'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	} else if settings.Mode == "smart" {
+		log.Println("Using specific stream handlers because Mode set to 'smart'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
@@ -155,11 +201,14 @@ func main() {
 		nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
 		nostr.RegisterHandler("kind/10001", kind10001.BuildKind10001Handler(store))
 		nostr.RegisterHandler("kind/10002", kind10002.BuildKind10002Handler(store))
+		nostr.RegisterHandler("kind/11011", kind11011.BuildKind11011Handler(store))
 		nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
 		nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
 		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
+	} else {
+		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
 	}
 
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
@@ -198,20 +247,20 @@ func main() {
 			stream.Close()
 		}
 
-		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), wrapper)
+		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), middleware.SessionMiddleware(host)(wrapper))
 	}
 
 	// Web Panel
 	if viper.GetBool("web") {
 		wg.Add(1)
 
-		fmt.Println("Starting with web server enabled")
+		log.Println("Starting with web server enabled")
 
 		go func() {
 			err := web.StartServer()
 
 			if err != nil {
-				fmt.Println("Fatal error occurred in web server")
+				log.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
@@ -222,21 +271,31 @@ func main() {
 	if viper.GetBool("proxy") {
 		wg.Add(1)
 
-		fmt.Println("Starting with legacy nostr proxy web server enabled")
+		log.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			err := websocket.StartServer(store)
+			app := websocket.BuildServer(store)
+
+			app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
+
+			err := websocket.StartServer(app)
 
 			if err != nil {
-				fmt.Println("Fatal error occurred in web server")
+				log.Println("Fatal error occurred in web server")
 			}
 
 			wg.Done()
 		}()
 	}
 
-	fmt.Printf("Host started with id: %s\n", host.ID())
-	fmt.Printf("Host started with address: %s\n", host.Addrs())
+	// Handle kill signals
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		os.Exit(0)
+	}()
 
 	wg.Wait()
 }

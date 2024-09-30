@@ -9,7 +9,7 @@ import (
 )
 
 type Store interface {
-	InitStore(args ...interface{}) error
+	InitStore(basepath string, args ...interface{}) error
 
 	// Hornet Storage
 	StoreLeaf(root string, leafData *types.DagLeafData) error
@@ -25,10 +25,9 @@ type Store interface {
 	DeleteEvent(eventID string) error
 
 	// Blossom
-	StoreBlob(data []byte, contentType string, publicKey string) (*types.BlobDescriptor, error)
-	GetBlob(sha256 string) ([]byte, *string, error)
-	DeleteBlob(sha256 string) error
-	ListBlobs(pubkey string, since, until int64) ([]types.BlobDescriptor, error)
+	StoreBlob(data []byte, hash []byte, publicKey string) error
+	GetBlob(hash string) ([]byte, error)
+	DeleteBlob(hash string) error
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {
