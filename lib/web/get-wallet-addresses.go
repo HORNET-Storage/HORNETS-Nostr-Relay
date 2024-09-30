@@ -3,8 +3,8 @@ package web
 import (
 	"log"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"           // Adjust the import path to your actual project structure
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton" // Adjust the import path to your actual project structure
+	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )

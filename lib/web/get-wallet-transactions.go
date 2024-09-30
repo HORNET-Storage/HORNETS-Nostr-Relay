@@ -3,9 +3,7 @@ package web
 import (
 	"fmt"
 	"log"
-	"math"
 	"strconv"
-	"strings"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
@@ -23,7 +21,7 @@ func handleLatestTransactions(c *fiber.Ctx) error {
 
 	// Get the latest 10 transactions
 	var transactions []types.WalletTransactions
-	result := db.Order("date desc").Limit(10).Find(&transactions)
+	result := db.Order("date desc").Find(&transactions)
 
 	if result.Error != nil {
 		log.Printf("Error querying transactions: %v", result.Error)
@@ -50,26 +48,14 @@ func handleLatestTransactions(c *fiber.Ctx) error {
 
 	// Process each transaction to convert the value to USD
 	for i, transaction := range transactions {
-		// Trim whitespace and remove any commas from the value string
-		cleanValue := strings.TrimSpace(strings.Replace(transaction.Value, ",", "", -1))
-
-		// Parse the value as a float64 to handle decimal points
-		satoshisFloat, err := strconv.ParseFloat(cleanValue, 64)
+		value, err := strconv.ParseFloat(transaction.Value, 64)
 		if err != nil {
-			log.Printf("Error converting value to float64: %v for value: '%s'", err, cleanValue)
+			log.Printf("Error converting value to float64: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Conversion error",
 			})
 		}
-
-		// Convert to int64, rounding to the nearest Satoshi
-		satoshis := int64(math.Round(satoshisFloat))
-
-		// Convert Satoshis to USD
-		usdValue := satoshiToUSD(bitcoinRate.Rate, satoshis)
-
-		// Update the transaction value
-		transactions[i].Value = fmt.Sprintf("%.2f", usdValue)
+		transactions[i].Value = fmt.Sprintf("%.8f", value)
 	}
 
 	// Respond with the transactions

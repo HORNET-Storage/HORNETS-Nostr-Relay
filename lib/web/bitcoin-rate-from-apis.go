@@ -24,24 +24,25 @@ type BinanceResponse struct {
 	Price string `json:"price"`
 }
 
+type MempoolResponse struct {
+	USD float64 `json:"USD"`
+}
+
 func fetchCoinGeckoPrice() (float64, error) {
 	resp, err := http.Get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, err
 	}
-
 	var result CoinGeckoResponse
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return 0, err
 	}
-
 	return result.Bitcoin.USD, nil
 }
 
@@ -51,32 +52,46 @@ func fetchBinancePrice() (float64, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, err
 	}
-
 	var result BinanceResponse
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return 0, err
 	}
-
 	price, err := strconv.ParseFloat(result.Price, 64)
 	if err != nil {
 		return 0, err
 	}
-
 	return price, nil
+}
+
+func fetchMempoolPrice() (float64, error) {
+	resp, err := http.Get("https://mempool.space/api/v1/prices")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	var result MempoolResponse
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return 0, err
+	}
+	return result.USD, nil
 }
 
 func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 	apis := []func() (float64, error){
 		fetchCoinGeckoPrice,
 		fetchBinancePrice,
+		fetchMempoolPrice,
 	}
-
 	for i := 0; i < len(apis); i++ {
 		index := (apiIndex + i) % len(apis)
 		price, err := apis[index]()
@@ -85,7 +100,6 @@ func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 		}
 		fmt.Println("Error fetching price from API", index, ":", err)
 	}
-
 	return 0, apiIndex, fmt.Errorf("all API calls failed")
 }
 

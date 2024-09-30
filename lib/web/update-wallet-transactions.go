@@ -1,7 +1,9 @@
 package web
 
 import (
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -30,7 +32,7 @@ func handleTransactions(c *fiber.Ctx) error {
 	}
 
 	for _, transaction := range transactions {
-		wtxid, ok := transaction["WTxId"].(string)
+		address, ok := transaction["address"].(string)
 		if !ok {
 			log.Printf("Invalid address format: %v", transaction["address"])
 			continue
@@ -42,7 +44,8 @@ func handleTransactions(c *fiber.Ctx) error {
 			continue
 		}
 
-		date, err := time.Parse("2006-01-02 15:04:05", dateStr)
+		// Correct format for ISO 8601 datetime string with timezone
+		date, err := time.Parse(time.RFC3339, dateStr)
 		if err != nil {
 			log.Printf("Error parsing date: %v", err)
 			continue
@@ -54,14 +57,20 @@ func handleTransactions(c *fiber.Ctx) error {
 			continue
 		}
 
-		value, ok := transaction["value"].(string)
+		valueStr, ok := transaction["value"].(string)
 		if !ok {
 			log.Printf("Invalid value format: %v", transaction["value"])
 			continue
 		}
 
+		value, err := strconv.ParseFloat(valueStr, 64)
+		if err != nil {
+			log.Printf("Error parsing value to float64: %v", err)
+			continue
+		}
+
 		var existingTransaction types.WalletTransactions
-		result := db.Where("witness_tx_id = ? AND date = ? AND output = ? AND value = ?", wtxid, date, output, value).First(&existingTransaction)
+		result := db.Where("address = ? AND date = ? AND output = ? AND value = ?", address, date, output, valueStr).First(&existingTransaction)
 
 		if result.Error == nil {
 			// Transaction already exists, skip it
@@ -76,10 +85,10 @@ func handleTransactions(c *fiber.Ctx) error {
 
 		// Create a new transaction
 		newTransaction := types.WalletTransactions{
-			WitnessTxId: wtxid,
-			Date:        date,
-			Output:      output,
-			Value:       value,
+			Address: address,
+			Date:    date,
+			Output:  output,
+			Value:   fmt.Sprintf("%.8f", value),
 		}
 		if err := db.Create(&newTransaction).Error; err != nil {
 			log.Printf("Error saving new transaction: %v", err)

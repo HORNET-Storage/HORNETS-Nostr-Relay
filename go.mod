@@ -162,6 +162,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.2 // indirect
 	github.com/ipfs/go-cid v0.4.1
+	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.17.8 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect

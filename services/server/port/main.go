@@ -15,6 +15,7 @@ import (
 
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
+	"github.com/joho/godotenv"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/fsnotify/fsnotify"
@@ -74,6 +75,13 @@ func init() {
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
 	viper.SetDefault("query_cache", map[string]string{})
 	viper.SetDefault("service_tag", "hornet-storage-service")
+	viper.SetDefault("RelayName", "HORNETS")
+	viper.SetDefault("RelayDescription", "The best relay ever.")
+	viper.SetDefault("RelayPubkey", "")
+	viper.SetDefault("RelayContact", "support@hornets.net")
+	viper.SetDefault("RelaySoftware", "golang")
+	viper.SetDefault("RelayVersion", "0.0.1")
+	viper.SetDefault("RelayDHTkey", "")
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -108,6 +116,37 @@ func main() {
 	err := store.InitStore("gravitondb", queryCache)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// generate server priv key if it does not exist
+	err := generateAndSaveNostrPrivateKey()
+	if err != nil {
+		log.Printf("error generating or saving server private key")
+	}
+
+	err = godotenv.Load(envFile)
+	if err != nil {
+		log.Printf("error loading .env file: %s", err)
+		return
+	}
+
+	// load keys from environment for signing kind 411
+	privKey, pubKey, err := loadSecp256k1Keys()
+	if err != nil {
+		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
+		return
+	}
+	// Create dht key for using relay private key and set it on viper.
+	_, _, err = generateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
+	if err != nil {
+		log.Printf("error generating dht-key: %s", err)
+		return
+	}
+
+	// Create and store kind 411 event
+	if err := createKind411Event(privKey, pubKey, store); err != nil {
+		log.Printf("Failed to create kind 411 event: %v", err)
+		return
 	}
 
 	// Stream Handlers

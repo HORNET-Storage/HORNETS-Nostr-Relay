@@ -26,7 +26,7 @@ type GravitonMemoryStore struct {
 	CacheConfig map[string]string
 }
 
-func (store *GravitonMemoryStore) InitStore(args ...interface{}) error {
+func (store *GravitonMemoryStore) InitStore(basepath string, args ...interface{}) error {
 	db, err := graviton.NewMemStore()
 	if err != nil {
 		return err
@@ -322,10 +322,12 @@ func (store *GravitonMemoryStore) RetrieveLeaf(root string, hash string, include
 	return data, nil
 }
 
+// Retrieve and build an entire scionic merkletree from the root hash
 func (store *GravitonMemoryStore) BuildDagFromStore(root string, includeContent bool) (*types.DagData, error) {
 	return stores.BuildDagFromStore(store, root, includeContent)
 }
 
+// Store an entire scionic merkltree (not implemented currently as not required, leaves are stored as received)
 func (store *GravitonMemoryStore) StoreDag(dag *types.DagData) error {
 	return stores.StoreDag(store, dag)
 }
