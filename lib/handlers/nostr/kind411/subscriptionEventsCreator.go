@@ -1,4 +1,4 @@
-package main
+package kind411creator
 
 import (
 	"crypto/ed25519"
@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -18,7 +17,6 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/deroproject/graviton"
-	"github.com/joho/godotenv"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 )
@@ -43,7 +41,7 @@ type RelayInfo struct {
 	DHTkey        string `json:"dhtkey,omitempty"`
 }
 
-func createKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
+func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
 	// Retrieve existing kind 411 events
 	filter := nostr.Filter{
 		Kinds: []int{411},
@@ -160,9 +158,9 @@ func serializeEventForID(event *nostr.Event) string {
 	return compactSerialized
 }
 
-func loadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
+func LoadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
 
-	privateKey, publicKey, err := signing.DeserializePrivateKey(os.Getenv("NOSTR_PRIVATE_KEY"))
+	privateKey, publicKey, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting keys: %s", err)
 	}
@@ -170,7 +168,7 @@ func loadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
 	return privateKey, publicKey, nil
 }
 
-func generateEd25519Keypair(privateKeyHex string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
+func GenerateEd25519Keypair(privateKeyHex string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
 	// Convert hex string to byte slice
 	privateKeyBytes, err := hex.DecodeString(privateKeyHex)
 	if err != nil {
@@ -199,18 +197,11 @@ func generateEd25519Keypair(privateKeyHex string) (ed25519.PrivateKey, ed25519.P
 	return privateKey, publicKey, nil
 }
 
-func generateAndSaveNostrPrivateKey() error {
+func GenerateAndSaveNostrPrivateKey() error {
 	// Check if .env file exists and if NOSTR_PRIVATE_KEY is already set
-	if _, err := os.Stat(envFile); err == nil {
-		err := godotenv.Load(envFile)
-		if err != nil {
-			return fmt.Errorf("error loading .env file: %w", err)
-		}
-
-		if os.Getenv(nostrPrivateKeyVar) != "" {
-			fmt.Println("NOSTR_PRIVATE_KEY is already set in .env file")
-			return nil
-		}
+	if viper.GetString("priv_key") != "" {
+		fmt.Println("NOSTR_PRIVATE_KEY is already set in config file")
+		return nil
 	}
 
 	// Generate new private key
@@ -222,19 +213,9 @@ func generateAndSaveNostrPrivateKey() error {
 	// Serialize and encode the private key
 	serializedPrivKey := hex.EncodeToString(privateKey.Serialize())
 
-	// Open .env file in append mode, create if not exists
-	f, err := os.OpenFile(envFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("error opening .env file: %w", err)
-	}
-	defer f.Close()
+	viper.Set("priv_key", serializedPrivKey)
 
-	// Write the new key to the file
-	if _, err := f.WriteString(fmt.Sprintf("\n%s=%s\n", nostrPrivateKeyVar, serializedPrivKey)); err != nil {
-		return fmt.Errorf("error writing to .env file: %w", err)
-	}
-
-	fmt.Println("NOSTR_PRIVATE_KEY has been generated and saved to .env file")
+	fmt.Println("NOSTR_PRIVATE_KEY has been generated and saved to config file")
 	return nil
 }
 

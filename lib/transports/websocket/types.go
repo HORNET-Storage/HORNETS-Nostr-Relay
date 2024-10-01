@@ -3,11 +3,12 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/gofiber/contrib/websocket"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/puzpuzpuz/xsync/v3"
-	"time"
 )
 
 // TODO: maybe we should move this into a different package since we use it in the sync package as well
@@ -56,4 +57,12 @@ type ListenerData struct {
 
 type EventMessage struct {
 	Event nostr.Event // Adapted for the specific event structure you're using
+}
+
+type Address struct {
+	Index       uint       `json:"index,string"` // Use string tag to handle string-encoded integers
+	Address     string     `json:"address"`
+	Status      string     `json:"status"`
+	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
+	Npub        string     `json:"npub,omitempty"`
 }

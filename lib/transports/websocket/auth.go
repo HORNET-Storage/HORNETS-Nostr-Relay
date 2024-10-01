@@ -6,13 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gofiber/contrib/websocket"
-	"github.com/joho/godotenv"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
@@ -26,7 +24,11 @@ import (
 
 // var session_state bool
 
-const envFile = ".env"
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+	AddressStatusUsed      = "used"
+)
 
 func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState) {
 	write := func(messageType string, params ...interface{}) {
@@ -88,12 +90,6 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 
 	// Initialize the Graviton store
 	store := &stores_graviton.GravitonStore{}
-	err = store.InitStore()
-	if err != nil {
-		log.Printf("Failed to initialize the Graviton store: %v", err)
-		write("NOTICE", "Failed to initialize the Graviton store: %v", err)
-		return
-	}
 
 	// Retrieve the subscriber using their npub
 	subscriber, err := store.GetSubscriber(env.Event.PubKey)
@@ -138,13 +134,6 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	userSession.Signature = &env.Event.Sig
 	userSession.Authenticated = true
 
-	err = godotenv.Load(envFile)
-	if err != nil {
-		log.Printf("Error loading .env file: %s", err)
-		write("NOTICE", "Error loading .env file: %s", err)
-		return
-	}
-
 	// Load keys from environment for signing kind 411
 	privKey, _, err := loadSecp256k1Keys()
 	if err != nil {
@@ -169,20 +158,6 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		write("NOTICE", "Session established but subscription inactive. Renew to continue access.")
 	}
 }
-
-type Address struct {
-	Index       uint       `json:"index,string"` // Use string tag to handle string-encoded integers
-	Address     string     `json:"address"`
-	Status      string     `json:"status"`
-	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
-	Npub        string     `json:"npub,omitempty"`
-}
-
-const (
-	AddressStatusAvailable = "available"
-	AddressStatusAllocated = "allocated"
-	AddressStatusUsed      = "used"
-)
 
 // Allocate the address to a specific npub (subscriber)
 func generateUniqueBitcoinAddress(store *stores_graviton.GravitonStore, npub string) (*Address, error) {
@@ -311,8 +286,7 @@ func getExistingNIP88Event(store *stores_graviton.GravitonStore, userPubKey stri
 }
 
 func loadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
-
-	privateKey, publicKey, err := signing.DeserializePrivateKey(os.Getenv("NOSTR_PRIVATE_KEY"))
+	privateKey, publicKey, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting keys: %s", err)
 	}

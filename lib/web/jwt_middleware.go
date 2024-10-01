@@ -7,9 +7,11 @@ import (
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/spf13/viper"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func jwtMiddleware(c *fiber.Ctx) error {
@@ -29,12 +31,16 @@ func jwtMiddleware(c *fiber.Ctx) error {
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Check if the token is in ActiveTokens
-	db, err := graviton.InitGorm()
+	dbPath := viper.GetString("relay_stats_db")
+	if dbPath == "" {
+		log.Fatal("Database path not found in config")
+	}
+
+	// Initialize the Gorm database
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		log.Printf("JWT Middleware: Database connection error: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Internal server error",
-		})
+		log.Printf("Failed to connect to the database: %v", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
 	var activeToken types.ActiveToken
