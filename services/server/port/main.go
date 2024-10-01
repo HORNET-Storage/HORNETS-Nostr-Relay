@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -18,7 +17,6 @@ import (
 
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
-	"github.com/joho/godotenv"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/fsnotify/fsnotify"
@@ -51,6 +49,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30009"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
+	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -72,6 +71,7 @@ import (
 
 func init() {
 	viper.SetDefault("key", "")
+	viper.SetDefault("priv_key", "")
 	viper.SetDefault("web", false)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
@@ -134,39 +134,7 @@ func generateRandomAPIKey() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-func loadOrCreateEnvFile(envFile string) {
-	// Check if the .env file exists
-	if _, err := os.Stat(envFile); os.IsNotExist(err) {
-		// If the file doesn't exist, create it
-		f, err := os.Create(envFile)
-		if err != nil {
-			log.Fatalf("Error creating .env file: %s", err)
-		}
-		defer f.Close()
-
-		// Optionally, write default environment variables to the .env file
-		_, err = f.WriteString("KEY=default_value\n")
-		if err != nil {
-			log.Fatalf("Error writing to .env file: %s", err)
-		}
-
-		fmt.Printf(".env file created at %s\n", envFile)
-	}
-
-	// Load the .env file
-	err := godotenv.Load(envFile)
-	if err != nil {
-		log.Printf("Error loading .env file: %s", err)
-		return
-	}
-
-	fmt.Printf(".env file loaded from %s\n", envFile)
-}
-
 func main() {
-
-	envFile := ".env"
-	loadOrCreateEnvFile(envFile)
 
 	ctx := context.Background()
 
@@ -188,58 +156,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// generate server priv key if it does not exist
-	err = generateAndSaveNostrPrivateKey()
+	_, err = stores_graviton.InitGorm()
 	if err != nil {
-		log.Printf("error generating or saving server private key")
-	}
-
-	err = godotenv.Load(envFile)
-	if err != nil {
-		log.Printf("error loading .env file: %s", err)
-		return
-	}
-
-	// load keys from environment for signing kind 411
-	privKey, pubKey, err := loadSecp256k1Keys()
-	if err != nil {
-		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
-		return
-	}
-	// Create dht key for using relay private key and set it on viper.
-	_, _, err = generateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
-	if err != nil {
-		log.Printf("error generating dht-key: %s", err)
-		return
-	}
-
-	// Create and store kind 411 event
-	if err := createKind411Event(privKey, pubKey, store); err != nil {
-		log.Printf("Failed to create kind 411 event: %v", err)
+		log.Printf("Failed to connect to the database: %v", err)
 		return
 	}
 
 	// generate server priv key if it does not exist
-	err = generateAndSaveNostrPrivateKey()
+	err = kind411creator.GenerateAndSaveNostrPrivateKey()
 	if err != nil {
 		log.Printf("error generating or saving server private key")
 	}
 	// load keys from environment for signing kind 411
-	privKey, pubKey, err = loadSecp256k1Keys()
+	privKey, pubKey, err := kind411creator.LoadSecp256k1Keys()
 	if err != nil {
 		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
 		return
 	}
 	// TODO: We need to only generate it once. When it does not exist.
 	// Create dht key for using relay private key and set it on viper.
-	_, _, err = generateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
+	_, _, err = kind411creator.GenerateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
 	if err != nil {
 		log.Printf("error generating dht-key: %s", err)
 		return
 	}
 
 	// Create and store kind 411 event
-	if err := createKind411Event(privKey, pubKey, store); err != nil {
+	if err := kind411creator.CreateKind411Event(privKey, pubKey, store); err != nil {
 		log.Printf("Failed to create kind 411 event: %v", err)
 		return
 	}

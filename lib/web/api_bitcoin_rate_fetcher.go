@@ -10,7 +10,8 @@ import (
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"github.com/spf13/viper"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -62,15 +63,18 @@ func fetchBinancePrice() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	var result BinanceResponse
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return 0, err
 	}
+
 	price, err := strconv.ParseFloat(result.Price, 64)
 	if err != nil {
 		return 0, err
 	}
+
 	return price, nil
 }
 
@@ -139,7 +143,13 @@ func pullBitcoinPrice() {
 
 func saveBitcoinRate(rate float64) {
 	// Initialize the Gorm database
-	db, err := graviton.InitGorm()
+	dbPath := viper.GetString("relay_stats_db")
+	if dbPath == "" {
+		log.Fatal("Database path not found in config")
+	}
+
+	// Initialize the Gorm database
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		log.Printf("Failed to connect to the database: %v", err)
 		return

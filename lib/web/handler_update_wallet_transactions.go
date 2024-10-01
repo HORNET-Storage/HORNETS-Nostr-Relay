@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -60,14 +61,15 @@ func updateWalletTransactions(c *fiber.Ctx) error {
 
 	// Initialize the Graviton store
 	store := &graviton.GravitonStore{}
-	err := store.InitStore()
-	if err != nil {
-		log.Printf("Failed to initialize the Graviton store: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+
+	// Initialize the Gorm database
+	dbPath := viper.GetString("relay_stats_db")
+	if dbPath == "" {
+		log.Fatal("Database path not found in config")
 	}
 
 	// Initialize the Gorm database
-	db, err := graviton.InitGorm()
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		log.Printf("Failed to connect to the database: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")

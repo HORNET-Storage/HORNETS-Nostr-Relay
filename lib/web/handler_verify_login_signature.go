@@ -12,9 +12,11 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/btcsuite/btcd/btcutil/bech32"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gofiber/fiber/v2"
@@ -47,12 +49,16 @@ func verifyLoginSignature(c *fiber.Ctx) error {
 		})
 	}
 
-	db, err := graviton.InitGorm()
+	dbPath := viper.GetString("relay_stats_db")
+	if dbPath == "" {
+		log.Fatal("Database path not found in config")
+	}
+
+	// Initialize the Gorm database
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		log.Printf("Verify login signature: Database connection error: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Internal server error",
-		})
+		log.Printf("Failed to connect to the database: %v", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
 	var userChallenge types.UserChallenge
