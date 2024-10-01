@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
-	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
@@ -119,7 +120,7 @@ func main() {
 	}
 
 	// generate server priv key if it does not exist
-	err := generateAndSaveNostrPrivateKey()
+	err = generateAndSaveNostrPrivateKey()
 	if err != nil {
 		log.Printf("error generating or saving server private key")
 	}
