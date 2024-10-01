@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -344,7 +343,7 @@ func getExistingNIP88Event(store *graviton.GravitonStore, userPubKey string) (*n
 
 func loadRelayPrivateKey() (*btcec.PrivateKey, *btcec.PublicKey, error) {
 
-	privateKey, publicKey, err := signing.DeserializePrivateKey(os.Getenv("NOSTR_PRIVATE_KEY"))
+	privateKey, publicKey, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting keys: %s", err)
 	}

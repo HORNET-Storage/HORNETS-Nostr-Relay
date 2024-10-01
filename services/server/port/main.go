@@ -31,7 +31,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
-	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
@@ -140,7 +140,12 @@ func main() {
 
 	wg := new(sync.WaitGroup)
 
-	viper.Set("key", os.Getenv("NOSTR_PUBLIC_KEY"))
+	priv, _, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
+	if err != nil {
+		log.Printf("Error deserializing Private Key %s", err)
+	}
+
+	viper.Set("key", hex.EncodeToString(priv.PubKey().SerializeCompressed()))
 
 	// Private key
 	key := viper.GetString("key")
@@ -151,7 +156,7 @@ func main() {
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
-	err := store.InitStore("gravitondb", queryCache)
+	err = store.InitStore("gravitondb", queryCache)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -175,7 +180,7 @@ func main() {
 	}
 	// TODO: We need to only generate it once. When it does not exist.
 	// Create dht key for using relay private key and set it on viper.
-	_, _, err = kind411creator.GenerateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
+	_, _, err = kind411creator.GenerateEd25519Keypair(viper.GetString("priv_key"))
 	if err != nil {
 		log.Printf("error generating dht-key: %s", err)
 		return
@@ -351,11 +356,11 @@ func main() {
 		log.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			app := websocket.BuildServer(store)
+			app := ws.BuildServer(store)
 
 			app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
 
-			err := websocket.StartServer(app)
+			err := ws.StartServer(app)
 
 			if err != nil {
 				log.Println("Fatal error occurred in web server")
