@@ -10,9 +10,12 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/spf13/viper"
+	"gorm.io/gorm"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func StartServer() error {
+func StartServer(store stores.Store, statsDb *gorm.DB) error {
 	app := fiber.New()
 
 	go pullBitcoinPrice()
@@ -22,6 +25,12 @@ func StartServer() error {
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, OPTIONS",
 	}))
+
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("db", statsDb)
+		c.Locals("store", store)
+		return c.Next()
+	})
 
 	// Rate limited routes
 	app.Post("/signup", rateLimiterMiddleware(), signUpUser)

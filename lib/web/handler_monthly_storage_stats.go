@@ -6,7 +6,6 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -19,12 +18,9 @@ func getMonthlyStorageStats(c *fiber.Ctx) error {
 		log.Fatal("Database path not found in config")
 	}
 
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
+	// Retrieve the gorm db
+	db := c.Locals("db").(*gorm.DB)
+	var err error
 
 	// Query to get the total GBs per month
 	var data []types.ActivityData

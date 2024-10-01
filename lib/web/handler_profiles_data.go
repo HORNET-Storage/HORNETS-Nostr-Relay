@@ -7,7 +7,6 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -21,12 +20,9 @@ func getProfilesTimeSeriesData(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Database configuration not found")
 	}
 
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
+	// Retrieve the gorm db
+	db := c.Locals("db").(*gorm.DB)
+	var err error
 
 	// Calculate the date range for the last 6 months
 	endDate := time.Now()

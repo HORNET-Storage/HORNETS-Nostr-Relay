@@ -161,12 +161,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	_, err = stores_graviton.InitGorm()
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return
-	}
-
 	// generate server priv key if it does not exist
 	err = kind411creator.GenerateAndSaveNostrPrivateKey()
 	if err != nil {
@@ -339,7 +333,13 @@ func main() {
 		log.Println("Starting with web server enabled")
 
 		go func() {
-			err := web.StartServer()
+			statDb, err := stores_graviton.InitGorm()
+			if err != nil {
+				log.Printf("Failed to connect to the database: %v", err)
+				return
+			}
+
+			err = web.StartServer(store, statDb)
 
 			if err != nil {
 				log.Println("Fatal error occurred in web server")

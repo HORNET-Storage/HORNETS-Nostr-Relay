@@ -6,7 +6,6 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/gofiber/fiber/v2"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -19,11 +18,8 @@ type AggregatedKindData struct {
 func getKindData(c *fiber.Ctx) error {
 	log.Println("Kind data request received")
 
-	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
+	// Retrieve the gorm db
+	db := c.Locals("db").(*gorm.DB)
 
 	var kinds []types.Kind
 	if err := db.Find(&kinds).Error; err != nil {

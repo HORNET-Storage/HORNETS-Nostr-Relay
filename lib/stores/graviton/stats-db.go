@@ -51,6 +51,7 @@ func InitGorm() (*gorm.DB, error) {
 			log.Fatalf("Failed to migrate database schema: %v", err)
 		}
 	})
+
 	return instance, err
 }
 

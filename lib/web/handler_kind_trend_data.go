@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -31,11 +30,8 @@ func getKindTrendData(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString("Invalid kind number")
 	}
 
-	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
+	// Retrieve the gorm db
+	db := c.Locals("db").(*gorm.DB)
 
 	var data []KindData
 	query := `

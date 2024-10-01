@@ -14,12 +14,11 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
 func updateWalletTransactions(c *fiber.Ctx) error {
@@ -58,21 +57,11 @@ func updateWalletTransactions(c *fiber.Ctx) error {
 		}
 	}
 
-	// Initialize the Graviton store
-	store := &graviton.GravitonStore{}
+	// Retrieve the gorm db
+	db := c.Locals("db").(*gorm.DB)
 
-	// Initialize the Gorm database
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
+	// Retrieve the store
+	store := c.Locals("store").(*stores.Store)
 
 	for _, transaction := range transactions {
 		walletName, ok := transaction["wallet_name"].(string)
@@ -107,7 +96,7 @@ func updateWalletTransactions(c *fiber.Ctx) error {
 		}
 
 		// Check if the transaction matches a subscriber's address and update the subscription
-		if err := processSubscriptionPayment(store, output, transaction); err != nil {
+		if err := processSubscriptionPayment(*store, output, transaction); err != nil {
 			log.Printf("Error processing subscription payment: %v", err)
 		}
 
@@ -182,7 +171,7 @@ func updateWalletTransactions(c *fiber.Ctx) error {
 }
 
 // processSubscriptionPayment checks if a transaction corresponds to a valid subscription payment
-func processSubscriptionPayment(store *graviton.GravitonStore, address string, transaction map[string]interface{}) error {
+func processSubscriptionPayment(store stores.Store, address string, transaction map[string]interface{}) error {
 	// Retrieve the subscription tiers from Viper
 	var subscriptionTiers []types.SubscriptionTier
 	err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers)
@@ -271,7 +260,7 @@ func processSubscriptionPayment(store *graviton.GravitonStore, address string, t
 	return nil
 }
 
-func UpdateNIP88EventAfterPayment(relayPrivKey *btcec.PrivateKey, userPubKey string, store *graviton.GravitonStore, tier string, expirationTimestamp int64) error {
+func UpdateNIP88EventAfterPayment(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store, tier string, expirationTimestamp int64) error {
 	existingEvent, err := getExistingNIP88Event(store, userPubKey)
 	if err != nil {
 		return fmt.Errorf("error fetching existing NIP-88 event: %v", err)
@@ -320,7 +309,7 @@ func UpdateNIP88EventAfterPayment(relayPrivKey *btcec.PrivateKey, userPubKey str
 	return nil
 }
 
-func getExistingNIP88Event(store *graviton.GravitonStore, userPubKey string) (*nostr.Event, error) {
+func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event, error) {
 	filter := nostr.Filter{
 		Kinds: []int{88},
 		Tags: nostr.TagMap{
