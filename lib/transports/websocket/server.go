@@ -6,13 +6,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"log"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -32,7 +33,28 @@ func BuildServer(store stores.Store) *fiber.App {
 
 	// Middleware for handling relay information requests
 	app.Use(handleRelayInfoRequests)
-	app.Get("/", websocket.New(handleWebSocketConnections))
+
+	app.Get("/", websocket.New(func(c *websocket.Conn) {
+		defer removeListener(c)
+
+		challenge := getGlobalChallenge()
+		log.Printf("Using global challenge for connection: %s", challenge)
+
+		state := &connectionState{authenticated: false}
+
+		// Send the AUTH challenge immediately upon connection
+		authChallenge := []interface{}{"AUTH", challenge}
+		if err := sendWebSocketMessage(c, authChallenge); err != nil {
+			log.Printf("Error sending AUTH challenge: %v", err)
+			return
+		}
+
+		for {
+			if err := processWebSocketMessage(c, challenge, state, store); err != nil {
+				break
+			}
+		}
+	}))
 
 	// Enable blossom routes for unchunked file storage
 	server := blossom.NewServer(store)
@@ -189,29 +211,7 @@ func PackRelayForSig(nr *NIP11RelayInfo) []byte {
 	return packed
 }
 
-func handleWebSocketConnections(c *websocket.Conn) {
-	defer removeListener(c)
-
-	challenge := getGlobalChallenge()
-	log.Printf("Using global challenge for connection: %s", challenge)
-
-	state := &connectionState{authenticated: false}
-
-	// Send the AUTH challenge immediately upon connection
-	authChallenge := []interface{}{"AUTH", challenge}
-	if err := sendWebSocketMessage(c, authChallenge); err != nil {
-		log.Printf("Error sending AUTH challenge: %v", err)
-		return
-	}
-
-	for {
-		if err := processWebSocketMessage(c, challenge, state); err != nil {
-			break
-		}
-	}
-}
-
-func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState) error {
+func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store stores.Store) error {
 	_, message, err := c.ReadMessage()
 	if err != nil {
 		return fmt.Errorf("read error: %w", err)
@@ -227,7 +227,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		handleReqMessage(c, env)
 
 	case *nostr.AuthEnvelope:
-		handleAuthMessage(c, env, challenge, state)
+		handleAuthMessage(c, env, challenge, state, store)
 
 	case *nostr.CloseEnvelope:
 		handleCloseMessage(c, env)

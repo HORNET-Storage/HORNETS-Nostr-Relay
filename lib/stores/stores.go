@@ -28,6 +28,11 @@ type Store interface {
 	StoreBlob(data []byte, hash []byte, publicKey string) error
 	GetBlob(hash string) ([]byte, error)
 	DeleteBlob(hash string) error
+
+	// Panel
+	GetSubscriber(npub string) (*types.Subscriber, error)
+	GetSubscriberByAddress(address string) (*types.Subscriber, error)
+	SaveSubscriber(subscriber *types.Subscriber) error
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"reflect"
@@ -442,6 +443,98 @@ func (store *GravitonMemoryStore) DeleteBlob(hash string) error {
 	graviton.Commit(contentTree)
 
 	return nil
+}
+
+func (store *GravitonMemoryStore) SaveSubscriber(subscriber *types.Subscriber) error {
+	// Load the snapshot and get the "subscribers" tree
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	subscriberTree, err := snapshot.GetTree("subscribers")
+	if err != nil {
+		return fmt.Errorf("failed to get subscribers tree: %v", err)
+	}
+
+	// Marshal the subscriber into JSON
+	subscriberData, err := json.Marshal(subscriber)
+	if err != nil {
+		return fmt.Errorf("failed to marshal subscriber: %v", err)
+	}
+
+	// Use the npub as the key for storing the subscriber
+	key := subscriber.Npub
+
+	// Store the subscriber data in the tree
+	if err := subscriberTree.Put([]byte(key), subscriberData); err != nil {
+		return fmt.Errorf("failed to put subscriber in Graviton store: %v", err)
+	}
+
+	// Commit the tree to persist the changes
+	if _, err := graviton.Commit(subscriberTree); err != nil {
+		return fmt.Errorf("failed to commit subscribers tree: %v", err)
+	}
+
+	return nil
+}
+
+func (store *GravitonMemoryStore) GetSubscriberByAddress(address string) (*types.Subscriber, error) {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	subscriberTree, err := snapshot.GetTree("subscribers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscribers tree: %v", err)
+	}
+
+	// Iterate over subscribers to find the one associated with the address
+	cursor := subscriberTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var subscriber types.Subscriber
+		if err := json.Unmarshal(v, &subscriber); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal subscriber data: %v", err)
+		}
+
+		// Assuming the subscriber has a list of addresses
+
+		if subscriber.Address == address {
+			return &subscriber, nil
+		}
+	}
+
+	return nil, fmt.Errorf("subscriber not found for address: %s", address)
+}
+
+func (store *GravitonMemoryStore) GetSubscriber(npub string) (*types.Subscriber, error) {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	subscriberTree, err := snapshot.GetTree("subscribers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscribers tree: %v", err)
+	}
+
+	// Iterate over subscribers to find the one with the matching npub
+	cursor := subscriberTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var subscriber types.Subscriber
+		if err := json.Unmarshal(v, &subscriber); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal subscriber data: %v", err)
+		}
+
+		// Check if the current subscriber's npub matches the provided npub
+		if subscriber.Npub == npub {
+			return &subscriber, nil
+		}
+	}
+
+	// If no subscriber was found with the matching npub, return an error
+	return nil, fmt.Errorf("subscriber not found for npub: %s", npub)
 }
 
 func GetBucket(leaf *merkle_dag.DagLeaf) string {

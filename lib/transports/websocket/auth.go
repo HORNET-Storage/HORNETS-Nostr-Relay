@@ -18,7 +18,7 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/deroproject/graviton"
 )
 
@@ -30,7 +30,7 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState) {
+func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, store stores.Store) {
 	write := func(messageType string, params ...interface{}) {
 		response := lib_nostr.BuildResponse(messageType, params)
 		if len(response) > 0 {
@@ -87,9 +87,6 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		write("OK", env.Event.ID, false, "Error event does not have required tags")
 		return
 	}
-
-	// Initialize the Graviton store
-	store := &stores_graviton.GravitonStore{}
 
 	// Retrieve the subscriber using their npub
 	subscriber, err := store.GetSubscriber(env.Event.PubKey)
@@ -160,7 +157,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 }
 
 // Allocate the address to a specific npub (subscriber)
-func generateUniqueBitcoinAddress(store *stores_graviton.GravitonStore, npub string) (*Address, error) {
+func generateUniqueBitcoinAddress(store stores.Store, npub string) (*Address, error) {
 	ss, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
@@ -202,7 +199,7 @@ func generateUniqueBitcoinAddress(store *stores_graviton.GravitonStore, npub str
 	return nil, fmt.Errorf("no available addresses")
 }
 
-func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *stores_graviton.GravitonStore) error {
+func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store) error {
 	// Check if a NIP-88 event already exists for this user
 	existingEvent, err := getExistingNIP88Event(store, userPubKey)
 	if err != nil {
@@ -264,7 +261,7 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *
 	return nil
 }
 
-func getExistingNIP88Event(store *stores_graviton.GravitonStore, userPubKey string) (*nostr.Event, error) {
+func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event, error) {
 	filter := nostr.Filter{
 		Kinds: []int{88},
 		Tags: nostr.TagMap{
