@@ -18,31 +18,48 @@ func StartServer() error {
 	go pullBitcoinPrice()
 
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowMethods: "GET, POST, OPTIONS",
 	}))
 
+	// Rate limited routes
+	app.Post("/signup", rateLimiterMiddleware(), signUpUser)
+	app.Post("/login", rateLimiterMiddleware(), loginUser)
+	app.Post("/verify", rateLimiterMiddleware(), verifyLoginSignature)
+
+	// Open routes
+	app.Get("/user-exist", checkUserExists)
+	app.Post("/logout", logoutUser)
+
+	// Wallet-specific routes with API key authentication
+	walletRoutes := app.Group("/api/wallet")
+	walletRoutes.Use(apiKeyMiddleware)
+	walletRoutes.Post("/balance", updateWalletBalance)
+	walletRoutes.Post("/transactions", updateWalletTransactions)
+	walletRoutes.Post("/addresses", saveWalletAddresses) // Added this line
+
+	secured := app.Group("/api")
+	secured.Use(jwtMiddleware)
+
 	// Dedicated routes for each handler
-	app.Post("/relaycount", handleRelayCount)
-	app.Post("/relay-settings", handleRelaySettings)
-	app.Get("/relay-settings", handleGetRelaySettings)
-	app.Post("/timeseries", handleTimeSeries)
-	app.Post("/activitydata", handleActivityData)
-	app.Post("/barchartdata", handleBarChartData)
-	app.Post("/balance", handleBalance) // Add the new route here
-	app.Post("/transactions", handleTransactions)
-	app.Post("/updateRate", handleBitcoinRate)
-	app.Get("/balance/usd", handleBalanceInUSD)
-	app.Get("/transactions/latest", handleLatestTransactions)
-	app.Get("/bitcoin-rates/last-30-days", handleBitcoinRatesForLast30Days)
-	app.Post("/addresses", handleAddresses)
-	app.Get("/addresses", getAddresses)
-	app.Post("/signup", handleSignUp)
-	app.Post("/login", handleLogin) // Add the new login route
-	app.Post("/verify", handleVerify)
-	app.Get("/user-exist", userExist)
-	app.Get("/api/kinds", handleKindData)
-	app.Get("/api/kind-trend/:kindNumber", handleKindTrendData)
+	secured.Get("/relaycount", getRelayCount)
+	secured.Post("/relay-settings", updateRelaySettings)
+	secured.Get("/relay-settings", getRelaySettings)
+	secured.Get("/timeseries", getProfilesTimeSeriesData)
+	secured.Get("/activitydata", getMonthlyStorageStats)
+	secured.Get("/barchartdata", getNotesMediaStorageData)
+	secured.Post("/updateRate", updateBitcoinRate) // TODO: We need to handle this one slightly differently
+	secured.Get("/balance/usd", getWalletBalanceUSD)
+	secured.Get("/transactions/latest", getLatestWalletTransactions)
+	secured.Get("/bitcoin-rates/last-30-days", getBitcoinRatesLast30Days)
+	secured.Get("/addresses", pullWalletAddresses)
+	secured.Get("/kinds", getKindData)
+	secured.Get("/kind-trend/:kindNumber", getKindTrendData)
+	secured.Post("/pending-transactions", saveUnconfirmedTransaction)
+	secured.Post("/replacement-transactions", replaceTransaction)
+	secured.Get("/pending-transactions", getPendingTransactions)
+	secured.Post("/refresh-token", refreshToken)
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)

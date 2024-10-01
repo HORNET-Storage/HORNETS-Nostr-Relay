@@ -1,10 +1,6 @@
 package web
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"log"
 	"time"
 
@@ -16,32 +12,12 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 )
 
-var jwtKey = []byte("zambia_nostr_token")
-
-func generateChallenge() (string, string, error) {
-	timestamp := time.Now().Format(time.RFC3339Nano)
-	letters := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	challenge := make([]byte, 12)
-	_, err := rand.Read(challenge)
-	if err != nil {
-		return "", "", err
-	}
-	for i := range challenge {
-		challenge[i] = letters[challenge[i]%byte(len(letters))]
-	}
-	fullChallenge := fmt.Sprintf("%s-%s", string(challenge), timestamp)
-	hash := sha256.Sum256([]byte(fullChallenge))
-	return fullChallenge, hex.EncodeToString(hash[:]), nil
-}
-
-func handleLogin(c *fiber.Ctx) error {
+func loginUser(c *fiber.Ctx) error {
 	log.Println("Login request received")
-	var loginPayload struct {
-		types.LoginPayload
-		Npub string `json:"npub"`
-	}
+	var loginPayload types.LoginPayload
 
 	if err := c.BodyParser(&loginPayload); err != nil {
+		log.Printf("Failed to parse JSON: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
@@ -50,7 +26,9 @@ func handleLogin(c *fiber.Ctx) error {
 	db, err := graviton.InitGorm()
 	if err != nil {
 		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
 
 	var user types.User
@@ -62,23 +40,24 @@ func handleLogin(c *fiber.Ctx) error {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginPayload.Password)); err != nil {
-		log.Printf("Invalid password: %v", err)
+		log.Printf("Invalid password for user %s: %v", user.Npub, err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Invalid email or password",
+			"error": "Invalid npub or password",
 		})
 	}
 
 	challenge, hash, err := generateChallenge()
 	if err != nil {
 		log.Printf("Error generating challenge: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
 
-	// Generate Nostr event
 	event := &nostr.Event{
 		PubKey:    user.Npub,
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      1, // Example kind
+		Kind:      1,
 		Tags:      nostr.Tags{},
 		Content:   challenge,
 	}
@@ -91,8 +70,12 @@ func handleLogin(c *fiber.Ctx) error {
 	}
 	if err := db.Create(&userChallenge).Error; err != nil {
 		log.Printf("Failed to save challenge: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
+
+	log.Printf("Login challenge created for user %s", user.Npub)
 
 	return c.JSON(fiber.Map{
 		"event": event,

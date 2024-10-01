@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -84,6 +86,28 @@ func init() {
 	viper.SetDefault("RelayVersion", "0.0.1")
 	viper.SetDefault("RelayDHTkey", "")
 
+	// Generate a random wallet API key
+	apiKey, err := generateRandomAPIKey()
+	if err != nil {
+		log.Fatalf("Failed to generate wallet API key: %v", err)
+	}
+	viper.SetDefault("wallet_api_key", apiKey)
+
+	viper.SetDefault("subscription_tiers", []map[string]interface{}{
+		{
+			"data_limit": "1 GB per month",
+			"price":      10000, // in sats
+		},
+		{
+			"data_limit": "5 GB per month",
+			"price":      40000, // in sats
+		},
+		{
+			"data_limit": "10 GB per month",
+			"price":      70000, // in sats
+		},
+	})
+
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
 
@@ -100,10 +124,55 @@ func init() {
 	viper.WatchConfig()
 }
 
+// Helper function to generate a random 32-byte hexadecimal key
+func generateRandomAPIKey() (string, error) {
+	bytes := make([]byte, 32) // 32 bytes = 256 bits
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+func loadOrCreateEnvFile(envFile string) {
+	// Check if the .env file exists
+	if _, err := os.Stat(envFile); os.IsNotExist(err) {
+		// If the file doesn't exist, create it
+		f, err := os.Create(envFile)
+		if err != nil {
+			log.Fatalf("Error creating .env file: %s", err)
+		}
+		defer f.Close()
+
+		// Optionally, write default environment variables to the .env file
+		_, err = f.WriteString("KEY=default_value\n")
+		if err != nil {
+			log.Fatalf("Error writing to .env file: %s", err)
+		}
+
+		fmt.Printf(".env file created at %s\n", envFile)
+	}
+
+	// Load the .env file
+	err := godotenv.Load(envFile)
+	if err != nil {
+		log.Printf("Error loading .env file: %s", err)
+		return
+	}
+
+	fmt.Printf(".env file loaded from %s\n", envFile)
+}
+
 func main() {
+
+	envFile := ".env"
+	loadOrCreateEnvFile(envFile)
+
 	ctx := context.Background()
 
 	wg := new(sync.WaitGroup)
+
+	viper.Set("key", os.Getenv("NOSTR_PUBLIC_KEY"))
 
 	// Private key
 	key := viper.GetString("key")
@@ -137,6 +206,31 @@ func main() {
 		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
 		return
 	}
+	// Create dht key for using relay private key and set it on viper.
+	_, _, err = generateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
+	if err != nil {
+		log.Printf("error generating dht-key: %s", err)
+		return
+	}
+
+	// Create and store kind 411 event
+	if err := createKind411Event(privKey, pubKey, store); err != nil {
+		log.Printf("Failed to create kind 411 event: %v", err)
+		return
+	}
+
+	// generate server priv key if it does not exist
+	err = generateAndSaveNostrPrivateKey()
+	if err != nil {
+		log.Printf("error generating or saving server private key")
+	}
+	// load keys from environment for signing kind 411
+	privKey, pubKey, err = loadSecp256k1Keys()
+	if err != nil {
+		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
+		return
+	}
+	// TODO: We need to only generate it once. When it does not exist.
 	// Create dht key for using relay private key and set it on viper.
 	_, _, err = generateEd25519Keypair(os.Getenv("NOSTR_PRIVATE_KEY"))
 	if err != nil {

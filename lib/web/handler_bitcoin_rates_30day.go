@@ -9,7 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func handleBitcoinRatesForLast30Days(c *fiber.Ctx) error {
+func getBitcoinRatesLast30Days(c *fiber.Ctx) error {
 	// Initialize the Gorm database
 	db, err := graviton.InitGorm()
 	if err != nil {

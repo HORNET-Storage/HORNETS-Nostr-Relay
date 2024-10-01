@@ -9,7 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func userExist(c *fiber.Ctx) error {
+func checkUserExists(c *fiber.Ctx) error {
 	log.Println("Checking if user exists...")
 	db, err := graviton.InitGorm()
 	if err != nil {
@@ -18,8 +18,16 @@ func userExist(c *fiber.Ctx) error {
 
 	var user types.User
 	if err := db.First(&user).Error; err != nil {
-		return c.JSON(fiber.Map{"exists": false})
+		return c.JSON(fiber.Map{
+			"exists":      false,
+			"allowSignup": true,
+			"message":     "No users found. Signup is allowed.",
+		})
 	}
 
-	return c.JSON(fiber.Map{"exists": true})
+	return c.JSON(fiber.Map{
+		"exists":      true,
+		"allowSignup": false,
+		"message":     "User exists. Signup is not allowed.",
+	})
 }

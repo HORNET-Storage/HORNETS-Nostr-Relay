@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func handleBitcoinRate(c *fiber.Ctx) error {
+func updateBitcoinRate(c *fiber.Ctx) error {
 	var data map[string]interface{}
 
 	// Parse the JSON body into the map

@@ -22,7 +22,7 @@ type MonthlyKindData struct {
 	TotalSize float64 `json:"totalSize"`
 }
 
-func handleKindTrendData(c *fiber.Ctx) error {
+func getKindTrendData(c *fiber.Ctx) error {
 	log.Println("Kind trend data request received")
 	kindNumberStr := c.Params("kindNumber")
 	kindNumber, err := strconv.Atoi(kindNumberStr)

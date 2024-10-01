@@ -14,7 +14,7 @@ type AddressResponse struct {
 	Address string `json:"address"`
 }
 
-func getAddresses(c *fiber.Ctx) error {
+func pullWalletAddresses(c *fiber.Ctx) error {
 	log.Println("Get addresses request received")
 
 	// Initialize the Gorm database

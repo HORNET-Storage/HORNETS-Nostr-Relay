@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func handleRelaySettings(c *fiber.Ctx) error {
+func updateRelaySettings(c *fiber.Ctx) error {
 	log.Println("Relay settings request received")
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	var data map[string]interface{}
@@ -74,7 +74,7 @@ func handleRelaySettings(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusOK)
 }
 
-func handleGetRelaySettings(c *fiber.Ctx) error {
+func getRelaySettings(c *fiber.Ctx) error {
 	log.Println("Get relay settings request received")
 
 	var relaySettings types.RelaySettings

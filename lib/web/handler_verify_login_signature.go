@@ -20,8 +20,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func handleVerify(c *fiber.Ctx) error {
-	log.Println("Verify request received")
+func verifyLoginSignature(c *fiber.Ctx) error {
+	log.Println("Verify login signature: Request received")
 	var verifyPayload struct {
 		Challenge   string      `json:"challenge"`
 		Signature   string      `json:"signature"`
@@ -30,27 +30,34 @@ func handleVerify(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&verifyPayload); err != nil {
+		log.Printf("Verify login signature: JSON parsing error: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
 	}
 
 	event := verifyPayload.Event
-	log.Println("Event received:", event)
+	log.Printf("Verify login signature: Event received for pubkey: %s", event.PubKey)
 
-	// Hash the event content
-	eventContentHash := sha256.Sum256([]byte(event.Content))
-	hashString := hex.EncodeToString(eventContentHash[:])
+	// Verify event (challenge response)
+	if !verifyEvent(&event) {
+		log.Println("Verify login signature: Invalid event signature")
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid event signature",
+		})
+	}
 
 	db, err := graviton.InitGorm()
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+		log.Printf("Verify login signature: Database connection error: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Internal server error",
+		})
 	}
 
 	var userChallenge types.UserChallenge
-	if err := db.Where("hash = ? AND expired = ?", hashString, false).First(&userChallenge).Error; err != nil {
-		log.Printf("Challenge not found: %v", err)
+	if err := db.Where("challenge = ? AND expired = ?", event.Content, false).First(&userChallenge).Error; err != nil {
+		log.Printf("Verify login signature: Challenge not found or expired: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid challenge or challenge expired",
 		})
@@ -58,27 +65,22 @@ func handleVerify(c *fiber.Ctx) error {
 
 	// Check if the challenge is expired
 	if time.Since(userChallenge.CreatedAt) > 3*time.Minute {
+		log.Println("Verify login signature: Challenge expired")
 		db.Model(&userChallenge).Update("expired", true)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Challenge expired",
 		})
 	}
 
-	// Verify event
-	if !verifyEvent(&event) {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Invalid event signature",
-		})
-	}
-
 	var user types.User
 	if err := db.Where("id = ?", userChallenge.UserID).First(&user).Error; err != nil {
-		log.Printf("User not found: %v", err)
+		log.Printf("Verify login signature: User not found: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not found",
 		})
 	}
 
+	// Generate JWT token
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &types.JWTClaims{
 		UserID: user.ID,
@@ -91,17 +93,33 @@ func handleVerify(c *fiber.Ctx) error {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
 	if err != nil {
-		log.Printf("Error creating JWT token: %v", err)
+		log.Printf("Verify login signature: Error creating JWT token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error creating token",
 		})
 	}
 
-	log.Println("User Public Key", user.Npub)
+	// Store the active token
+	activeToken := types.ActiveToken{
+		UserID:    user.ID,
+		Token:     tokenString,
+		ExpiresAt: expirationTime,
+	}
+	if err := db.Create(&activeToken).Error; err != nil {
+		log.Printf("Verify login signature: Failed to store active token: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Error storing token",
+		})
+	}
+
+	log.Printf("Verify login signature: Successful verification for user ID: %d", user.ID)
 
 	return c.JSON(fiber.Map{
 		"token": tokenString,
-		"user":  user,
+		"user": fiber.Map{
+			"id":   user.ID,
+			"npub": user.Npub,
+		},
 	})
 }
 

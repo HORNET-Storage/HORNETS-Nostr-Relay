@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func handleLatestTransactions(c *fiber.Ctx) error {
+func getLatestWalletTransactions(c *fiber.Ctx) error {
 	// Initialize the Gorm database
 	db, err := graviton.InitGorm()
 	if err != nil {
@@ -19,7 +19,6 @@ func handleLatestTransactions(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
-	// Get the latest 10 transactions
 	var transactions []types.WalletTransactions
 	result := db.Order("date desc").Find(&transactions)
 

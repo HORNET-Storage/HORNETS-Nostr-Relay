@@ -16,7 +16,7 @@ type AggregatedKindData struct {
 	TotalSize  float64 `json:"totalSize"`
 }
 
-func handleKindData(c *fiber.Ctx) error {
+func getKindData(c *fiber.Ctx) error {
 	log.Println("Kind data request received")
 
 	db, err := gorm.Open(sqlite.Open("relay_stats.db"), &gorm.Config{})

@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func handleRelayCount(c *fiber.Ctx) error {
+func getRelayCount(c *fiber.Ctx) error {
 	log.Println("Relay count request received")
 
 	// Retrieve the database path from the config file using Viper

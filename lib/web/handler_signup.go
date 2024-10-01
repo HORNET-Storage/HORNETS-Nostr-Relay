@@ -10,7 +10,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func handleSignUp(c *fiber.Ctx) error {
+func signUpUser(c *fiber.Ctx) error {
 	log.Println("Sign-up request received")
 	var signUpPayload struct {
 		Npub     string `json:"npub"`

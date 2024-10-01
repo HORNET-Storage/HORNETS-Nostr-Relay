@@ -204,6 +204,12 @@ type UserProfile struct {
 	Timestamp     time.Time `gorm:"autoCreateTime"`
 }
 
+type ActiveToken struct {
+	UserID    uint   `gorm:"index"`
+	Token     string `gorm:"uniqueIndex"`
+	ExpiresAt time.Time
+}
+
 type ActivityData struct {
 	Month   string  `json:"month"`
 	TotalGB float64 `json:"total_gb"`
@@ -218,9 +224,36 @@ type BarChartData struct {
 type User struct {
 	ID        uint      `gorm:"primaryKey"`
 	Password  string    // Store hashed passwords
-	Npub      string    `gorm:"uniqueIndex"` // Add this field
+	Npub      string    `gorm:"uniqueIndex"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
+}
+
+type PendingTransaction struct {
+	ID               uint      `gorm:"primaryKey"`
+	TxID             string    `gorm:"not null;uniqueIndex" json:"txid"`
+	FeeRate          int       `gorm:"not null" json:"feeRate"`
+	Amount           int       `gorm:"not null" json:"amount"`
+	RecipientAddress string    `gorm:"not null" json:"recipient_address"`
+	Timestamp        time.Time `gorm:"not null" json:"timestamp"`
+	EnableRBF        bool      `gorm:"not null" json:"enable_rbf"` // New field for RBF
+}
+
+type ReplaceTransactionRequest struct {
+	OriginalTxID     string `json:"original_tx_id"`
+	NewTxID          string `json:"new_tx_id"`
+	NewFeeRate       int    `json:"new_fee_rate"`
+	Amount           int    `json:"amount"`
+	RecipientAddress string `json:"recipient_address"`
+}
+
+// Address structure to be stored in Graviton
+type Address struct {
+	Index       string     `json:"index"`
+	Address     string     `json:"address"`
+	WalletName  string     `json:"wallet_name"`
+	Status      string     `json:"status,omitempty"`
+	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
 }
 
 // type User struct {
@@ -233,6 +266,15 @@ type User struct {
 // 	CreatedAt time.Time `gorm:"autoCreateTime"`
 // 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 // }
+
+type Subscriber struct {
+	Npub              string    `json:"npub"`                // The unique public key of the subscriber
+	Tier              string    `json:"tier"`                // The subscription tier the user has selected
+	StartDate         time.Time `json:"start_date"`          // When the subscription started
+	EndDate           time.Time `json:"end_date"`            // When the subscription ends
+	Address           string    `json:"address"`             // The address associated with the subscription
+	LastTransactionID string    `json:"last_transaction_id"` // The ID of the last processed transaction
+}
 
 type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
@@ -280,6 +322,11 @@ type JWTClaims struct {
 type Libp2pStream struct {
 	Stream network.Stream
 	Ctx    context.Context
+}
+
+type SubscriptionTier struct {
+	DataLimit string
+	Price     string
 }
 
 func (ls *Libp2pStream) Read(msg []byte) (int, error) {

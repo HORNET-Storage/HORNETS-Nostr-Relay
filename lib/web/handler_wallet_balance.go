@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func handleBalanceInUSD(c *fiber.Ctx) error {
+func getWalletBalanceUSD(c *fiber.Ctx) error {
 	// Initialize the Gorm database
 	db, err := graviton.InitGorm()
 	if err != nil {

@@ -52,6 +52,12 @@ func fetchBinancePrice() (float64, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
+
+	// If the response status is not 200, return an error
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("binance API returned non-OK status: %v", resp.Status)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, err

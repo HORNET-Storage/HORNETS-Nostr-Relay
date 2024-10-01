@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func handleTimeSeries(c *fiber.Ctx) error {
+func getProfilesTimeSeriesData(c *fiber.Ctx) error {
 	log.Println("Time series request received")
 
 	// Retrieve the database path from the config file using Viper
