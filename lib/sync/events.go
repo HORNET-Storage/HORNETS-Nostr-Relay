@@ -7,9 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"strings"
+	"time"
+
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/illuzen/go-negentropy"
 	"github.com/libp2p/go-libp2p"
@@ -18,10 +24,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/nbd-wtf/go-nostr"
-	"io"
-	"log"
-	"strings"
-	"time"
 )
 
 // TODO: where is this supposed to come from? config file?
@@ -74,7 +76,7 @@ func LoadEventVector(events []*nostr.Event) (*negentropy.Vector, error) {
 	return vector, nil
 }
 
-func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string, store *stores_graviton.GravitonStore) error {
+func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string, store stores.Store) error {
 	log.Printf("Performing negentropy on %s", hostId)
 	events, err := store.QueryEvents(filter)
 	if err != nil {
@@ -178,7 +180,7 @@ func DownloadDag(root string) {
 	}
 }
 
-func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId string, store *stores_graviton.GravitonStore, initiator bool) error {
+func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId string, store stores.Store, initiator bool) error {
 	// Now, start listening to responses and reconcile
 	reader := bufio.NewReader(stream)
 	final := false

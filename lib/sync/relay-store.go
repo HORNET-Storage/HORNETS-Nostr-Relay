@@ -9,7 +9,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"io"
+	"log"
+	"net/http"
+	"reflect"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/dht/v2/bep44"
@@ -21,21 +30,13 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/nbd-wtf/go-nostr"
 	"gorm.io/gorm"
-	"io"
-	"log"
-	"net/http"
-	"reflect"
-	"sort"
-	"strings"
-	"sync"
-	"time"
 )
 
 type RelayStore struct {
 	db           *gorm.DB
 	syncTicker   *time.Ticker
 	libp2pHost   host.Host
-	eventStore   *stores_graviton.GravitonStore
+	eventStore   *stores.Store
 	mutex        sync.RWMutex
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
@@ -76,7 +77,7 @@ func NewRelayStore(
 	db *gorm.DB,
 	dhtServer *dht.Server,
 	host host.Host,
-	eventStore *stores_graviton.GravitonStore,
+	eventStore *stores.Store,
 	uploadInterval time.Duration,
 	syncInterval time.Duration,
 ) *RelayStore {
@@ -260,7 +261,7 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 		log.Printf("Error creating stream to %+v: %v", target, err)
 	}
 
-	err = InitiateEventSync(stream, filter, target.ID.String(), rs.eventStore)
+	err = InitiateEventSync(stream, filter, target.ID.String(), *rs.eventStore)
 	if err != nil {
 		log.Printf("Error syncing events with %+v: %v", target, err)
 	}
