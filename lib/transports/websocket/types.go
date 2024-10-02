@@ -58,11 +58,3 @@ type ListenerData struct {
 type EventMessage struct {
 	Event nostr.Event // Adapted for the specific event structure you're using
 }
-
-type Address struct {
-	Index       uint       `json:"index,string"` // Use string tag to handle string-encoded integers
-	Address     string     `json:"address"`
-	Status      string     `json:"status"`
-	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
-	Npub        string     `json:"npub,omitempty"`
-}
