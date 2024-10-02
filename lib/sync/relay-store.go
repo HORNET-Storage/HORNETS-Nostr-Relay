@@ -36,7 +36,7 @@ type RelayStore struct {
 	db           *gorm.DB
 	syncTicker   *time.Ticker
 	libp2pHost   host.Host
-	eventStore   *stores.Store
+	eventStore   stores.Store
 	mutex        sync.RWMutex
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
@@ -77,7 +77,7 @@ func NewRelayStore(
 	db *gorm.DB,
 	dhtServer *dht.Server,
 	host host.Host,
-	eventStore *stores.Store,
+	eventStore stores.Store,
 	uploadInterval time.Duration,
 	syncInterval time.Duration,
 ) *RelayStore {
@@ -261,7 +261,7 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 		log.Printf("Error creating stream to %+v: %v", target, err)
 	}
 
-	err = InitiateEventSync(stream, filter, target.ID.String(), *rs.eventStore)
+	err = InitiateEventSync(stream, filter, target.ID.String(), rs.eventStore)
 	if err != nil {
 		log.Printf("Error syncing events with %+v: %v", target, err)
 	}
