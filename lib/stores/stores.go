@@ -33,6 +33,7 @@ type Store interface {
 	GetSubscriber(npub string) (*types.Subscriber, error)
 	GetSubscriberByAddress(address string) (*types.Subscriber, error)
 	SaveSubscriber(subscriber *types.Subscriber) error
+	AllocateBitcoinAddress(npub string) (*types.Address, error)
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {

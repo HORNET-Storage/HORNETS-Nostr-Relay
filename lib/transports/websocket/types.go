@@ -12,6 +12,7 @@ import (
 )
 
 // TODO: maybe we should move this into a different package since we use it in the sync package as well
+// It certainly shouldn't be here, that's for sure
 type NIP11RelayInfo struct {
 	Name            string           `json:"name,omitempty"`
 	Description     string           `json:"description,omitempty"`
@@ -57,12 +58,4 @@ type ListenerData struct {
 
 type EventMessage struct {
 	Event nostr.Event // Adapted for the specific event structure you're using
-}
-
-type Address struct {
-	Index       uint       `json:"index,string"` // Use string tag to handle string-encoded integers
-	Address     string     `json:"address"`
-	Status      string     `json:"status"`
-	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
-	Npub        string     `json:"npub,omitempty"`
 }

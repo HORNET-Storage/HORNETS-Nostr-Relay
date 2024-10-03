@@ -249,11 +249,12 @@ type ReplaceTransactionRequest struct {
 
 // Address structure to be stored in Graviton
 type Address struct {
-	Index       string     `json:"index"`
+	Index       string     `json:"index,string"` // Use string tag to handle string-encoded integers
 	Address     string     `json:"address"`
 	WalletName  string     `json:"wallet_name"`
-	Status      string     `json:"status,omitempty"`
+	Status      string     `json:"status"`
 	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
+	Npub        string     `json:"npub,omitempty"`
 }
 
 // type User struct {

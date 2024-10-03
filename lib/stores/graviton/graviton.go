@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/deroproject/graviton"
@@ -22,6 +23,12 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+)
+
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+	AddressStatusUsed      = "used"
 )
 
 type GravitonStore struct {
@@ -1141,4 +1148,54 @@ func (store *GravitonStore) GetSubscriber(npub string) (*types.Subscriber, error
 
 	// If no subscriber was found with the matching npub, return an error
 	return nil, fmt.Errorf("subscriber not found for npub: %s", npub)
+}
+
+// AllocateBitcoinAddress allocates an available Bitcoin address to a subscriber.
+func (store *GravitonStore) AllocateBitcoinAddress(npub string) (*types.Address, error) {
+	// Load snapshot from the database
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	// Access the relay addresses tree
+	addressTree, err := snapshot.GetTree("relay_addresses")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get address tree: %v", err)
+	}
+
+	// Iterate through the addresses to find an available one
+	cursor := addressTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var addr types.Address
+		if err := json.Unmarshal(v, &addr); err != nil {
+			log.Printf("Error unmarshaling address: %v. Skipping this address.", err)
+			continue
+		}
+		if addr.Status == AddressStatusAvailable {
+			// Allocate the address to the subscriber
+			now := time.Now()
+			addr.Status = AddressStatusAllocated
+			addr.AllocatedAt = &now
+			addr.Npub = npub
+
+			// Marshal the updated address and store it back in the database
+			value, err := json.Marshal(addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal address: %v", err)
+			}
+			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
+				return nil, fmt.Errorf("failed to put address in tree: %v", err)
+			}
+
+			// Commit the changes to the database
+			if _, err := graviton.Commit(addressTree); err != nil {
+				return nil, fmt.Errorf("failed to commit address tree: %v", err)
+			}
+
+			return &addr, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no available addresses")
 }
