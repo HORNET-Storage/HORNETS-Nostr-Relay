@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
@@ -17,6 +18,13 @@ func StartServer() error {
 
 	go pullBitcoinPrice()
 
+	statisticsStore := &gorm.GormStatisticsStore{}
+
+	err := statisticsStore.InitStore(viper.GetString("relay_stats_db"), nil)
+	if err != nil {
+		log.Fatalf("failed to initialize statistics store: %v", err)
+	}
+
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
@@ -24,41 +32,89 @@ func StartServer() error {
 	}))
 
 	// Rate limited routes
-	app.Post("/signup", rateLimiterMiddleware(), signUpUser)
-	app.Post("/login", rateLimiterMiddleware(), loginUser)
-	app.Post("/verify", rateLimiterMiddleware(), verifyLoginSignature)
+	app.Post("/signup", func(c *fiber.Ctx) error {
+		return signUpUser(c, statisticsStore)
+	})
+	app.Post("/login", func(c *fiber.Ctx) error {
+		return loginUser(c, statisticsStore)
+	})
+
+	app.Post("/verify", rateLimiterMiddleware(), func(c *fiber.Ctx) error {
+		return verifyLoginSignature(c, statisticsStore)
+	})
 
 	// Open routes
-	app.Get("/user-exist", checkUserExists)
-	app.Post("/logout", logoutUser)
+	app.Get("/user-exist", func(c *fiber.Ctx) error {
+		return checkUserExists(c, statisticsStore)
+	})
+	app.Post("/logout", func(c *fiber.Ctx) error {
+		return logoutUser(c, statisticsStore)
+	})
 
 	// Wallet-specific routes with API key authentication
 	walletRoutes := app.Group("/api/wallet")
 	walletRoutes.Use(apiKeyMiddleware)
-	walletRoutes.Post("/balance", updateWalletBalance)
-	walletRoutes.Post("/transactions", updateWalletTransactions)
-	walletRoutes.Post("/addresses", saveWalletAddresses) // Added this line
+	walletRoutes.Post("/balance", func(c *fiber.Ctx) error {
+		return updateWalletBalance(c, statisticsStore)
+	})
+	walletRoutes.Post("/transactions", func(c *fiber.Ctx) error {
+		return updateWalletTransactions(c, statisticsStore)
+	})
+	walletRoutes.Post("/addresses", func(c *fiber.Ctx) error {
+		return saveWalletAddresses(c, statisticsStore) // Pass the store instance
+	})
 
 	secured := app.Group("/api")
-	secured.Use(jwtMiddleware)
+	secured.Use(func(c *fiber.Ctx) error {
+		return jwtMiddleware(c, statisticsStore)
+	})
 
 	// Dedicated routes for each handler
-	secured.Get("/relaycount", getRelayCount)
+	secured.Get("/relaycount", func(c *fiber.Ctx) error {
+		return getRelayCount(c, statisticsStore)
+	})
 	secured.Post("/relay-settings", updateRelaySettings)
 	secured.Get("/relay-settings", getRelaySettings)
-	secured.Get("/timeseries", getProfilesTimeSeriesData)
-	secured.Get("/activitydata", getMonthlyStorageStats)
-	secured.Get("/barchartdata", getNotesMediaStorageData)
-	secured.Post("/updateRate", updateBitcoinRate) // TODO: We need to handle this one slightly differently
-	secured.Get("/balance/usd", getWalletBalanceUSD)
-	secured.Get("/transactions/latest", getLatestWalletTransactions)
-	secured.Get("/bitcoin-rates/last-30-days", getBitcoinRatesLast30Days)
-	secured.Get("/addresses", pullWalletAddresses)
-	secured.Get("/kinds", getKindData)
-	secured.Get("/kind-trend/:kindNumber", getKindTrendData)
-	secured.Post("/pending-transactions", saveUnconfirmedTransaction)
-	secured.Post("/replacement-transactions", replaceTransaction)
-	secured.Get("/pending-transactions", getPendingTransactions)
+	secured.Get("/timeseries", func(c *fiber.Ctx) error {
+		return getProfilesTimeSeriesData(c, statisticsStore)
+	})
+	secured.Get("/activitydata", func(c *fiber.Ctx) error {
+		return getMonthlyStorageStats(c, statisticsStore)
+	})
+	secured.Get("/barchartdata", func(c *fiber.Ctx) error {
+		return getNotesMediaStorageData(c, statisticsStore)
+	})
+	secured.Post("/updateRate", func(c *fiber.Ctx) error {
+		return updateBitcoinRate(c, statisticsStore)
+	})
+	secured.Get("/balance/usd", func(c *fiber.Ctx) error {
+		return getWalletBalanceUSD(c, statisticsStore)
+	})
+
+	secured.Get("/transactions/latest", func(c *fiber.Ctx) error {
+		return getLatestWalletTransactions(c, statisticsStore)
+	})
+	secured.Get("/bitcoin-rates/last-30-days", func(c *fiber.Ctx) error {
+		return getBitcoinRatesLast30Days(c, statisticsStore)
+	})
+	secured.Get("/addresses", func(c *fiber.Ctx) error {
+		return pullWalletAddresses(c, statisticsStore)
+	})
+	secured.Get("/kinds", func(c *fiber.Ctx) error {
+		return getKindData(c, statisticsStore)
+	})
+	secured.Get("/kind-trend/:kindNumber", func(c *fiber.Ctx) error {
+		return getKindTrendData(c, statisticsStore)
+	})
+	secured.Post("/pending-transactions", func(c *fiber.Ctx) error {
+		return saveUnconfirmedTransaction(c, statisticsStore)
+	})
+	secured.Post("/replacement-transactions", func(c *fiber.Ctx) error {
+		return replaceTransaction(c, statisticsStore)
+	})
+	secured.Get("/pending-transactions", func(c *fiber.Ctx) error {
+		return getPendingTransactions(c, statisticsStore)
+	})
 	secured.Post("/refresh-token", refreshToken)
 
 	port := viper.GetString("port")

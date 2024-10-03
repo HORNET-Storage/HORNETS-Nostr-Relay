@@ -5,51 +5,18 @@ import (
 	"log"
 	"strconv"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-func getLatestWalletTransactions(c *fiber.Ctx) error {
-	// Initialize the Gorm database
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+func getLatestWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+	// Get the latest wallet transactions
+	transactions, err := store.GetLatestWalletTransactions()
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
-	var transactions []types.WalletTransactions
-	result := db.Order("date desc").Find(&transactions)
-
-	if result.Error != nil {
-		log.Printf("Error querying transactions: %v", result.Error)
+		log.Printf("Error querying transactions: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database query error",
 		})
-	}
-
-	// Get the latest Bitcoin rate
-	var bitcoinRate types.BitcoinRate
-	result = db.Order("timestamp desc").First(&bitcoinRate)
-
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			log.Printf("No Bitcoin rate found, using default value")
-			bitcoinRate.Rate = 0.0 // Set default rate
-		} else {
-			log.Printf("Error querying Bitcoin rate: %v", result.Error)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Database query error",
-			})
-		}
 	}
 
 	// Process each transaction to convert the value to USD
@@ -61,6 +28,7 @@ func getLatestWalletTransactions(c *fiber.Ctx) error {
 				"error": "Conversion error",
 			})
 		}
+		// You can adjust the format as needed, currently keeping the value as satoshis
 		transactions[i].Value = fmt.Sprintf("%.8f", value)
 	}
 

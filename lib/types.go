@@ -352,6 +352,23 @@ type WebSocketStream struct {
 	writeBuffer bytes.Buffer
 }
 
+type AggregatedKindData struct {
+	KindNumber int     `json:"kindNumber"`
+	KindCount  int     `json:"kindCount"`
+	TotalSize  float64 `json:"totalSize"`
+}
+
+type KindData struct {
+	Month     string
+	Size      float64
+	Timestamp time.Time
+}
+
+type MonthlyKindData struct {
+	Month     string  `json:"month"`
+	TotalSize float64 `json:"totalSize"`
+}
+
 func NewWebSocketStream(conn *websocket.Conn, ctx context.Context) *WebSocketStream {
 	return &WebSocketStream{
 		Conn: conn,
@@ -387,4 +404,9 @@ func (ws *WebSocketStream) Close() error {
 
 func (ws *WebSocketStream) Context() context.Context {
 	return ws.Ctx
+}
+
+type AddressResponse struct {
+	Index   string `json:"index"`
+	Address string `json:"address"`
 }

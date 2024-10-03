@@ -4,17 +4,14 @@ import (
 	"log"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 )
 
-func loginUser(c *fiber.Ctx) error {
+// Refactored loginUser function
+func loginUser(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	log.Println("Login request received")
 	var loginPayload types.LoginPayload
 
@@ -25,33 +22,24 @@ func loginUser(c *fiber.Ctx) error {
 		})
 	}
 
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Find the user by npub
+	user, err := store.FindUserByNpub(loginPayload.Npub)
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
-	var user types.User
-	if err := db.Where("npub = ?", loginPayload.Npub).First(&user).Error; err != nil {
 		log.Printf("User not found: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid npub or password",
 		})
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginPayload.Password)); err != nil {
+	// Compare passwords
+	if err := store.ComparePasswords(user.Password, loginPayload.Password); err != nil {
 		log.Printf("Invalid password for user %s: %v", user.Npub, err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid npub or password",
 		})
 	}
 
+	// Generate the challenge and hash
 	challenge, hash, err := generateChallenge()
 	if err != nil {
 		log.Printf("Error generating challenge: %v", err)
@@ -60,6 +48,7 @@ func loginUser(c *fiber.Ctx) error {
 		})
 	}
 
+	// Create the Nostr event
 	event := &nostr.Event{
 		PubKey:    user.Npub,
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
@@ -68,13 +57,15 @@ func loginUser(c *fiber.Ctx) error {
 		Content:   challenge,
 	}
 
+	// Save the user challenge
 	userChallenge := types.UserChallenge{
 		UserID:    user.ID,
 		Npub:      user.Npub,
 		Challenge: challenge,
 		Hash:      hash,
 	}
-	if err := db.Create(&userChallenge).Error; err != nil {
+
+	if err := store.SaveUserChallenge(&userChallenge); err != nil {
 		log.Printf("Failed to save challenge: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Internal server error",
@@ -83,6 +74,7 @@ func loginUser(c *fiber.Ctx) error {
 
 	log.Printf("Login challenge created for user %s", user.Npub)
 
+	// Return the event as JSON
 	return c.JSON(fiber.Map{
 		"event": event,
 	})

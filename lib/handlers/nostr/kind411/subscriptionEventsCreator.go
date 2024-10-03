@@ -198,9 +198,9 @@ func GenerateEd25519Keypair(privateKeyHex string) (ed25519.PrivateKey, ed25519.P
 }
 
 func GenerateAndSaveNostrPrivateKey() error {
-	// Check if .env file exists and if NOSTR_PRIVATE_KEY is already set
+	// Check if config file exists and if priv_key is already set
 	if viper.GetString("priv_key") != "" {
-		fmt.Println("NOSTR_PRIVATE_KEY is already set in config file")
+		fmt.Println("priv_key is already set in config file")
 		return nil
 	}
 
@@ -215,7 +215,7 @@ func GenerateAndSaveNostrPrivateKey() error {
 
 	viper.Set("priv_key", serializedPrivKey)
 
-	fmt.Println("NOSTR_PRIVATE_KEY has been generated and saved to config file")
+	fmt.Println("priv_key has been generated and saved to config file")
 	return nil
 }
 

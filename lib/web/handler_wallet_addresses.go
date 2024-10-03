@@ -5,10 +5,9 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 // Address status constants
@@ -18,7 +17,7 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func saveWalletAddresses(c *fiber.Ctx) error {
+func saveWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	log.Println("Addresses request received")
 	var addresses []types.Address
 
@@ -29,25 +28,11 @@ func saveWalletAddresses(c *fiber.Ctx) error {
 		})
 	}
 
-	// Initialize the Gorm database
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
 	// Initialize the Graviton store
 	gravitonStore := graviton.GravitonStore{} // Assuming this is initialized appropriately elsewhere
 
 	// Get the expected wallet name from the configuration
 	expectedWalletName := viper.GetString("wallet_name")
-
 	if expectedWalletName == "" {
 		log.Println("No expected wallet name set in configuration.")
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
@@ -61,41 +46,41 @@ func saveWalletAddresses(c *fiber.Ctx) error {
 			continue
 		}
 
-		// Check if the address already exists in the SQL database
-		var existingAddress types.WalletAddress
-		result := db.Where("address = ?", addr.Address).First(&existingAddress)
+		// Check if the address already exists in the SQL database using the store method
+		addressExists, err := store.AddressExists(addr.Address)
+		if err != nil {
+			log.Printf("Error checking if address exists: %v", err)
+			continue
+		}
 
-		if result.Error == nil {
-			// Address already exists, skip it
+		if addressExists {
 			log.Printf("Duplicate address found, skipping: %s", addr.Address)
 			continue
 		}
 
-		if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-			log.Printf("Error querying address: %v", result.Error)
-			continue
-		}
-
-		// Create a new address in the SQL database
+		// Create a new address in the SQL database using the store method
 		newAddress := types.WalletAddress{
 			Index:   addr.Index,
 			Address: addr.Address,
 		}
-		if err := db.Create(&newAddress).Error; err != nil {
+
+		if err := store.SaveAddress(&newAddress); err != nil {
 			log.Printf("Error saving new address: %v", err)
 			continue
 		}
 
 		// Add the address to the Graviton store
 		gravitonAddress := &types.Address{
-			Index:       addr.Index, // Assuming addr.Index is a string that needs parsing
+			Index:       addr.Index,
 			Address:     addr.Address,
 			WalletName:  addr.WalletName,
-			Status:      AddressStatusAvailable, // Set the status to available
+			Status:      AddressStatusAvailable,
 			AllocatedAt: nil,
 		}
 
-		gravitonStore.SaveAddress(gravitonAddress)
+		if err := gravitonStore.SaveAddress(gravitonAddress); err != nil {
+			log.Printf("Error saving address to Graviton store: %v", err)
+		}
 	}
 
 	// Respond with a success message
