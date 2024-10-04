@@ -718,7 +718,7 @@ func (store *GormStatisticsStore) DeletePendingTransaction(txID string) error {
 }
 
 // ExistingTransactionExists checks if a transaction already exists in the database
-func (store *GormStatisticsStore) ExistingTransactionExists(address string, date time.Time, output string, value string) (bool, error) {
+func (store *GormStatisticsStore) TransactionExists(address string, date time.Time, output string, value string) (bool, error) {
 	var existingTransaction types.WalletTransactions
 	result := store.DB.Where("address = ? AND date = ? AND output = ? AND value = ?", address, date, output, value).First(&existingTransaction)
 

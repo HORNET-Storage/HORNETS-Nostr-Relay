@@ -85,7 +85,7 @@ func updateWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) err
 		}
 
 		// Check for existing transactions
-		exists, err := store.ExistingTransactionExists(address, date, output, valueStr)
+		exists, err := store.TransactionExists(address, date, output, valueStr)
 		if err != nil {
 			log.Printf("Error checking existing transactions: %v", err)
 			continue

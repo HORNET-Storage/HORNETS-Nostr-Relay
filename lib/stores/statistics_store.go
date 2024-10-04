@@ -4,6 +4,7 @@ import (
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 // StatisticsStore defines the interface for storing and retrieving statistical data.
@@ -11,11 +12,59 @@ type StatisticsStore interface {
 	// General initialization for the store
 	InitStore(basepath string, args ...interface{}) error
 
-	// Functions for statistics management
-	SaveBitcoinRate(rate types.BitcoinRate) error
+	// Bitcoin-related statistics
+	SaveBitcoinRate(rate float64) error
 	GetBitcoinRatesLast30Days() ([]types.BitcoinRate, error)
+
+	// Pending/Unconfirmed transactions
 	SavePendingTransaction(transaction types.PendingTransaction) error
 	GetPendingTransactionByID(id string) (*types.PendingTransaction, error)
+	DeletePendingTransaction(txID string) error
+	ReplaceTransaction(replaceRequest types.ReplaceTransactionRequest) error
+	GetPendingTransactions() ([]types.PendingTransaction, error)
+
+	// Event kinds and user profiles
+	SaveEventKind(event *nostr.Event) error
 	UpsertUserProfile(npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error
-	SaveEventKind(eventKind types.Kind) error
+
+	// User registration and authentication
+	SignUpUser(npub string, password string) error
+	ComparePasswords(hashedPassword, password string) error
+	FindUserByNpub(npub string) (*types.User, error)
+	UserExists() (bool, error)
+	GetUserByID(userID uint) (types.User, error)
+
+	// File-related statistics (photos, videos, etc.)
+	SaveFile(kindName string, relaySettings types.RelaySettings, hash string, leafCount int, sizeMB float64, itemName string) error
+	FetchKindData() ([]types.AggregatedKindData, error)
+	FetchKindTrendData(kindNumber int) ([]types.MonthlyKindData, error)
+
+	// Wallet-related operations
+	SaveWalletTransaction(tx types.WalletTransactions) error
+	UpdateWalletBalance(walletName, balance string) error
+	GetLatestWalletBalance() (types.WalletBalance, error)
+	TransactionExists(address string, date time.Time, output string, value string) (bool, error)
+	GetLatestWalletTransactions() ([]types.WalletTransactions, error)
+	FetchWalletAddresses() ([]types.WalletAddress, error)
+
+	// User challenge and token management
+	SaveUserChallenge(userChallenge *types.UserChallenge) error
+	GetUserChallenge(challenge string) (types.UserChallenge, error)
+	MarkChallengeExpired(userChallenge *types.UserChallenge) error
+	StoreActiveToken(activeToken *types.ActiveToken) error
+	DeleteActiveToken(token string) error
+	IsActiveToken(token string) (bool, error)
+
+	// Statistics and storage stats
+	FetchMonthlyStorageStats() ([]types.ActivityData, error)
+	FetchNotesMediaStorageData() ([]types.BarChartData, error)
+	FetchProfilesTimeSeriesData(startDate, endDate string) ([]types.TimeSeriesData, error)
+
+	// Fetch counts for various file types
+	FetchKindCount() (int, error)
+	FetchPhotoCount() (int, error)
+	FetchVideoCount() (int, error)
+	FetchGitNestrCount(gitNestr []string) (int, error)
+	FetchAudioCount() (int, error)
+	FetchMiscCount() (int, error)
 }
