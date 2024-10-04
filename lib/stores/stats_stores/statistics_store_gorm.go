@@ -50,7 +50,7 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
 	}
-	log.Println("DB Initiated.")
+
 	return nil
 }
 
