@@ -5,13 +5,13 @@ import (
 	"log"
 	"strconv"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
-func getLatestWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func getLatestWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	// Get the latest wallet transactions
-	transactions, err := store.GetLatestWalletTransactions()
+	transactions, err := store.GetStatsStore().GetLatestWalletTransactions()
 	if err != nil {
 		log.Printf("Error querying transactions: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

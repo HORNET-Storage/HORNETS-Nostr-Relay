@@ -5,12 +5,12 @@ import (
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored getProfilesTimeSeriesData function
-func getProfilesTimeSeriesData(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func getProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Time series request received")
 
 	// Calculate the date range for the last 6 months
@@ -19,7 +19,7 @@ func getProfilesTimeSeriesData(c *fiber.Ctx, store *gorm.GormStatisticsStore) er
 	log.Printf("Start date: %s, End date: %s", startDate, endDate.Format("2006-01"))
 
 	// Fetch the time series data from the statistics store
-	data, err := store.FetchProfilesTimeSeriesData(startDate, endDate.Format("2006-01"))
+	data, err := store.GetStatsStore().FetchProfilesTimeSeriesData(startDate, endDate.Format("2006-01"))
 	if err != nil {
 		log.Println("Error fetching time series data:", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")

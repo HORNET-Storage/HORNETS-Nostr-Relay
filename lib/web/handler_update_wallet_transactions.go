@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gofiber/fiber/v2"
@@ -22,7 +21,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func updateWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	var transactions []map[string]interface{}
 	log.Println("Transactions request received")
 
@@ -80,13 +79,13 @@ func updateWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) err
 
 		// Process pending transactions
 		txID := strings.Split(address, ":")[0]
-		err = store.DeletePendingTransaction(txID)
+		err = store.GetStatsStore().DeletePendingTransaction(txID)
 		if err != nil {
 			continue
 		}
 
 		// Check for existing transactions
-		exists, err := store.TransactionExists(address, date, output, valueStr)
+		exists, err := store.GetStatsStore().TransactionExists(address, date, output, valueStr)
 		if err != nil {
 			log.Printf("Error checking existing transactions: %v", err)
 			continue
@@ -103,7 +102,7 @@ func updateWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) err
 			Value:   fmt.Sprintf("%.8f", value),
 		}
 
-		err = store.SaveWalletTransaction(newTransaction)
+		err = store.GetStatsStore().SaveWalletTransaction(newTransaction)
 		if err != nil {
 			log.Printf("Error saving new transaction: %v", err)
 			continue

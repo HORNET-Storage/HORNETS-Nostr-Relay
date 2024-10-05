@@ -4,8 +4,7 @@ import (
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 )
@@ -17,7 +16,7 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func saveWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Addresses request received")
 	var addresses []types.Address
 
@@ -27,9 +26,6 @@ func saveWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 			"error": "Cannot parse JSON",
 		})
 	}
-
-	// Initialize the Graviton store
-	gravitonStore := graviton.GravitonStore{} // Assuming this is initialized appropriately elsewhere
 
 	// Get the expected wallet name from the configuration
 	expectedWalletName := viper.GetString("wallet_name")
@@ -47,7 +43,7 @@ func saveWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 		}
 
 		// Check if the address already exists in the SQL database using the store method
-		addressExists, err := store.AddressExists(addr.Address)
+		addressExists, err := store.GetStatsStore().AddressExists(addr.Address)
 		if err != nil {
 			log.Printf("Error checking if address exists: %v", err)
 			continue
@@ -64,7 +60,7 @@ func saveWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 			Address: addr.Address,
 		}
 
-		if err := store.SaveAddress(&newAddress); err != nil {
+		if err := store.GetStatsStore().SaveAddress(&newAddress); err != nil {
 			log.Printf("Error saving new address: %v", err)
 			continue
 		}
@@ -78,7 +74,7 @@ func saveWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 			AllocatedAt: nil,
 		}
 
-		if err := gravitonStore.SaveAddress(gravitonAddress); err != nil {
+		if err := store.SaveAddress(gravitonAddress); err != nil {
 			log.Printf("Error saving address to Graviton store: %v", err)
 		}
 	}

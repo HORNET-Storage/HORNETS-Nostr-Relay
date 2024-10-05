@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"log"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 )
 
 // Refactored updateWalletBalance function
-func updateWalletBalance(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func updateWalletBalance(c *fiber.Ctx, store stores.Store) error {
 	var data map[string]interface{}
 
 	// Parse the JSON body into the map
@@ -51,7 +51,7 @@ func updateWalletBalance(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	balance := fmt.Sprintf("%v", balanceRaw)
 
 	// Use the statistics store to update the wallet balance
-	err := store.UpdateWalletBalance(walletName, balance)
+	err := store.GetStatsStore().UpdateWalletBalance(walletName, balance)
 	if err != nil {
 		log.Printf("Error updating wallet balance: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

@@ -3,15 +3,15 @@ package web
 import (
 	"log"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
-func checkUserExists(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func checkUserExists(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Checking if user exists...")
 
 	// Check if any user exists in the database using the store
-	exists, err := store.UserExists()
+	exists, err := store.GetStatsStore().UserExists()
 	if err != nil {
 		log.Printf("Error checking if user exists: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")

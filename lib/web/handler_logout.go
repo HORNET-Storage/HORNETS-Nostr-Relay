@@ -4,12 +4,12 @@ import (
 	"log"
 	"strings"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored logoutUser function
-func logoutUser(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func logoutUser(c *fiber.Ctx, store stores.Store) error {
 	// Get the Authorization token
 	token := c.Get("Authorization")
 	if token == "" {
@@ -22,7 +22,7 @@ func logoutUser(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	token = strings.TrimPrefix(token, "Bearer ")
 
 	// Delete the token from ActiveTokens using the statistics store
-	if err := store.DeleteActiveToken(token); err != nil {
+	if err := store.GetStatsStore().DeleteActiveToken(token); err != nil {
 		log.Printf("Failed to delete token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to logout",

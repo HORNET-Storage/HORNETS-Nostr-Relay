@@ -3,12 +3,12 @@ package web
 import (
 	"log"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored signUpUser function
-func signUpUser(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func signUpUser(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Sign-up request received")
 	var signUpPayload struct {
 		Npub     string `json:"npub"`
@@ -23,7 +23,7 @@ func signUpUser(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	}
 
 	// Use the statistics store to sign up the user
-	err := store.SignUpUser(signUpPayload.Npub, signUpPayload.Password)
+	err := store.GetStatsStore().SignUpUser(signUpPayload.Npub, signUpPayload.Password)
 	if err != nil {
 		log.Printf("Failed to create user: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")

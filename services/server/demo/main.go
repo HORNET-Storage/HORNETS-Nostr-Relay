@@ -43,13 +43,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	statDb, err := stores_graviton.InitGorm()
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return
-	}
-
-	err = web.StartServer(store, statDb)
+	err = web.StartServer(store)
 
 	if err != nil {
 		fmt.Println("Fatal error occurred in web server")

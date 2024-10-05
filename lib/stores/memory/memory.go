@@ -67,6 +67,11 @@ func (store *GravitonMemoryStore) InitStore(basepath string, args ...interface{}
 	return nil
 }
 
+// Not implemented for the Memory Store
+func (store *GravitonMemoryStore) GetStatsStore() stores.StatisticsStore {
+	return nil
+}
+
 func (store *GravitonMemoryStore) QueryDag(filter map[string]string) ([]string, error) {
 	keys := []string{}
 
@@ -592,6 +597,40 @@ func (store *GravitonMemoryStore) AllocateBitcoinAddress(npub string) (*types.Ad
 	}
 
 	return nil, fmt.Errorf("no available addresses")
+}
+
+func (store *GravitonMemoryStore) SaveAddress(addr *types.Address) error {
+	// Load the snapshot and get the "relay_addresses" tree
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	addressTree, err := snapshot.GetTree("relay_addresses")
+	if err != nil {
+		return fmt.Errorf("failed to get address tree: %v", err)
+	}
+
+	// Marshal the address into JSON
+	addressData, err := json.Marshal(addr)
+	if err != nil {
+		return fmt.Errorf("failed to marshal address: %v", err)
+	}
+
+	// Use the index as the key for storing the address
+	key := addr.Index
+
+	// Store the address data in the tree
+	if err := addressTree.Put([]byte(key), addressData); err != nil {
+		return fmt.Errorf("failed to put address in Graviton store: %v", err)
+	}
+
+	// Commit the tree to persist the changes
+	if _, err := graviton.Commit(addressTree); err != nil {
+		return fmt.Errorf("failed to commit address tree: %v", err)
+	}
+
+	return nil
 }
 
 func GetBucket(leaf *merkle_dag.DagLeaf) string {

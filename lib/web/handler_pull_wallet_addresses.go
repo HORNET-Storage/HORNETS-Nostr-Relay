@@ -4,16 +4,16 @@ import (
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored pullWalletAddresses function
-func pullWalletAddresses(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func pullWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Get addresses request received")
 
 	// Fetch wallet addresses using the statistics store
-	walletAddresses, err := store.FetchWalletAddresses()
+	walletAddresses, err := store.GetStatsStore().FetchWalletAddresses()
 	if err != nil {
 		log.Printf("Error fetching addresses: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")

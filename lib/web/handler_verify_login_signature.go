@@ -14,13 +14,13 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/btcsuite/btcd/btcutil/bech32"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gofiber/fiber/v2"
 )
 
-func verifyLoginSignature(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func verifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Verify login signature: Request received")
 
 	// Parse the payload
@@ -49,7 +49,7 @@ func verifyLoginSignature(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	}
 
 	// Retrieve the user challenge from the store
-	userChallenge, err := store.GetUserChallenge(event.Content)
+	userChallenge, err := store.GetStatsStore().GetUserChallenge(event.Content)
 	if err != nil {
 		log.Printf("Verify login signature: Challenge not found or expired: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -60,7 +60,7 @@ func verifyLoginSignature(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	// Check if the challenge has expired
 	if time.Since(userChallenge.CreatedAt) > 3*time.Minute {
 		log.Println("Verify login signature: Challenge expired")
-		if err := store.MarkChallengeExpired(&userChallenge); err != nil {
+		if err := store.GetStatsStore().MarkChallengeExpired(&userChallenge); err != nil {
 			log.Printf("Verify login signature: Error updating challenge: %v", err)
 		}
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -69,7 +69,7 @@ func verifyLoginSignature(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	}
 
 	// Retrieve the user based on the challenge
-	user, err := store.GetUserByID(userChallenge.UserID)
+	user, err := store.GetStatsStore().GetUserByID(userChallenge.UserID)
 	if err != nil {
 		log.Printf("Verify login signature: User not found: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -102,7 +102,7 @@ func verifyLoginSignature(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 		Token:     tokenString,
 		ExpiresAt: expirationTime,
 	}
-	if err := store.StoreActiveToken(&activeToken); err != nil {
+	if err := store.GetStatsStore().StoreActiveToken(&activeToken); err != nil {
 		log.Printf("Verify login signature: Failed to store active token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error storing token",

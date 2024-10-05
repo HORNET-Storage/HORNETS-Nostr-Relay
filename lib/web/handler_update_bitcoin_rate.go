@@ -3,12 +3,12 @@ package web
 import (
 	"log"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored updateBitcoinRate function
-func updateBitcoinRate(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func updateBitcoinRate(c *fiber.Ctx, store stores.Store) error {
 	var data map[string]interface{}
 
 	// Parse the JSON body into the map
@@ -41,7 +41,7 @@ func updateBitcoinRate(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	}
 
 	// Use the statistics store to update the Bitcoin rate
-	err := store.UpdateBitcoinRate(rate)
+	err := store.GetStatsStore().UpdateBitcoinRate(rate)
 	if err != nil {
 		log.Printf("Error updating Bitcoin rate: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

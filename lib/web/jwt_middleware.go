@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
 )
 
-func jwtMiddleware(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func jwtMiddleware(c *fiber.Ctx, store stores.Store) error {
 
 	// Get the Authorization header
 	authHeader := c.Get("Authorization")
@@ -28,7 +28,7 @@ func jwtMiddleware(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Check if the token is active and not expired using the store method
-	isActive, err := store.IsActiveToken(tokenString)
+	isActive, err := store.GetStatsStore().IsActiveToken(tokenString)
 	if err != nil {
 		log.Printf("JWT Middleware: Error checking token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")

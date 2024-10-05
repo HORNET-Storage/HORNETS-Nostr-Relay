@@ -26,6 +26,7 @@ type StatisticsStore interface {
 	// Event kinds and user profiles
 	SaveEventKind(event *nostr.Event) error
 	UpsertUserProfile(npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error
+	DeleteEventByID(eventID string) error
 
 	// User registration and authentication
 	SignUpUser(npub string, password string) error
@@ -46,6 +47,11 @@ type StatisticsStore interface {
 	TransactionExists(address string, date time.Time, output string, value string) (bool, error)
 	GetLatestWalletTransactions() ([]types.WalletTransactions, error)
 	FetchWalletAddresses() ([]types.WalletAddress, error)
+	SaveAddress(address *types.WalletAddress) error
+	AddressExists(address string) (bool, error)
+	GetLatestBitcoinRate() (types.BitcoinRate, error)
+	UpdateBitcoinRate(rate float64) error
+	SaveUnconfirmedTransaction(pendingTransaction *types.PendingTransaction) error
 
 	// User challenge and token management
 	SaveUserChallenge(userChallenge *types.UserChallenge) error

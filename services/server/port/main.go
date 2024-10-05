@@ -66,7 +66,6 @@ import (
 
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	//negentropy "github.com/illuzen/go-negentropy"
 )
 
@@ -180,13 +179,6 @@ func main() {
 	err := store.InitStore("gravitondb", queryCache)
 	if err != nil {
 		log.Fatal(err)
-	}
-
-	statisticsStore := &gorm.GormStatisticsStore{}
-
-	err = statisticsStore.InitStore(viper.GetString("relay_stats_db"), nil)
-	if err != nil {
-		log.Fatalf("failed to initialize statistics store: %v", err)
 	}
 
 	// generate server priv key if it does not exist
@@ -364,13 +356,7 @@ func main() {
 		log.Println("Starting with web server enabled")
 
 		go func() {
-			statDb, err := stores_graviton.InitGorm()
-			if err != nil {
-				log.Printf("Failed to connect to the database: %v", err)
-				return
-			}
-
-			err = web.StartServer(store, statDb)
+			err = web.StartServer(store)
 
 			if err != nil {
 				log.Println("Fatal error occurred in web server")

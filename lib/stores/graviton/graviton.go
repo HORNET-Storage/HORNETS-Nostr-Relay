@@ -34,7 +34,7 @@ const (
 
 type GravitonStore struct {
 	Database      *graviton.Store
-	StatsDatabase *gorm.GormStatisticsStore
+	StatsDatabase stores.StatisticsStore
 }
 
 func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
@@ -68,6 +68,10 @@ func (store *GravitonStore) InitStore(basepath string, args ...interface{}) erro
 	}
 
 	return nil
+}
+
+func (store *GravitonStore) GetStatsStore() stores.StatisticsStore {
+	return store.StatsDatabase
 }
 
 // Scionic Merkletree's (Chunked data)
@@ -263,9 +267,7 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 			sizeMB = float64(sizeBytes) / (1024 * 1024) // Convert to MB
 		}
 
-		statisticsStore := &gorm.GormStatisticsStore{}
-
-		err = statisticsStore.SaveFile(kindName, relaySettings, hash, leafCount, sizeMB, itemName)
+		err = store.StatsDatabase.SaveFile(kindName, relaySettings, hash, leafCount, sizeMB, itemName)
 		if err != nil {
 			return err
 		}

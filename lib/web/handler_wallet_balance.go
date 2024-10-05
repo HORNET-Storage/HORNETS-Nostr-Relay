@@ -4,13 +4,13 @@ import (
 	"log"
 	"strconv"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
-func getWalletBalanceUSD(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func getWalletBalanceUSD(c *fiber.Ctx, store stores.Store) error {
 	// Get the latest wallet balance
-	latestBalance, err := store.GetLatestWalletBalance()
+	latestBalance, err := store.GetStatsStore().GetLatestWalletBalance()
 	if err != nil {
 		log.Printf("Error querying latest balance: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -19,7 +19,7 @@ func getWalletBalanceUSD(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	}
 
 	// Get the latest Bitcoin rate
-	bitcoinRate, err := store.GetLatestBitcoinRate()
+	bitcoinRate, err := store.GetStatsStore().GetLatestBitcoinRate()
 	if err != nil {
 		log.Printf("Error querying Bitcoin rate: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

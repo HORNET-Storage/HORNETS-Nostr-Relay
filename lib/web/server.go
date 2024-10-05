@@ -6,27 +6,18 @@ import (
 	"net/http"
 	"strconv"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/spf13/viper"
-	"gorm.io/gorm"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func StartServer(store stores.Store, statsDb *gorm.DB) error {
+func StartServer(store stores.Store) error {
 	app := fiber.New()
 
 	go pullBitcoinPrice()
-
-	statisticsStore := &gorm.GormStatisticsStore{}
-
-	err := statisticsStore.InitStore(viper.GetString("relay_stats_db"), nil)
-	if err != nil {
-		log.Fatalf("failed to initialize statistics store: %v", err)
-	}
 
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
@@ -34,95 +25,89 @@ func StartServer(store stores.Store, statsDb *gorm.DB) error {
 		AllowMethods: "GET, POST, OPTIONS",
 	}))
 
-	app.Use(func(c *fiber.Ctx) error {
-		c.Locals("db", statsDb)
-		c.Locals("store", store)
-		return c.Next()
-	})
-
 	// Rate limited routes
 	app.Post("/signup", func(c *fiber.Ctx) error {
-		return signUpUser(c, statisticsStore)
+		return signUpUser(c, store)
 	})
 	app.Post("/login", func(c *fiber.Ctx) error {
-		return loginUser(c, statisticsStore)
+		return loginUser(c, store)
 	})
 
 	app.Post("/verify", rateLimiterMiddleware(), func(c *fiber.Ctx) error {
-		return verifyLoginSignature(c, statisticsStore)
+		return verifyLoginSignature(c, store)
 	})
 
 	// Open routes
 	app.Get("/user-exist", func(c *fiber.Ctx) error {
-		return checkUserExists(c, statisticsStore)
+		return checkUserExists(c, store)
 	})
 	app.Post("/logout", func(c *fiber.Ctx) error {
-		return logoutUser(c, statisticsStore)
+		return logoutUser(c, store)
 	})
 
 	// Wallet-specific routes with API key authentication
 	walletRoutes := app.Group("/api/wallet")
 	walletRoutes.Use(apiKeyMiddleware)
 	walletRoutes.Post("/balance", func(c *fiber.Ctx) error {
-		return updateWalletBalance(c, statisticsStore)
+		return updateWalletBalance(c, store)
 	})
 	walletRoutes.Post("/transactions", func(c *fiber.Ctx) error {
-		return updateWalletTransactions(c, statisticsStore)
+		return updateWalletTransactions(c, store)
 	})
 	walletRoutes.Post("/addresses", func(c *fiber.Ctx) error {
-		return saveWalletAddresses(c, statisticsStore) // Pass the store instance
+		return saveWalletAddresses(c, store) // Pass the store instance
 	})
 
 	secured := app.Group("/api")
 	secured.Use(func(c *fiber.Ctx) error {
-		return jwtMiddleware(c, statisticsStore)
+		return jwtMiddleware(c, store)
 	})
 
 	// Dedicated routes for each handler
 	secured.Get("/relaycount", func(c *fiber.Ctx) error {
-		return getRelayCount(c, statisticsStore)
+		return getRelayCount(c, store)
 	})
 	secured.Post("/relay-settings", updateRelaySettings)
 	secured.Get("/relay-settings", getRelaySettings)
 	secured.Get("/timeseries", func(c *fiber.Ctx) error {
-		return getProfilesTimeSeriesData(c, statisticsStore)
+		return getProfilesTimeSeriesData(c, store)
 	})
 	secured.Get("/activitydata", func(c *fiber.Ctx) error {
-		return getMonthlyStorageStats(c, statisticsStore)
+		return getMonthlyStorageStats(c, store)
 	})
 	secured.Get("/barchartdata", func(c *fiber.Ctx) error {
-		return getNotesMediaStorageData(c, statisticsStore)
+		return getNotesMediaStorageData(c, store)
 	})
 	secured.Post("/updateRate", func(c *fiber.Ctx) error {
-		return updateBitcoinRate(c, statisticsStore)
+		return updateBitcoinRate(c, store)
 	})
 	secured.Get("/balance/usd", func(c *fiber.Ctx) error {
-		return getWalletBalanceUSD(c, statisticsStore)
+		return getWalletBalanceUSD(c, store)
 	})
 
 	secured.Get("/transactions/latest", func(c *fiber.Ctx) error {
-		return getLatestWalletTransactions(c, statisticsStore)
+		return getLatestWalletTransactions(c, store)
 	})
 	secured.Get("/bitcoin-rates/last-30-days", func(c *fiber.Ctx) error {
-		return getBitcoinRatesLast30Days(c, statisticsStore)
+		return getBitcoinRatesLast30Days(c, store)
 	})
 	secured.Get("/addresses", func(c *fiber.Ctx) error {
-		return pullWalletAddresses(c, statisticsStore)
+		return pullWalletAddresses(c, store)
 	})
 	secured.Get("/kinds", func(c *fiber.Ctx) error {
-		return getKindData(c, statisticsStore)
+		return getKindData(c, store)
 	})
 	secured.Get("/kind-trend/:kindNumber", func(c *fiber.Ctx) error {
-		return getKindTrendData(c, statisticsStore)
+		return getKindTrendData(c, store)
 	})
 	secured.Post("/pending-transactions", func(c *fiber.Ctx) error {
-		return saveUnconfirmedTransaction(c, statisticsStore)
+		return saveUnconfirmedTransaction(c, store)
 	})
 	secured.Post("/replacement-transactions", func(c *fiber.Ctx) error {
-		return replaceTransaction(c, statisticsStore)
+		return replaceTransaction(c, store)
 	})
 	secured.Get("/pending-transactions", func(c *fiber.Ctx) error {
-		return getPendingTransactions(c, statisticsStore)
+		return getPendingTransactions(c, store)
 	})
 	secured.Post("/refresh-token", refreshToken)
 

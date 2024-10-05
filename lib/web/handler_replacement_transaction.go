@@ -4,13 +4,13 @@ import (
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	gorm_store "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
 // Refactored replaceTransaction function
-func replaceTransaction(c *fiber.Ctx, store *gorm_store.GormStatisticsStore) error {
+func replaceTransaction(c *fiber.Ctx, store stores.Store) error {
 	// Parse the JSON body into the ReplaceTransactionRequest struct
 	var replaceRequest types.ReplaceTransactionRequest
 	if err := c.BodyParser(&replaceRequest); err != nil {
@@ -21,7 +21,7 @@ func replaceTransaction(c *fiber.Ctx, store *gorm_store.GormStatisticsStore) err
 	}
 
 	// Use the statistics store to replace the transaction
-	err := store.ReplaceTransaction(replaceRequest)
+	err := store.GetStatsStore().ReplaceTransaction(replaceRequest)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{

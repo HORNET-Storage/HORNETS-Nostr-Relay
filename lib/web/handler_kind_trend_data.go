@@ -4,12 +4,12 @@ import (
 	"log"
 	"strconv"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored getKindTrendData handler
-func getKindTrendData(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
+func getKindTrendData(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Kind trend data request received")
 	kindNumberStr := c.Params("kindNumber")
 	kindNumber, err := strconv.Atoi(kindNumberStr)
@@ -19,7 +19,7 @@ func getKindTrendData(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	}
 
 	// Fetch the kind trend data using the statistics store
-	trendData, err := store.FetchKindTrendData(kindNumber)
+	trendData, err := store.GetStatsStore().FetchKindTrendData(kindNumber)
 	if err != nil {
 		log.Println("Error fetching kind trend data:", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
