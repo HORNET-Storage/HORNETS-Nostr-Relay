@@ -128,15 +128,13 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	userSession.Authenticated = true
 
 	// Load keys from environment for signing kind 411
-	privKey, _, err := loadSecp256k1Keys()
+	privateKey, _, err := signing.DeserializePrivateKey(viper.GetString("private_key"))
 	if err != nil {
-		log.Printf("Error loading keys from environment for %s: %s", env.Event.PubKey, err)
-		write("NOTICE", "Error loading keys from environment. Check if you have the key in the environment: %s", err)
-		return
+		log.Printf("failed to deserialize private key")
 	}
 
 	// Create or update NIP-88 event
-	err = CreateNIP88Event(privKey, env.Event.PubKey, store)
+	err = CreateNIP88Event(privateKey, env.Event.PubKey, store)
 	if err != nil {
 		log.Printf("Failed to create/update NIP-88 event for %s: %v", env.Event.PubKey, err)
 		write("NOTICE", "Failed to create/update NIP-88 event: %v", err)
@@ -196,8 +194,13 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
 	}
 
+	serializedPrivateKey, err := signing.SerializePrivateKey(relayPrivKey)
+	if err != nil {
+		log.Printf("failed to serialize private key")
+	}
+
 	event := &nostr.Event{
-		PubKey:    hex.EncodeToString(relayPrivKey.PubKey().SerializeCompressed()),
+		PubKey:    *serializedPrivateKey,
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
 		Kind:      764,
 		Tags:      tags,
@@ -244,13 +247,4 @@ func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event,
 	}
 
 	return nil, nil
-}
-
-func loadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
-	privateKey, publicKey, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting keys: %s", err)
-	}
-
-	return privateKey, publicKey, nil
 }

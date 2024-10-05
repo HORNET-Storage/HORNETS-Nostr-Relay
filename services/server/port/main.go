@@ -70,8 +70,7 @@ import (
 )
 
 func init() {
-	viper.SetDefault("key", "")
-	viper.SetDefault("priv_key", "")
+	viper.SetDefault("private_key", "")
 	viper.SetDefault("web", true)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
@@ -81,6 +80,7 @@ func init() {
 	viper.SetDefault("RelayName", "HORNETS")
 	viper.SetDefault("RelayDescription", "The best relay ever.")
 	viper.SetDefault("RelayPubkey", "")
+	viper.SetDefault("RelaySupportedNips", []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116})
 	viper.SetDefault("RelayContact", "support@hornets.net")
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")
@@ -153,55 +153,54 @@ func generateRandomAPIKey() (string, error) {
 }
 
 func main() {
-
 	ctx := context.Background()
-
 	wg := new(sync.WaitGroup)
 
-	// priv, _, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
-	// if err != nil {
-	// 	log.Printf("Error deserializing Private Key %s", err)
-	// }
+	serializedPrivateKey := viper.GetString("private_key")
 
-	priv := viper.GetString("priv_key")
+	// Generate a new private key and save it to viper config if one doesn't exist
+	if serializedPrivateKey == "" {
+		newKey, err := signing.GeneratePrivateKey()
+		if err != nil {
+			log.Printf("error generating or saving server private key")
+		}
 
-	viper.Set("key", priv)
+		serializedPrivateKey, err := signing.SerializePrivateKey(newKey)
+		if err != nil {
+			log.Printf("error generating or saving server private key")
+		}
 
-	// Private key
-	key := viper.GetString("key")
+		viper.Set("private_key", serializedPrivateKey)
+		err = viper.WriteConfig()
+		if err != nil {
+			log.Println("Viper has failed to write the config")
+		}
+	}
 
-	host := libp2p.GetHostOnPort(key, viper.GetString("port"))
+	privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
+	if err != nil {
+		log.Printf("failed to deserialize private key")
+	}
+
+	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+	if err != nil {
+		log.Printf("failed to serialize public key")
+	}
+
+	viper.Set("RelayPubkey", serializedPublicKey)
+
+	host := libp2p.GetHostOnPort(serializedPrivateKey, viper.GetString("port"))
 
 	// Create and initialize database
 	store := &stores_graviton.GravitonStore{}
-
 	queryCache := viper.GetStringMapString("query_cache")
-	err := store.InitStore("gravitondb", queryCache)
+	err = store.InitStore("gravitondb", queryCache)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// generate server priv key if it does not exist
-	err = kind411creator.GenerateAndSaveNostrPrivateKey()
-	if err != nil {
-		log.Printf("error generating or saving server private key")
-	}
-	// load keys from environment for signing kind 411
-	privKey, pubKey, err := kind411creator.LoadSecp256k1Keys()
-	if err != nil {
-		log.Printf("error loading keys from environment. check if you have the key in the environment: %s", err)
-		return
-	}
-	// TODO: We need to only generate it once. When it does not exist.
-	// Create dht key for using relay private key and set it on viper.
-	_, _, err = kind411creator.GenerateEd25519Keypair(viper.GetString("priv_key"))
-	if err != nil {
-		log.Printf("error generating dht-key: %s", err)
-		return
-	}
-
 	// Create and store kind 411 event
-	if err := kind411creator.CreateKind411Event(privKey, pubKey, store); err != nil {
+	if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
 		log.Printf("Failed to create kind 411 event: %v", err)
 		return
 	}

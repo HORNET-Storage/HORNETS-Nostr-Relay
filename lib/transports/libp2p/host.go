@@ -141,13 +141,9 @@ func (n *connectionNotifier) ListenClose(net network.Network, multiaddr multiadd
 	fmt.Printf("Stopped listening on: %s\n", multiaddr)
 }
 
-func GetHostOnPort(priv string, port string) host.Host {
-	key := priv
-	if priv == "" {
-		key = *generateKey()
-	}
+func GetHostOnPort(serializedPrivateKey string, port string) host.Host {
+	decodedKey, err := signing.DecodeKey(serializedPrivateKey)
 
-	decodedKey, err := signing.DecodeKey(key)
 	if err != nil {
 		log.Fatal(err)
 	}

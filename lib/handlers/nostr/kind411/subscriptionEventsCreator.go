@@ -1,7 +1,6 @@
 package kind411creator
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -156,67 +155,6 @@ func serializeEventForID(event *nostr.Event) string {
 	compactSerialized := string(serialized)
 
 	return compactSerialized
-}
-
-func LoadSecp256k1Keys() (*btcec.PrivateKey, *btcec.PublicKey, error) {
-
-	privateKey, publicKey, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting keys: %s", err)
-	}
-
-	return privateKey, publicKey, nil
-}
-
-func GenerateEd25519Keypair(privateKeyHex string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
-	// Convert hex string to byte slice
-	privateKeyBytes, err := hex.DecodeString(privateKeyHex)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decode hex string: %v", err)
-	}
-
-	// Ensure the private key is the correct length
-	if len(privateKeyBytes) != ed25519.SeedSize {
-		return nil, nil, fmt.Errorf("invalid private key length: expected %d, got %d", ed25519.SeedSize, len(privateKeyBytes))
-	}
-
-	// Clamp the private key for Ed25519 usage
-	privateKeyBytes[0] &= 248  // Clear the lowest 3 bits
-	privateKeyBytes[31] &= 127 // Clear the highest bit
-	privateKeyBytes[31] |= 64  // Set the second highest bit
-
-	// Generate the keypair
-	privateKey := ed25519.NewKeyFromSeed(privateKeyBytes)
-	publicKey := privateKey.Public().(ed25519.PublicKey)
-
-	viper.Set("RelayDHTkey", publicKey)
-	log.Println("dht private key", hex.EncodeToString(privateKey))
-	log.Println("dht public key", hex.EncodeToString(publicKey))
-	viper.Set("RelayDHTkey", hex.EncodeToString(publicKey))
-
-	return privateKey, publicKey, nil
-}
-
-func GenerateAndSaveNostrPrivateKey() error {
-	// Check if config file exists and if priv_key is already set
-	if viper.GetString("priv_key") != "" {
-		fmt.Println("priv_key is already set in config file")
-		return nil
-	}
-
-	// Generate new private key
-	privateKey, err := btcec.NewPrivateKey()
-	if err != nil {
-		return fmt.Errorf("error generating private key: %w", err)
-	}
-
-	// Serialize and encode the private key
-	serializedPrivKey := hex.EncodeToString(privateKey.Serialize())
-
-	viper.Set("priv_key", serializedPrivKey)
-
-	fmt.Println("priv_key has been generated and saved to config file")
-	return nil
 }
 
 func allocateAddress(store *stores_graviton.GravitonStore) (*types.Address, error) {
