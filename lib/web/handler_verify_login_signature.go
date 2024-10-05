@@ -12,18 +12,18 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/btcsuite/btcd/btcutil/bech32"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/gofiber/fiber/v2"
 )
 
-func verifyLoginSignature(c *fiber.Ctx) error {
+func verifyLoginSignature(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	log.Println("Verify login signature: Request received")
+
+	// Parse the payload
 	var verifyPayload struct {
 		Challenge   string      `json:"challenge"`
 		Signature   string      `json:"signature"`
@@ -38,10 +38,9 @@ func verifyLoginSignature(c *fiber.Ctx) error {
 		})
 	}
 
+	// Verify the event's signature
 	event := verifyPayload.Event
 	log.Printf("Verify login signature: Event received for pubkey: %s", event.PubKey)
-
-	// Verify event (challenge response)
 	if !verifyEvent(&event) {
 		log.Println("Verify login signature: Invalid event signature")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
@@ -49,37 +48,29 @@ func verifyLoginSignature(c *fiber.Ctx) error {
 		})
 	}
 
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Retrieve the user challenge from the store
+	userChallenge, err := store.GetUserChallenge(event.Content)
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
-	var userChallenge types.UserChallenge
-	if err := db.Where("challenge = ? AND expired = ?", event.Content, false).First(&userChallenge).Error; err != nil {
 		log.Printf("Verify login signature: Challenge not found or expired: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid challenge or challenge expired",
 		})
 	}
 
-	// Check if the challenge is expired
+	// Check if the challenge has expired
 	if time.Since(userChallenge.CreatedAt) > 3*time.Minute {
 		log.Println("Verify login signature: Challenge expired")
-		db.Model(&userChallenge).Update("expired", true)
+		if err := store.MarkChallengeExpired(&userChallenge); err != nil {
+			log.Printf("Verify login signature: Error updating challenge: %v", err)
+		}
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Challenge expired",
 		})
 	}
 
-	var user types.User
-	if err := db.Where("id = ?", userChallenge.UserID).First(&user).Error; err != nil {
+	// Retrieve the user based on the challenge
+	user, err := store.GetUserByID(userChallenge.UserID)
+	if err != nil {
 		log.Printf("Verify login signature: User not found: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not found",
@@ -105,13 +96,13 @@ func verifyLoginSignature(c *fiber.Ctx) error {
 		})
 	}
 
-	// Store the active token
+	// Store the active token in the database
 	activeToken := types.ActiveToken{
 		UserID:    user.ID,
 		Token:     tokenString,
 		ExpiresAt: expirationTime,
 	}
-	if err := db.Create(&activeToken).Error; err != nil {
+	if err := store.StoreActiveToken(&activeToken); err != nil {
 		log.Printf("Verify login signature: Failed to store active token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error storing token",
@@ -120,6 +111,7 @@ func verifyLoginSignature(c *fiber.Ctx) error {
 
 	log.Printf("Verify login signature: Successful verification for user ID: %d", user.ID)
 
+	// Respond with the token and user information
 	return c.JSON(fiber.Map{
 		"token": tokenString,
 		"user": fiber.Map{

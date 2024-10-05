@@ -3,8 +3,9 @@ package libp2p
 import (
 	"context"
 	"fmt"
-	"github.com/spf13/viper"
 	"log"
+
+	"github.com/spf13/viper"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -43,8 +44,8 @@ func generateKey() *string {
 	}
 
 	// TODO: should this not go here?
-	viper.Set("relay_pub_key", serializedPub)
-	viper.Set("key", serializedPriv)
+	viper.Set("key", serializedPub)
+	viper.Set("priv_key", serializedPriv)
 	log.Println("Generated public/private key pair: ", *serializedPub, "/", *serializedPriv)
 	log.Println("Please copy the private key into your config.json file if you want to re-use it")
 

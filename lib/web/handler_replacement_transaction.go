@@ -2,14 +2,15 @@ package web
 
 import (
 	"log"
-	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm_store "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
-func replaceTransaction(c *fiber.Ctx) error {
+// Refactored replaceTransaction function
+func replaceTransaction(c *fiber.Ctx, store *gorm_store.GormStatisticsStore) error {
 	// Parse the JSON body into the ReplaceTransactionRequest struct
 	var replaceRequest types.ReplaceTransactionRequest
 	if err := c.BodyParser(&replaceRequest); err != nil {
@@ -19,49 +20,24 @@ func replaceTransaction(c *fiber.Ctx) error {
 		})
 	}
 
-	// Retrieve the gorm db
-	db := c.Locals("db").(*gorm.DB)
-
-	// Delete the original pending transaction
-	var originalPendingTransaction types.PendingTransaction
-	if err := db.Where("tx_id = ?", replaceRequest.OriginalTxID).First(&originalPendingTransaction).Error; err != nil {
+	// Use the statistics store to replace the transaction
+	err := store.ReplaceTransaction(replaceRequest)
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			log.Printf("No pending transaction found with TxID %s", replaceRequest.OriginalTxID)
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "Original transaction not found",
 			})
 		}
-		log.Printf("Error querying original transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
-	if err := db.Delete(&originalPendingTransaction).Error; err != nil {
-		log.Printf("Error deleting pending transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
+		log.Printf("Error replacing transaction: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Error deleting original transaction",
-		})
-	}
-	log.Printf("Deleted original pending transaction with TxID %s", replaceRequest.OriginalTxID)
-
-	// Save the new pending transaction
-	newPendingTransaction := types.PendingTransaction{
-		TxID:             replaceRequest.NewTxID, // Save the new transaction ID
-		FeeRate:          replaceRequest.NewFeeRate,
-		Amount:           replaceRequest.Amount,
-		RecipientAddress: replaceRequest.RecipientAddress,
-		Timestamp:        time.Now(),
-	}
-
-	if err := db.Create(&newPendingTransaction).Error; err != nil {
-		log.Printf("Error saving new pending transaction: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Error saving new transaction",
+			"error": "Error replacing transaction",
 		})
 	}
 
+	// Respond with success
 	return c.JSON(fiber.Map{
 		"status":  "success",
 		"message": "Replacement transaction saved successfully",
-		"txid":    newPendingTransaction.TxID,
+		"txid":    replaceRequest.NewTxID,
 	})
 }

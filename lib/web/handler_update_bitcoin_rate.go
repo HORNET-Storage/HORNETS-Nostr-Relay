@@ -2,14 +2,13 @@ package web
 
 import (
 	"log"
-	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
-	"gorm.io/gorm"
 )
 
-func updateBitcoinRate(c *fiber.Ctx) error {
+// Refactored updateBitcoinRate function
+func updateBitcoinRate(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	var data map[string]interface{}
 
 	// Parse the JSON body into the map
@@ -23,6 +22,7 @@ func updateBitcoinRate(c *fiber.Ctx) error {
 	// Print the received data
 	log.Println("Received data:", data)
 
+	// Extract the rate from the received data
 	rateRaw, ok := data["rate"]
 	if !ok {
 		log.Printf("Rate not found in the data: %v", data)
@@ -31,6 +31,7 @@ func updateBitcoinRate(c *fiber.Ctx) error {
 		})
 	}
 
+	// Validate the rate format
 	rate, ok := rateRaw.(float64)
 	if !ok {
 		log.Printf("Invalid rate format: %v", rateRaw)
@@ -39,40 +40,16 @@ func updateBitcoinRate(c *fiber.Ctx) error {
 		})
 	}
 
-	// Retrieve the gorm db
-	db := c.Locals("db").(*gorm.DB)
-
-	// Query the latest Bitcoin rate
-	var latestBitcoinRate types.BitcoinRate
-	result := db.Order("timestamp desc").First(&latestBitcoinRate)
-
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying bitcoin rate: %v", result.Error)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Database query error",
-		})
-	}
-
-	if result.Error == nil && latestBitcoinRate.Rate == rate {
-		// If the rate is the same as the latest entry, no update needed
-		return c.JSON(fiber.Map{
-			"message": "Rate is the same as the latest entry, no update needed",
-		})
-	}
-
-	// Add the new rate
-	newRate := types.BitcoinRate{
-		Rate:      rate,
-		Timestamp: time.Now(),
-	}
-	if err := db.Create(&newRate).Error; err != nil {
-		log.Printf("Error saving new rate: %v", err)
+	// Use the statistics store to update the Bitcoin rate
+	err := store.UpdateBitcoinRate(rate)
+	if err != nil {
+		log.Printf("Error updating Bitcoin rate: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database save error",
 		})
 	}
 
-	// Respond with the received data
+	// Respond with the success message
 	return c.JSON(fiber.Map{
 		"status":  "success",
 		"message": "Bitcoin rate updated successfully",

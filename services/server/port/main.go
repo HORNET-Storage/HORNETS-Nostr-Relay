@@ -66,13 +66,14 @@ import (
 
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
 	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	//negentropy "github.com/illuzen/go-negentropy"
 )
 
 func init() {
 	viper.SetDefault("key", "")
 	viper.SetDefault("priv_key", "")
-	viper.SetDefault("web", false)
+	viper.SetDefault("web", true)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
@@ -85,6 +86,24 @@ func init() {
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")
 	viper.SetDefault("RelayDHTkey", "")
+
+	// Set default relay settings (including Mode)
+	viper.SetDefault("relay_settings", map[string]interface{}{
+		"Mode":             "smart", // Default mode to "smart"
+		"IsKindsActive":    false,   // Default to false for activity flags
+		"IsPhotosActive":   false,
+		"IsVideosActive":   false,
+		"IsGitNestrActive": false,
+		"IsAudioActive":    false,
+		"Kinds":            []string{}, // Default empty arrays for list fields
+		"DynamicKinds":     []string{},
+		"Photos":           []string{},
+		"Videos":           []string{},
+		"GitNestr":         []string{},
+		"Audio":            []string{},
+		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
+		"Chunked":          []string{},
+	})
 
 	// Generate a random wallet API key
 	apiKey, err := generateRandomAPIKey()
@@ -140,12 +159,14 @@ func main() {
 
 	wg := new(sync.WaitGroup)
 
-	priv, _, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
-	if err != nil {
-		log.Printf("Error deserializing Private Key %s", err)
-	}
+	// priv, _, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
+	// if err != nil {
+	// 	log.Printf("Error deserializing Private Key %s", err)
+	// }
 
-	viper.Set("key", hex.EncodeToString(priv.PubKey().SerializeCompressed()))
+	priv := viper.GetString("priv_key")
+
+	viper.Set("key", priv)
 
 	// Private key
 	key := viper.GetString("key")
@@ -156,9 +177,16 @@ func main() {
 	store := &stores_graviton.GravitonStore{}
 
 	queryCache := viper.GetStringMapString("query_cache")
-	err = store.InitStore("gravitondb", queryCache)
+	err := store.InitStore("gravitondb", queryCache)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	statisticsStore := &gorm.GormStatisticsStore{}
+
+	err = statisticsStore.InitStore(viper.GetString("relay_stats_db"), nil)
+	if err != nil {
+		log.Fatalf("failed to initialize statistics store: %v", err)
 	}
 
 	// generate server priv key if it does not exist
@@ -237,24 +265,27 @@ func main() {
 	}
 
 	negentropy.SetupNegentropyEventHandler(host, "host", store)
+	skipdht := true
+	if !skipdht {
+		libp2pAddrs := []string{}
+		for _, addr := range host.Addrs() {
+			libp2pAddrs = append(libp2pAddrs, addr.String())
+		}
+		viper.Set("LibP2PID", host.ID().String())
+		viper.Set("LibP2PAddrs", libp2pAddrs)
+		selfRelay := ws.GetRelayInfo()
+		log.Printf("Self Relay: %+v\n", selfRelay)
 
-	libp2pAddrs := []string{}
-	for _, addr := range host.Addrs() {
-		libp2pAddrs = append(libp2pAddrs, addr.String())
+		dhtServer := negentropy.DefaultDHTServer()
+		defer dhtServer.Close()
+
+		// this periodically syncs with other relays, and uploads user keys to dht
+		uploadInterval := time.Hour * 2
+		syncInterval := time.Hour * 3
+		relayStore := negentropy.NewRelayStore(syncDB, dhtServer, host, store, uploadInterval, syncInterval)
+		log.Printf("Created relay store: %+v", relayStore)
+
 	}
-	viper.Set("LibP2PID", host.ID().String())
-	viper.Set("LibP2PAddrs", libp2pAddrs)
-	selfRelay := ws.GetRelayInfo()
-	log.Printf("Self Relay: %+v\n", selfRelay)
-
-	dhtServer := negentropy.DefaultDHTServer()
-	defer dhtServer.Close()
-
-	// this periodically syncs with other relays, and uploads user keys to dht
-	uploadInterval := time.Hour * 2
-	syncInterval := time.Hour * 3
-	relayStore := negentropy.NewRelayStore(syncDB, dhtServer, host, store, uploadInterval, syncInterval)
-	log.Printf("Created relay store: %+v", relayStore)
 
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {

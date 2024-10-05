@@ -3,29 +3,22 @@ package web
 import (
 	"log"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-func checkUserExists(c *fiber.Ctx) error {
+func checkUserExists(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	log.Println("Checking if user exists...")
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
 
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Check if any user exists in the database using the store
+	exists, err := store.UserExists()
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
+		log.Printf("Error checking if user exists: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
-	var user types.User
-	if err := db.First(&user).Error; err != nil {
+	// If no users exist, allow signup
+	if !exists {
 		return c.JSON(fiber.Map{
 			"exists":      false,
 			"allowSignup": true,
@@ -33,6 +26,7 @@ func checkUserExists(c *fiber.Ctx) error {
 		})
 	}
 
+	// If a user exists, disallow signup
 	return c.JSON(fiber.Map{
 		"exists":      true,
 		"allowSignup": false,

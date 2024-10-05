@@ -4,17 +4,14 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-func jwtMiddleware(c *fiber.Ctx) error {
+func jwtMiddleware(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 
 	// Get the Authorization header
 	authHeader := c.Get("Authorization")
@@ -30,22 +27,15 @@ func jwtMiddleware(c *fiber.Ctx) error {
 	// Extract the token
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
-	// Check if the token is in ActiveTokens
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Check if the token is active and not expired using the store method
+	isActive, err := store.IsActiveToken(tokenString)
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
+		log.Printf("JWT Middleware: Error checking token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
-	var activeToken types.ActiveToken
-	if err := db.Where("token = ? AND expires_at > ?", tokenString, time.Now()).First(&activeToken).Error; err != nil {
-		log.Printf("JWT Middleware: Token not found in ActiveTokens or expired: %v", err)
+	if !isActive {
+		log.Println("JWT Middleware: Token not found in ActiveTokens or expired")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired token",
 		})
@@ -53,7 +43,7 @@ func jwtMiddleware(c *fiber.Ctx) error {
 
 	// Parse and validate the token
 	token, err := jwt.ParseWithClaims(tokenString, &types.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// Validate the alg
+		// Validate the algorithm
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -67,7 +57,7 @@ func jwtMiddleware(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check if the token is valid
+	// Check if the token is valid and set user claims in the context
 	if claims, ok := token.Claims.(*types.JWTClaims); ok && token.Valid {
 		c.Locals("user", claims)
 		return c.Next()

@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	jsoniter "github.com/json-iterator/go"
@@ -32,13 +33,21 @@ const (
 )
 
 type GravitonStore struct {
-	Database *graviton.Store
+	Database      *graviton.Store
+	StatsDatabase *gorm.GormStatisticsStore
 }
 
 func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
 	db, err := graviton.NewDiskStore(basepath)
 	if err != nil {
 		return err
+	}
+
+	// Initialize GORM StatsDatabase
+	store.StatsDatabase = &gorm.GormStatisticsStore{}
+	err = store.StatsDatabase.InitStore(viper.GetString("relay_stats_db"), nil)
+	if err != nil {
+		return fmt.Errorf("failed to initialize StatsDatabase: %v", err) // Proper error handling
 	}
 
 	store.Database = db
@@ -254,96 +263,11 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 			sizeMB = float64(sizeBytes) / (1024 * 1024) // Convert to MB
 		}
 
-		gormDB, err := InitGorm()
+		statisticsStore := &gorm.GormStatisticsStore{}
+
+		err = statisticsStore.SaveFile(kindName, relaySettings, hash, leafCount, sizeMB, itemName)
 		if err != nil {
 			return err
-		}
-
-		mode := relaySettings.Mode
-
-		// Process file according to the mode (smart or unlimited)
-		if mode == "smart" {
-			// In smart mode, check if the file type is blocked
-			if contains(append(append(relaySettings.Photos, relaySettings.Videos...), relaySettings.Audio...), strings.ToLower(kindName)) {
-				return fmt.Errorf("file type not permitted: %s", kindName)
-			}
-
-			// Save the file under the correct category if not blocked
-			if contains(relaySettings.Photos, strings.ToLower(kindName)) {
-				photo := types.Photo{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  kindName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&photo)
-			} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
-				video := types.Video{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  kindName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&video)
-			} else if contains(relaySettings.Audio, strings.ToLower(kindName)) {
-				audio := types.Audio{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  kindName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&audio)
-			} else {
-				// Save the file under Misc if it doesn't fall under any specific category
-				misc := types.Misc{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  itemName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&misc)
-			}
-		} else if mode == "unlimited" {
-			// In unlimited mode, check if the file type is blocked
-			if contains(append(append(relaySettings.Photos, relaySettings.Videos...), relaySettings.Audio...), strings.ToLower(kindName)) {
-				return fmt.Errorf("blocked file type: %s", kindName)
-			}
-
-			// Save the file under the correct category if not blocked
-			if contains(relaySettings.Photos, strings.ToLower(kindName)) {
-				photo := types.Photo{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  kindName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&photo)
-			} else if contains(relaySettings.Videos, strings.ToLower(kindName)) {
-				video := types.Video{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  kindName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&video)
-			} else if contains(relaySettings.Audio, strings.ToLower(kindName)) {
-				audio := types.Audio{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  kindName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&audio)
-			} else {
-				// Save the file under Misc if it doesn't fall under any specific category
-				misc := types.Misc{
-					Hash:      hash,
-					LeafCount: leafCount,
-					KindName:  itemName,
-					Size:      sizeMB,
-				}
-				gormDB.Create(&misc)
-			}
 		}
 	}
 
@@ -631,8 +555,10 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 		return err
 	}
 
-	// Store event in Gorm SQLite database
-	storeInGorm(event)
+	err = store.StatsDatabase.SaveEventKind(event)
+	if err != nil {
+		log.Printf("error saving the event: %s", err)
+	}
 
 	return nil
 }
@@ -665,13 +591,10 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 	}
 	graviton.Commit(tree)
 
-	gormDB, err := InitGorm()
-	if err != nil {
-		return err
+	// Delete the event from the GORM SQLite database using statisticsStore
+	if err := store.StatsDatabase.DeleteEventByID(eventID); err != nil {
+		log.Printf("error deleting event, %s", err)
 	}
-
-	// Delete event from Gorm SQLite database
-	gormDB.Delete(&types.Kind{}, "event_id = ?", eventID)
 
 	return nil
 }
@@ -954,6 +877,15 @@ func GetBucket(leaf *merkle_dag.DagLeaf) string {
 	}
 }
 
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
 func GetKindFromItemName(itemName string) string {
 	parts := strings.Split(itemName, ".")
 	return parts[len(parts)-1]
@@ -1098,8 +1030,13 @@ func (store *GravitonStore) GetSubscriberByAddress(address string) (*types.Subsc
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
 	}
 
+	// Check if the "subscribers" tree exists in the snapshot
 	subscriberTree, err := snapshot.GetTree("subscribers")
 	if err != nil {
+		// Handle the case where the tree does not exist (i.e., no subscribers yet)
+		if err == graviton.ErrNotFound || err == graviton.ErrNoMoreKeys {
+			return nil, fmt.Errorf("no subscribers found: the 'subscribers' tree does not exist")
+		}
 		return nil, fmt.Errorf("failed to get subscribers tree: %v", err)
 	}
 

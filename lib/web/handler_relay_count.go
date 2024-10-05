@@ -3,32 +3,18 @@ package web
 import (
 	"log"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
-	"gorm.io/gorm"
 )
 
-func getRelayCount(c *fiber.Ctx) error {
+// Refactored getRelayCount function
+func getRelayCount(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	log.Println("Relay count request received")
-
-	// Retrieve the database path from the config file using Viper
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Retrieve the gorm db
-	db := c.Locals("db").(*gorm.DB)
-	var err error
 
 	// Retrieve relay settings from the config file using Viper
 	var relaySettings struct {
-		Kinds    []string `mapstructure:"kinds"`
-		Photos   []string `mapstructure:"photos"`
-		Videos   []string `mapstructure:"videos"`
 		GitNestr []string `mapstructure:"gitNestr"`
-		Audio    []string `mapstructure:"audio"`
 	}
 	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
 		log.Fatalf("Error unmarshaling relay settings: %v", err)
@@ -40,82 +26,48 @@ func getRelayCount(c *fiber.Ctx) error {
 		"photos":   0,
 		"videos":   0,
 		"gitNestr": 0,
-		"audio":    0, // Add audio to response data
-		"misc":     0, // Add misc to response data
+		"audio":    0,
+		"misc":     0,
 	}
 
-	// Aggregate counts for each category
-	responseData["kinds"], err = getKindCounts(db)
+	// Fetch counts from the statistics store
+	var err error
+	responseData["kinds"], err = store.FetchKindCount()
 	if err != nil {
 		log.Printf("Error getting kind counts: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Error getting kind counts")
 	}
 
-	responseData["photos"], err = getPhotoCounts(db)
+	responseData["photos"], err = store.FetchPhotoCount()
 	if err != nil {
 		log.Printf("Error getting photo counts: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Error getting photo counts")
 	}
 
-	responseData["videos"], err = getVideoCounts(db)
+	responseData["videos"], err = store.FetchVideoCount()
 	if err != nil {
 		log.Printf("Error getting video counts: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Error getting video counts")
 	}
 
-	responseData["gitNestr"], err = getGitNestrCounts(db, relaySettings.GitNestr)
+	responseData["gitNestr"], err = store.FetchGitNestrCount(relaySettings.GitNestr)
 	if err != nil {
 		log.Printf("Error getting gitNestr counts: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Error getting gitNestr counts")
 	}
 
-	responseData["audio"], err = getAudioCounts(db) // Add audio counts
+	responseData["audio"], err = store.FetchAudioCount()
 	if err != nil {
 		log.Printf("Error getting audio counts: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Error getting audio counts")
 	}
 
-	responseData["misc"], err = getMiscCounts(db) // Add misc counts
+	responseData["misc"], err = store.FetchMiscCount()
 	if err != nil {
 		log.Printf("Error getting misc counts: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Error getting misc counts")
 	}
 
+	// Respond with the aggregated counts
 	return c.JSON(responseData)
-}
-
-func getKindCounts(db *gorm.DB) (int, error) {
-	var count int64
-	err := db.Model(&types.Kind{}).Count(&count).Error
-	return int(count), err
-}
-
-func getPhotoCounts(db *gorm.DB) (int, error) {
-	var count int64
-	err := db.Model(&types.Photo{}).Count(&count).Error
-	return int(count), err
-}
-
-func getVideoCounts(db *gorm.DB) (int, error) {
-	var count int64
-	err := db.Model(&types.Video{}).Count(&count).Error
-	return int(count), err
-}
-
-func getGitNestrCounts(db *gorm.DB, gitNestr []string) (int, error) {
-	var count int64
-	err := db.Model(&types.GitNestr{}).Where("git_type IN ?", gitNestr).Count(&count).Error
-	return int(count), err
-}
-
-func getAudioCounts(db *gorm.DB) (int, error) {
-	var count int64
-	err := db.Model(&types.Audio{}).Count(&count).Error
-	return int(count), err
-}
-
-func getMiscCounts(db *gorm.DB) (int, error) {
-	var count int64
-	err := db.Model(&types.Misc{}).Count(&count).Error
-	return int(count), err
 }

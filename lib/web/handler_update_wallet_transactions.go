@@ -9,19 +9,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
-	"gorm.io/gorm"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func updateWalletTransactions(c *fiber.Ctx) error {
+func updateWalletTransactions(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	var transactions []map[string]interface{}
 	log.Println("Transactions request received")
 
@@ -35,118 +36,62 @@ func updateWalletTransactions(c *fiber.Ctx) error {
 	// Get the expected wallet name from the configuration
 	expectedWalletName := viper.GetString("wallet_name")
 
-	// If the expected wallet name is not set, set it using the first transaction's wallet name
+	// Set wallet name from first transaction if not set
 	if expectedWalletName == "" && len(transactions) > 0 {
-		firstTransaction := transactions[0]
-		walletName, ok := firstTransaction["wallet_name"].(string)
+		walletName, ok := transactions[0]["wallet_name"].(string)
 		if !ok {
-			log.Println("Wallet name missing or invalid in the first transaction")
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Wallet name missing or invalid",
 			})
 		}
-
-		// Set the expected wallet name in Viper
 		viper.Set("wallet_name", walletName)
 		expectedWalletName = walletName
-		log.Printf("Setting wallet name in configuration: %s", expectedWalletName)
-
-		// Optionally save the updated configuration to a file
-		if err := viper.WriteConfig(); err != nil {
-			log.Printf("Error saving updated configuration: %v", err)
-		}
 	}
 
-	// Retrieve the gorm db
-	db := c.Locals("db").(*gorm.DB)
-
-	// Retrieve the store
-	store := c.Locals("store").(*stores.Store)
+	// Initialize the Graviton store for subscription processing
+	gravitonStore := &graviton.GravitonStore{}
+	queryCache := viper.GetStringMapString("query_cache")
+	err := gravitonStore.InitStore("gravitondb", queryCache)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	for _, transaction := range transactions {
 		walletName, ok := transaction["wallet_name"].(string)
 		if !ok || walletName != expectedWalletName {
-			log.Printf("Transaction from unknown wallet: %v", walletName)
 			continue // Skip processing if wallet name doesn't match
 		}
 
-		address, ok := transaction["address"].(string)
-		if !ok {
-			log.Printf("Invalid address format: %v", transaction["address"])
-			continue
-		}
-
-		dateStr, ok := transaction["date"].(string)
-		if !ok {
-			log.Printf("Invalid date format: %v", transaction["date"])
-			continue
-		}
-
-		// Correct format for ISO 8601 datetime string with timezone
+		// Extract transaction details
+		address, _ := transaction["address"].(string)
+		dateStr, _ := transaction["date"].(string)
 		date, err := time.Parse(time.RFC3339, dateStr)
 		if err != nil {
 			log.Printf("Error parsing date: %v", err)
 			continue
 		}
-
-		output, ok := transaction["output"].(string)
-		if !ok {
-			log.Printf("Invalid output format: %v", transaction["output"])
-			continue
-		}
-
-		// Check if the transaction matches a subscriber's address and update the subscription
-		if err := processSubscriptionPayment(*store, output, transaction); err != nil {
-			log.Printf("Error processing subscription payment: %v", err)
-		}
-
-		valueStr, ok := transaction["value"].(string)
-		if !ok {
-			log.Printf("Invalid value format: %v", transaction["value"])
-			continue
-		}
-
+		output, _ := transaction["output"].(string)
+		valueStr, _ := transaction["value"].(string)
 		value, err := strconv.ParseFloat(valueStr, 64)
 		if err != nil {
-			log.Printf("Error parsing value to float64: %v", err)
+			log.Printf("Error parsing value: %v", err)
 			continue
 		}
 
-		// Extract the TxID portion before the colon
+		// Process pending transactions
 		txID := strings.Split(address, ":")[0]
-
-		log.Println("Transaction id for pending test: ", txID)
-
-		// TODO: get this working and update the variable names so that they match what they stand for.
-		var pendingTx types.PendingTransaction
-		unconfirmedResult := db.Where("tx_id = ?", txID).First(&pendingTx)
-
-		if unconfirmedResult.Error == nil {
-			// TxID found in PendingTransactions, delete it
-			if err := db.Delete(&pendingTx).Error; err != nil {
-				log.Printf("Error deleting pending transaction with TxID %s: %v", txID, err)
-				continue
-			}
-			log.Printf("Deleted pending transaction with TxID %s", txID)
-		} else if unconfirmedResult.Error == gorm.ErrRecordNotFound {
-			log.Printf("No pending transaction found with TxID %s", txID)
-		} else {
-			// If there was an error querying (other than not found), log it and continue
-			log.Printf("Error querying pending transaction with TxID %s: %v", txID, unconfirmedResult.Error)
+		err = store.DeletePendingTransaction(txID)
+		if err != nil {
 			continue
 		}
 
-		var existingTransaction types.WalletTransactions
-		result := db.Where("address = ? AND date = ? AND output = ? AND value = ?", address, date, output, valueStr).First(&existingTransaction)
-
-		if result.Error == nil {
-			// Transaction already exists, skip it
-			log.Printf("Duplicate transaction found, skipping: %v", transaction)
+		// Check for existing transactions
+		exists, err := store.TransactionExists(address, date, output, valueStr)
+		if err != nil {
+			log.Printf("Error checking existing transactions: %v", err)
 			continue
 		}
-
-		if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-			log.Printf("Error querying transaction: %v", result.Error)
+		if exists {
 			continue
 		}
 
@@ -157,16 +102,23 @@ func updateWalletTransactions(c *fiber.Ctx) error {
 			Output:  output,
 			Value:   fmt.Sprintf("%.8f", value),
 		}
-		if err := db.Create(&newTransaction).Error; err != nil {
+
+		err = store.SaveWalletTransaction(newTransaction)
+		if err != nil {
 			log.Printf("Error saving new transaction: %v", err)
 			continue
 		}
+
+		// Process subscription payments
+		err = processSubscriptionPayment(gravitonStore, output, transaction)
+		if err != nil {
+			log.Printf("Error processing subscription payment: %v", err)
+		}
 	}
 
-	// Respond with a success message
 	return c.JSON(fiber.Map{
 		"status":  "success",
-		"message": "Transactions received and processed successfully",
+		"message": "Transactions processed successfully",
 	})
 }
 

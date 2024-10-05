@@ -3,16 +3,14 @@ package web
 import (
 	"fmt"
 	"log"
-	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-func updateWalletBalance(c *fiber.Ctx) error {
+// Refactored updateWalletBalance function
+func updateWalletBalance(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	var data map[string]interface{}
 
 	// Parse the JSON body into the map
@@ -28,7 +26,6 @@ func updateWalletBalance(c *fiber.Ctx) error {
 
 	// Get the expected wallet name from the configuration
 	expectedWalletName := viper.GetString("wallet_name")
-
 	if expectedWalletName == "" {
 		log.Println("No expected wallet name set in configuration.")
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
@@ -51,52 +48,20 @@ func updateWalletBalance(c *fiber.Ctx) error {
 			"error": "Balance not found",
 		})
 	}
-
 	balance := fmt.Sprintf("%v", balanceRaw)
 
-	// Initialize the Gorm database
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Use the statistics store to update the wallet balance
+	err := store.UpdateWalletBalance(walletName, balance)
 	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
-	// Query the latest wallet balance
-	var latestBalance types.WalletBalance
-	result := db.Order("timestamp desc").First(&latestBalance)
-
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying latest balance: %v", result.Error)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Database query error",
-		})
-	}
-
-	if result.Error == nil && latestBalance.Balance == balance {
-		// If the latest balance is the same, do not add a new entry
-		return c.JSON(fiber.Map{
-			"message": "Balance is the same as the latest entry, no update needed",
-		})
-	}
-
-	// Add a new entry
-	newBalance := types.WalletBalance{
-		Balance:   balance,
-		Timestamp: time.Now(),
-	}
-	if err := db.Create(&newBalance).Error; err != nil {
-		log.Printf("Error saving new balance: %v", err)
+		log.Printf("Error updating wallet balance: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database save error",
 		})
 	}
 
 	// Respond with the received data
-	return c.JSON(data)
+	return c.JSON(fiber.Map{
+		"message": "Wallet balance updated successfully",
+		"balance": balance,
+	})
 }

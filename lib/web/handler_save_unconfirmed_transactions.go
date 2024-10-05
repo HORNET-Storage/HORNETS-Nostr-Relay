@@ -2,16 +2,16 @@ package web
 
 import (
 	"log"
-	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/gofiber/fiber/v2"
-	"gorm.io/gorm"
 )
 
-func saveUnconfirmedTransaction(c *fiber.Ctx) error {
+// Refactored saveUnconfirmedTransaction function
+func saveUnconfirmedTransaction(c *fiber.Ctx, store *gorm.GormStatisticsStore) error {
 	var pendingTransaction types.PendingTransaction
-	log.Println("Saving unconfirmed transactions.")
+	log.Println("Saving unconfirmed transaction.")
 
 	// Parse the JSON body into the struct with field mappings
 	if err := c.BodyParser(&pendingTransaction); err != nil {
@@ -21,14 +21,9 @@ func saveUnconfirmedTransaction(c *fiber.Ctx) error {
 		})
 	}
 
-	// Ensure Timestamp is populated
-	pendingTransaction.Timestamp = time.Now()
-
-	// Retrieve the gorm db
-	db := c.Locals("db").(*gorm.DB)
-
-	// Save the pending transaction to the database
-	if err := db.Create(&pendingTransaction).Error; err != nil {
+	// Use the statistics store to save the pending transaction
+	err := store.SaveUnconfirmedTransaction(&pendingTransaction)
+	if err != nil {
 		log.Printf("Error saving pending transaction: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database save error",

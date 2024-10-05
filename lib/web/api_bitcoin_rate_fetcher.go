@@ -4,15 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
 	"github.com/spf13/viper"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 type CoinGeckoResponse struct {
@@ -115,6 +112,12 @@ func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 
 func pullBitcoinPrice() {
 	// Fetch the initial Bitcoin rate immediately
+	store := &gorm.GormStatisticsStore{}
+	err := store.InitStore(viper.GetString("relay_stats_db"), nil) // Provide the correct path to your SQLite DB here
+	if err != nil {
+		fmt.Println("Error initializing database:", err)
+		return
+	}
 	apiIndex := 0
 	price, newIndex, err := fetchBitcoinPrice(apiIndex)
 	if err != nil {
@@ -122,7 +125,7 @@ func pullBitcoinPrice() {
 	} else {
 		fmt.Printf("Initial Bitcoin Price from APIs: $%.2f\n", price)
 		apiIndex = newIndex
-		saveBitcoinRate(price)
+		store.SaveBitcoinRate(price)
 	}
 
 	// Set up the ticker for subsequent fetches
@@ -136,49 +139,7 @@ func pullBitcoinPrice() {
 		} else {
 			fmt.Printf("Bitcoin Price from APIs: $%.2f\n", price)
 			apiIndex = newIndex
-			saveBitcoinRate(price)
+			store.SaveBitcoinRate(price)
 		}
 	}
-}
-
-func saveBitcoinRate(rate float64) {
-	// Initialize the Gorm database
-	dbPath := viper.GetString("relay_stats_db")
-	if dbPath == "" {
-		log.Fatal("Database path not found in config")
-	}
-
-	// Initialize the Gorm database
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
-	if err != nil {
-		log.Printf("Failed to connect to the database: %v", err)
-		return
-	}
-
-	// Query the latest Bitcoin rate
-	var latestBitcoinRate types.BitcoinRate
-	result := db.Order("timestamp desc").First(&latestBitcoinRate)
-
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying bitcoin rate: %v", result.Error)
-		return
-	}
-
-	if result.Error == nil && latestBitcoinRate.Rate == rate {
-		// If the rate is the same as the latest entry, no update needed
-		fmt.Println("Rate is the same as the latest entry, no update needed")
-		return
-	}
-
-	// Add the new rate
-	newRate := types.BitcoinRate{
-		Rate:      rate,
-		Timestamp: time.Now(),
-	}
-	if err := db.Create(&newRate).Error; err != nil {
-		log.Printf("Error saving new rate: %v", err)
-		return
-	}
-
-	fmt.Println("Bitcoin rate updated successfully")
 }
