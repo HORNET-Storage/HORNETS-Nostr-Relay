@@ -11,16 +11,21 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+*.env
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
 data
 
-web/
+
 leaves
 content
 gravitondb
 hornet-storage
 
 config.json
+
+
+**/.DS_Store
+

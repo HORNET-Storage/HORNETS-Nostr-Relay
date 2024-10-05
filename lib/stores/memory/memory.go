@@ -1,8 +1,8 @@
 package memory
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"reflect"
@@ -22,13 +22,19 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 )
 
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+	AddressStatusUsed      = "used"
+)
+
 type GravitonMemoryStore struct {
 	Database *graviton.Store
 
 	CacheConfig map[string]string
 }
 
-func (store *GravitonMemoryStore) InitStore(args ...interface{}) error {
+func (store *GravitonMemoryStore) InitStore(basepath string, args ...interface{}) error {
 	db, err := graviton.NewMemStore()
 	if err != nil {
 		return err
@@ -58,6 +64,11 @@ func (store *GravitonMemoryStore) InitStore(args ...interface{}) error {
 		}
 	}
 
+	return nil
+}
+
+// Not implemented for the Memory Store
+func (store *GravitonMemoryStore) GetStatsStore() stores.StatisticsStore {
 	return nil
 }
 
@@ -324,10 +335,12 @@ func (store *GravitonMemoryStore) RetrieveLeaf(root string, hash string, include
 	return data, nil
 }
 
+// Retrieve and build an entire scionic merkletree from the root hash
 func (store *GravitonMemoryStore) BuildDagFromStore(root string, includeContent bool) (*types.DagData, error) {
 	return stores.BuildDagFromStore(store, root, includeContent)
 }
 
+// Store an entire scionic merkltree (not implemented currently as not required, leaves are stored as received)
 func (store *GravitonMemoryStore) StoreDag(dag *types.DagData) error {
 	return stores.StoreDag(store, dag)
 }
@@ -400,67 +413,36 @@ func (store *GravitonMemoryStore) DeleteEvent(eventID string) error {
 	return nil
 }
 
-func (store *GravitonMemoryStore) StoreBlob(data []byte, contentType string, publicKey string) (*types.BlobDescriptor, error) {
+func (store *GravitonMemoryStore) StoreBlob(data []byte, hash []byte, publicKey string) error {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
-	hash := sha256.Sum256(data)
-	sha256Str := hex.EncodeToString(hash[:])
-
-	descriptor := types.BlobDescriptor{
-		URL:      fmt.Sprintf("/%s", sha256Str),
-		SHA256:   sha256Str,
-		Size:     int64(len(data)),
-		Type:     contentType,
-		Uploaded: time.Now().Unix(),
-	}
-
-	serializedDescriptor, err := cbor.Marshal(descriptor)
-	if err != nil {
-		return nil, err
-	}
-
-	blossomTree.Put(hash[:], serializedDescriptor)
 	contentTree.Put(hash[:], data)
 
-	graviton.Commit(blossomTree, contentTree)
+	graviton.Commit(contentTree)
 
-	return &descriptor, nil
+	return nil
 }
 
-func (store *GravitonMemoryStore) GetBlob(hash string) ([]byte, *string, error) {
+func (store *GravitonMemoryStore) GetBlob(hash string) ([]byte, error) {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
 	hashBytes, err := hex.DecodeString(hash)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	serializedDescriptor, err := blossomTree.Get(hashBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var descriptor types.BlobDescriptor
-	err = cbor.Unmarshal(serializedDescriptor, &descriptor)
-	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	content, err := contentTree.Get(hashBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return content, &descriptor.Type, nil
+	return content, nil
 }
 
 func (store *GravitonMemoryStore) DeleteBlob(hash string) error {
 	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
 	contentTree, _ := snapshot.GetTree("content")
 
 	hashBytes, err := hex.DecodeString(hash)
@@ -468,39 +450,187 @@ func (store *GravitonMemoryStore) DeleteBlob(hash string) error {
 		return err
 	}
 
-	blossomTree.Delete(hashBytes)
 	contentTree.Delete(hashBytes)
+
+	graviton.Commit(contentTree)
 
 	return nil
 }
 
-func (store *GravitonMemoryStore) ListBlobs(pubkey string, since, until int64) ([]types.BlobDescriptor, error) {
-	snapshot, _ := store.Database.LoadSnapshot(0)
-	blossomTree, _ := snapshot.GetTree("blossom")
-	cursor := blossomTree.Cursor()
-
-	results := []types.BlobDescriptor{}
-
-	_, value, cursorErr := cursor.First()
-	for {
-		if cursorErr == nil {
-			break
-		}
-
-		var descriptor types.BlobDescriptor
-		err := cbor.Unmarshal(value, &descriptor)
-		if err != nil {
-			return nil, err
-		}
-
-		if descriptor.Uploaded >= since && descriptor.Uploaded <= until {
-			results = append(results, descriptor)
-		}
-
-		_, value, cursorErr = cursor.Next()
+func (store *GravitonMemoryStore) SaveSubscriber(subscriber *types.Subscriber) error {
+	// Load the snapshot and get the "subscribers" tree
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
 	}
 
-	return results, nil
+	subscriberTree, err := snapshot.GetTree("subscribers")
+	if err != nil {
+		return fmt.Errorf("failed to get subscribers tree: %v", err)
+	}
+
+	// Marshal the subscriber into JSON
+	subscriberData, err := json.Marshal(subscriber)
+	if err != nil {
+		return fmt.Errorf("failed to marshal subscriber: %v", err)
+	}
+
+	// Use the npub as the key for storing the subscriber
+	key := subscriber.Npub
+
+	// Store the subscriber data in the tree
+	if err := subscriberTree.Put([]byte(key), subscriberData); err != nil {
+		return fmt.Errorf("failed to put subscriber in Graviton store: %v", err)
+	}
+
+	// Commit the tree to persist the changes
+	if _, err := graviton.Commit(subscriberTree); err != nil {
+		return fmt.Errorf("failed to commit subscribers tree: %v", err)
+	}
+
+	return nil
+}
+
+func (store *GravitonMemoryStore) GetSubscriberByAddress(address string) (*types.Subscriber, error) {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	subscriberTree, err := snapshot.GetTree("subscribers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscribers tree: %v", err)
+	}
+
+	// Iterate over subscribers to find the one associated with the address
+	cursor := subscriberTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var subscriber types.Subscriber
+		if err := json.Unmarshal(v, &subscriber); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal subscriber data: %v", err)
+		}
+
+		// Assuming the subscriber has a list of addresses
+
+		if subscriber.Address == address {
+			return &subscriber, nil
+		}
+	}
+
+	return nil, fmt.Errorf("subscriber not found for address: %s", address)
+}
+
+func (store *GravitonMemoryStore) GetSubscriber(npub string) (*types.Subscriber, error) {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	subscriberTree, err := snapshot.GetTree("subscribers")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscribers tree: %v", err)
+	}
+
+	// Iterate over subscribers to find the one with the matching npub
+	cursor := subscriberTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var subscriber types.Subscriber
+		if err := json.Unmarshal(v, &subscriber); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal subscriber data: %v", err)
+		}
+
+		// Check if the current subscriber's npub matches the provided npub
+		if subscriber.Npub == npub {
+			return &subscriber, nil
+		}
+	}
+
+	// If no subscriber was found with the matching npub, return an error
+	return nil, fmt.Errorf("subscriber not found for npub: %s", npub)
+}
+
+// AllocateBitcoinAddress allocates an available Bitcoin address to a subscriber.
+func (store *GravitonMemoryStore) AllocateBitcoinAddress(npub string) (*types.Address, error) {
+	// Load snapshot from the database
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	// Access the relay addresses tree
+	addressTree, err := snapshot.GetTree("relay_addresses")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get address tree: %v", err)
+	}
+
+	// Iterate through the addresses to find an available one
+	cursor := addressTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var addr types.Address
+		if err := json.Unmarshal(v, &addr); err != nil {
+			log.Printf("Error unmarshaling address: %v. Skipping this address.", err)
+			continue
+		}
+		if addr.Status == AddressStatusAvailable {
+			// Allocate the address to the subscriber
+			now := time.Now()
+			addr.Status = AddressStatusAllocated
+			addr.AllocatedAt = &now
+			addr.Npub = npub
+
+			// Marshal the updated address and store it back in the database
+			value, err := json.Marshal(addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal address: %v", err)
+			}
+			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
+				return nil, fmt.Errorf("failed to put address in tree: %v", err)
+			}
+
+			// Commit the changes to the database
+			if _, err := graviton.Commit(addressTree); err != nil {
+				return nil, fmt.Errorf("failed to commit address tree: %v", err)
+			}
+
+			return &addr, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no available addresses")
+}
+
+func (store *GravitonMemoryStore) SaveAddress(addr *types.Address) error {
+	// Load the snapshot and get the "relay_addresses" tree
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	addressTree, err := snapshot.GetTree("relay_addresses")
+	if err != nil {
+		return fmt.Errorf("failed to get address tree: %v", err)
+	}
+
+	// Marshal the address into JSON
+	addressData, err := json.Marshal(addr)
+	if err != nil {
+		return fmt.Errorf("failed to marshal address: %v", err)
+	}
+
+	// Use the index as the key for storing the address
+	key := addr.Index
+
+	// Store the address data in the tree
+	if err := addressTree.Put([]byte(key), addressData); err != nil {
+		return fmt.Errorf("failed to put address in Graviton store: %v", err)
+	}
+
+	// Commit the tree to persist the changes
+	if _, err := graviton.Commit(addressTree); err != nil {
+		return fmt.Errorf("failed to commit address tree: %v", err)
+	}
+
+	return nil
 }
 
 func GetBucket(leaf *merkle_dag.DagLeaf) string {

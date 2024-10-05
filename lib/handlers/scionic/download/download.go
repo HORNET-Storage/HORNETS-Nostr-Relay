@@ -1,10 +1,9 @@
 package download
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -12,21 +11,24 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
 func AddDownloadHandler(libp2phost host.Host, store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) {
-	libp2phost.SetStreamHandler("/download/1.0.0", BuildDownloadStreamHandler(store, canDownloadDag))
+	libp2phost.SetStreamHandler("/download", middleware.SessionMiddleware(libp2phost)(BuildDownloadStreamHandler(store, canDownloadDag)))
 }
 
 func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) func(network.Stream) {
 	downloadStreamHandler := func(stream network.Stream) {
 		enc := cbor.NewEncoder(stream)
 
-		result, message := utils.WaitForDownloadMessage(stream)
-		if !result {
-			utils.WriteErrorToStream(stream, "Failed to recieve upload message in time", nil)
+		libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: context.Background()}
+
+		message, err := utils.WaitForDownloadMessage(libp2pStream)
+		if err != nil {
+			utils.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", nil)
 
 			stream.Close()
 			return
@@ -35,7 +37,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		// Ensure the node is storing the root leaf
 		rootData, err := store.RetrieveLeaf(message.Root, message.Root, true)
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Node does not have root leaf", nil)
+			utils.WriteErrorToStream(libp2pStream, "Node does not have root leaf", nil)
 
 			stream.Close()
 			return
@@ -45,24 +47,14 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 
 		err = rootLeaf.VerifyRootLeaf()
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Error occured when trying to verify root leaf", err)
-
-			stream.Close()
-			return
-		}
-
-		if !result {
-			jsonData, _ := json.Marshal(rootLeaf)
-			os.WriteFile("before_download.json", jsonData, 0644)
-
-			utils.WriteErrorToStream(stream, "Failed to verify root leaf", nil)
+			utils.WriteErrorToStream(libp2pStream, "Failed to verify root leaf", err)
 
 			stream.Close()
 			return
 		}
 
 		if !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
-			utils.WriteErrorToStream(stream, "Not allowed to download this", nil)
+			utils.WriteErrorToStream(libp2pStream, "Not allowed to download this", nil)
 
 			stream.Close()
 			return
@@ -80,7 +72,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 
 		dagData, err := store.BuildDagFromStore(message.Root, includeContent)
 		if err != nil {
-			utils.WriteErrorToStream(stream, "Failed to build dag from root %e", err)
+			utils.WriteErrorToStream(libp2pStream, "Failed to build dag from root %e", err)
 
 			stream.Close()
 			return
@@ -116,8 +108,13 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						return err
 					}
 
-					if result := utils.WaitForResponse(stream); !result {
+					resp, err := utils.WaitForResponse(libp2pStream)
+					if err != nil {
 						return err
+					}
+
+					if !resp.Ok {
+						return fmt.Errorf("client responded withg false")
 					}
 				} else {
 					if !message.Filter.IncludeContent {
@@ -154,10 +151,6 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 							if err != nil {
 								return err
 							}
-
-							if !result {
-								return err
-							}
 						}
 
 						message := types.UploadMessage{
@@ -172,8 +165,13 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 							return err
 						}
 
-						if result = utils.WaitForResponse(stream); !result {
+						resp, err := utils.WaitForResponse(libp2pStream)
+						if err != nil {
 							return err
+						}
+
+						if !resp.Ok {
+							return fmt.Errorf("cient responded withg false")
 						}
 					}
 				}
@@ -182,7 +180,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			})
 
 			if err != nil {
-				utils.WriteErrorToStream(stream, "Failed to download dag %e", err)
+				utils.WriteErrorToStream(libp2pStream, "Failed to download dag %e", err)
 
 				stream.Close()
 				return
@@ -205,8 +203,13 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 						return err
 					}
 
-					if result := utils.WaitForResponse(stream); !result {
+					resp, err := utils.WaitForResponse(libp2pStream)
+					if err != nil {
 						return err
+					}
+
+					if !resp.Ok {
+						return fmt.Errorf("client responded withg false")
 					}
 				} else {
 					err := leaf.VerifyLeaf()
@@ -241,8 +244,14 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					if err := streamEncoder.Encode(&message); err != nil {
 						return err
 					}
-					if result = utils.WaitForResponse(stream); !result {
-						return fmt.Errorf("did not recieve a valid response")
+
+					resp, err := utils.WaitForResponse(libp2pStream)
+					if err != nil {
+						return err
+					}
+
+					if !resp.Ok {
+						return fmt.Errorf("client responded withg false")
 					}
 				}
 
@@ -250,7 +259,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			})
 
 			if err != nil {
-				utils.WriteErrorToStream(stream, "Failed to download dag", err)
+				utils.WriteErrorToStream(libp2pStream, "Failed to download dag", err)
 
 				stream.Close()
 				return
