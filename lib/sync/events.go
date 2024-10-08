@@ -16,7 +16,6 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/illuzen/go-negentropy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -29,14 +28,14 @@ import (
 // TODO: where is this supposed to come from? config file?
 const hornetNpub string = "npub1c25aedfd38f9fed72b383f6eefaea9f21dd58ec2c9989e0cc275cb5296adec17"
 
-func SetupNegentropyEventHandler(h host.Host, hostId string, db *stores_graviton.GravitonStore) {
+func SetupNegentropyEventHandler(h host.Host, hostId string, store stores.Store) {
 	handler := func(stream network.Stream) {
-		handleIncomingNegentropyEventStream(stream, hostId, db)
+		handleIncomingNegentropyEventStream(stream, hostId, store)
 	}
 	h.SetStreamHandler(NegentropyProtocol, handler)
 }
 
-func handleIncomingNegentropyEventStream(stream network.Stream, hostId string, store *stores_graviton.GravitonStore) {
+func handleIncomingNegentropyEventStream(stream network.Stream, hostId string, store stores.Store) {
 	defer stream.Close()
 
 	// Log the incoming connection (optional)
