@@ -38,6 +38,7 @@ type Store interface {
 	SaveSubscriber(subscriber *types.Subscriber) error
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
 	SaveAddress(addr *types.Address) error
+	AllocateAddress() (*types.Address, error)
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {

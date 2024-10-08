@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gofiber/fiber/v2"
@@ -45,14 +44,6 @@ func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 		}
 		viper.Set("wallet_name", walletName)
 		expectedWalletName = walletName
-	}
-
-	// Initialize the Graviton store for subscription processing
-	gravitonStore := &graviton.GravitonStore{}
-	queryCache := viper.GetStringMapString("query_cache")
-	err := gravitonStore.InitStore("gravitondb", queryCache)
-	if err != nil {
-		log.Fatal(err)
 	}
 
 	for _, transaction := range transactions {
@@ -109,7 +100,7 @@ func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 		}
 
 		// Process subscription payments
-		err = processSubscriptionPayment(gravitonStore, output, transaction)
+		err = processSubscriptionPayment(store, output, transaction)
 		if err != nil {
 			log.Printf("Error processing subscription payment: %v", err)
 		}
@@ -197,12 +188,12 @@ func processSubscriptionPayment(store stores.Store, address string, transaction 
 	}
 
 	// Update the NIP-88 event
-	relayPrivKey, _, err := loadRelayPrivateKey() // You need to implement this function
+	privateKey, _, err := signing.DeserializePrivateKey(viper.GetString("private_key"))
 	if err != nil {
-		return fmt.Errorf("failed to load relay private key: %v", err)
+		log.Printf("failed to deserialize private key")
 	}
 
-	err = UpdateNIP88EventAfterPayment(relayPrivKey, subscriber.Npub, store, matchedTier.DataLimit, newEndDate.Unix())
+	err = UpdateNIP88EventAfterPayment(privateKey, subscriber.Npub, store, matchedTier.DataLimit, newEndDate.Unix())
 	if err != nil {
 		return fmt.Errorf("failed to update NIP-88 event: %v", err)
 	}
@@ -279,14 +270,4 @@ func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event,
 	}
 
 	return nil, nil
-}
-
-func loadRelayPrivateKey() (*btcec.PrivateKey, *btcec.PublicKey, error) {
-
-	privateKey, publicKey, err := signing.DeserializePrivateKey(viper.GetString("priv_key"))
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting keys: %s", err)
-	}
-
-	return privateKey, publicKey, nil
 }

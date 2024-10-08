@@ -633,6 +633,45 @@ func (store *GravitonMemoryStore) SaveAddress(addr *types.Address) error {
 	return nil
 }
 
+func (store *GravitonMemoryStore) AllocateAddress() (*types.Address, error) {
+	ss, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	addressTree, err := ss.GetTree("relay_addresses")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get address tree: %v", err)
+	}
+
+	cursor := addressTree.Cursor()
+	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
+		var addr types.Address
+		if err := json.Unmarshal(v, &addr); err != nil {
+			return nil, err
+		}
+		if addr.Status == AddressStatusAvailable {
+			now := time.Now()
+			addr.Status = AddressStatusAllocated
+			addr.AllocatedAt = &now
+
+			value, err := json.Marshal(addr)
+			if err != nil {
+				return nil, err
+			}
+			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
+				return nil, err
+			}
+			if _, err := graviton.Commit(addressTree); err != nil {
+				return nil, err
+			}
+			return &addr, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no available addresses")
+}
+
 func GetBucket(leaf *merkle_dag.DagLeaf) string {
 	hkind, ok := leaf.AdditionalData["hkind"]
 	if ok {
