@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -44,10 +45,12 @@ func BuildServer(store stores.Store) *fiber.App {
 
 		// Send the AUTH challenge immediately upon connection
 		authChallenge := []interface{}{"AUTH", challenge}
-		if err := sendWebSocketMessage(c, authChallenge); err != nil {
-			log.Printf("Error sending AUTH challenge: %v", err)
-			return
+		jsonAuth, err := json.Marshal(authChallenge)
+		if err != nil {
+			log.Printf("Error marshalling auth interface: %v", err)
 		}
+
+		handleIncomingMessage(c, jsonAuth)
 
 		for {
 			if err := processWebSocketMessage(c, challenge, state, store); err != nil {

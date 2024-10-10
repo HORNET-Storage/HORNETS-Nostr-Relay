@@ -11,6 +11,11 @@ import (
 
 func sendWebSocketMessage(ws *websocket.Conn, msg interface{}) error {
 	// msg is any of nostr.ClosedEnvelope, nostr.EOSEEnvelope, nostr.OKEnvelope, nostr.EventEnvelope, nostr.NoticeEnvelope
+	marshalledMsg, err := jsoniter.MarshalToString(msg)
+	if err != nil {
+		log.Println()
+	}
+	log.Println("Websocket message: ", marshalledMsg)
 	if err := ws.WriteJSON(msg); err != nil {
 		log.Printf("Error sending message over WebSocket: %v", err)
 		return err
@@ -151,9 +156,13 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			log.Println("Expected challenge string for 'AUTH' message type is not a string.")
 			return
 		}
+		log.Println("Dealing with auth message message")
 		// Send the AUTH message with the signed event
-		authMessage := []interface{}{"AUTH", challengeString}
-		sendWebSocketMessage(ws, authMessage)
+		authEnvelope := nostr.AuthEnvelope{
+			Challenge: &challengeString,
+		}
+
+		sendWebSocketMessage(ws, authEnvelope)
 
 	default:
 		log.Printf("Unhandled message type: %s", messageType)
