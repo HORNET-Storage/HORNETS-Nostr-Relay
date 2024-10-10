@@ -165,7 +165,14 @@ func IsFilePermitted(filename string) bool {
 			return true
 		}
 
-		return false // File type is not permitted in "smart" mode if it doesn't match any active type
+		// Miscellaneous case: If the file type is not in the known lists but also not blocked, allow it
+		if !contains(settings.Photos, fileExtension) &&
+			!contains(settings.Videos, fileExtension) &&
+			!contains(settings.Audio, fileExtension) {
+			return true // Permit miscellaneous files in smart mode if they are not explicitly blocked
+		}
+
+		return false // File type is not permitted in "smart" mode if it doesn't match any active or miscellaneous type
 	} else if settings.Mode == "unlimited" {
 		// Unlimited mode: Allow everything except explicitly blocked types
 
