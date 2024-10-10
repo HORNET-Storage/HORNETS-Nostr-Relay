@@ -186,6 +186,11 @@ type RelaySettings struct {
 	IsVideosActive   bool     `json:"isVideosActive"`
 	IsGitNestrActive bool     `json:"isGitNestrActive"`
 	IsAudioActive    bool     `json:"isAudioActive"`
+
+	// New fields for the file type lists
+	PhotoTypes []string `json:"photoTypes"`
+	VideoTypes []string `json:"videoTypes"`
+	AudioTypes []string `json:"audioTypes"`
 }
 
 type TimeSeriesData struct {

@@ -102,8 +102,21 @@ func init() {
 		"Audio":            []string{},
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
-	})
 
+		// New default file type lists for Photos, Videos, and Audio
+		"PhotoFileTypes": []string{
+			"jpeg", "jpg", "png", "gif", "bmp", "tiff", "raw", "svg",
+			"eps", "psd", "ai", "pdf", "webp",
+		},
+		"VideoFileTypes": []string{
+			"avi", "mp4", "mov", "wmv", "mkv", "flv", "mpeg",
+			"3gp", "webm", "ogg",
+		},
+		"AudioFileTypes": []string{
+			"mp3", "wav", "ogg", "flac", "aac", "wma", "m4a",
+			"opus", "m4b", "midi", "mp4", "webm", "3gp",
+		},
+	})
 	// Generate a random wallet API key
 	apiKey, err := generateRandomAPIKey()
 	if err != nil {
