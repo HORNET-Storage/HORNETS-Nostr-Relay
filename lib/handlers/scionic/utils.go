@@ -3,11 +3,15 @@ package scionic
 import (
 	"fmt"
 	"io"
+	"log"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/spf13/viper"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
@@ -133,4 +137,73 @@ func WriteMessageToStream[T any](stream types.Stream, message T) error {
 	}
 
 	return nil
+}
+
+// Function to check file permission based on RelaySettings, loading settings internally
+func IsFilePermitted(filename string) bool {
+	// Load relay settings
+	settings, err := LoadRelaySettings()
+	if err != nil {
+		log.Fatalf("Failed to load relay settings: %v", err)
+		return false
+	}
+
+	// Extract the file extension and make it lowercase for case-insensitive comparison
+	fileExtension := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+
+	// Check mode setting
+	if settings.Mode == "smart" {
+		// Smart mode: Check if the file extension is explicitly allowed
+
+		if settings.IsPhotosActive && contains(settings.PhotoTypes, fileExtension) {
+			return true
+		}
+		if settings.IsVideosActive && contains(settings.VideoTypes, fileExtension) {
+			return true
+		}
+		if settings.IsAudioActive && contains(settings.AudioTypes, fileExtension) {
+			return true
+		}
+
+		return false // File type is not permitted in "smart" mode if it doesn't match any active type
+	} else if settings.Mode == "unlimited" {
+		// Unlimited mode: Allow everything except explicitly blocked types
+
+		if contains(settings.Photos, fileExtension) || contains(settings.Videos, fileExtension) || contains(settings.Audio, fileExtension) {
+			return false // File type is explicitly blocked in "unlimited" mode
+		}
+
+		return true // File type is permitted in "unlimited" mode
+	}
+
+	return false // Default to false if the mode is not recognized
+}
+
+// Helper function to check if a slice contains a given string
+func contains(list []string, item string) bool {
+	for _, element := range list {
+		if element == item {
+			return true
+		}
+	}
+	return false
+}
+
+func LoadRelaySettings() (*types.RelaySettings, error) {
+	viper.SetConfigName("config") // Name of config file (without extension)
+	viper.SetConfigType("json")   // Type of the config file
+	viper.AddConfigPath(".")      // Path to look for the config file in
+
+	if err := viper.ReadInConfig(); err != nil {
+		log.Fatalf("Error reading config file: %s", err)
+		return nil, err
+	}
+
+	var settings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		log.Fatalf("Error unmarshaling config into struct: %s (nostr/utils)", err)
+		return nil, err
+	}
+
+	return &settings, nil
 }
