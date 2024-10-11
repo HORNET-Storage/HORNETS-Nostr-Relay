@@ -479,7 +479,7 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 			COUNT(CASE WHEN dht_key THEN 1 ELSE NULL END) as dht_key,
 			COUNT(CASE WHEN lightning_addr AND dht_key THEN 1 ELSE NULL END) as lightning_and_dht
 		FROM user_profiles
-		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) < ?
+		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) <= ?
 		GROUP BY month
 		ORDER BY month ASC;
     `, startDate, endDate).Scan(&data).Error
