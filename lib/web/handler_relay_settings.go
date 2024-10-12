@@ -90,9 +90,6 @@ func getRelaySettings(c *fiber.Ctx) error {
 	if relaySettings.Protocol == nil {
 		relaySettings.Protocol = []string{}
 	}
-	if relaySettings.Chunked == nil {
-		relaySettings.Chunked = []string{}
-	}
 
 	log.Println("Fetched relay settings:", relaySettings)
 

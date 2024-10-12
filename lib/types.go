@@ -169,23 +169,20 @@ type BitcoinRate struct {
 }
 
 type RelaySettings struct {
-	Mode             string   `json:"mode"`
-	Protocol         []string `json:"protocol"`
-	Chunked          []string `json:"chunked"`
-	Chunksize        string   `json:"chunksize"`
-	MaxFileSize      int      `json:"maxFileSize"`
-	MaxFileSizeUnit  string   `json:"maxFileSizeUnit"`
-	Kinds            []string `json:"kinds"`
-	DynamicKinds     []string `json:"dynamicKinds"`
-	Photos           []string `json:"photos"`
-	Videos           []string `json:"videos"`
-	GitNestr         []string `json:"gitNestr"`
-	Audio            []string `json:"audio"`
-	IsKindsActive    bool     `json:"isKindsActive"`
-	IsPhotosActive   bool     `json:"isPhotosActive"`
-	IsVideosActive   bool     `json:"isVideosActive"`
-	IsGitNestrActive bool     `json:"isGitNestrActive"`
-	IsAudioActive    bool     `json:"isAudioActive"`
+	Mode                string   `json:"mode"`
+	Protocol            []string `json:"protocol"`
+	Kinds               []string `json:"kinds"`
+	DynamicKinds        []string `json:"dynamicKinds"`
+	Photos              []string `json:"photos"`
+	Videos              []string `json:"videos"`
+	GitNestr            []string `json:"gitNestr"`
+	Audio               []string `json:"audio"`
+	IsKindsActive       bool     `json:"isKindsActive"`
+	IsPhotosActive      bool     `json:"isPhotosActive"`
+	IsVideosActive      bool     `json:"isVideosActive"`
+	IsGitNestrActive    bool     `json:"isGitNestrActive"`
+	IsAudioActive       bool     `json:"isAudioActive"`
+	IsFileStorageActive bool     `json:"isFileStorageActive"`
 
 	// New fields for the file type lists
 	PhotoTypes []string `json:"photoTypes"`

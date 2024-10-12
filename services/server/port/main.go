@@ -88,20 +88,20 @@ func init() {
 
 	// Set default relay settings (including Mode)
 	viper.SetDefault("relay_settings", map[string]interface{}{
-		"Mode":             "smart", // Default mode to "smart"
-		"IsKindsActive":    false,   // Default to false for activity flags
-		"IsPhotosActive":   false,
-		"IsVideosActive":   false,
-		"IsGitNestrActive": false,
-		"IsAudioActive":    false,
-		"Kinds":            []string{}, // Default empty arrays for list fields
-		"DynamicKinds":     []string{},
-		"Photos":           []string{},
-		"Videos":           []string{},
-		"GitNestr":         []string{},
-		"Audio":            []string{},
-		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
-		"Chunked":          []string{},
+		"Mode":                "smart", // Default mode to "smart"
+		"IsKindsActive":       false,   // Default to false for activity flags
+		"IsPhotosActive":      false,
+		"IsVideosActive":      false,
+		"IsGitNestrActive":    false,
+		"IsAudioActive":       false,
+		"isFileStorageActive": false,
+		"Kinds":               []string{}, // Default empty arrays for list fields
+		"DynamicKinds":        []string{},
+		"Photos":              []string{},
+		"Videos":              []string{},
+		"GitNestr":            []string{},
+		"Audio":               []string{},
+		"Protocol":            []string{}, // Default empty Protocol and Chunked lists
 
 		// New default file type lists for Photos, Videos, and Audio
 		"PhotoFileTypes": []string{
