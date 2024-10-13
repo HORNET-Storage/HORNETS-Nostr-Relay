@@ -2,9 +2,12 @@ package test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
@@ -12,8 +15,10 @@ import (
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/anacrolix/dht/v2/exts/getput"
 	"github.com/anacrolix/dht/v2/krpc"
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/stretchr/testify/require"
+	"log"
 	"math/rand"
 	"net"
 	"testing"
@@ -66,7 +71,7 @@ func TestPutGetDHT(t *testing.T) {
 
 	salt := []byte(fmt.Sprintf("nostr:relay:%d", randomInt))
 
-	target, err := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	target, err := doPut(server, relayBytes, salt, &pubKey, &privKey)
 	require.NoError(t, err)
 
 	// Wait a bit for the value to propagate
@@ -78,7 +83,8 @@ func TestPutGetDHT(t *testing.T) {
 	t.Logf("Got result: %+v", decodedValue)
 
 	var prettyJSON bytes.Buffer
-	json.Indent(&prettyJSON, decodedValue, "", "  ")
+	err = json.Indent(&prettyJSON, decodedValue, "", "  ")
+	require.NoError(t, err)
 	t.Logf("Received JSON:\n%s", prettyJSON.String())
 
 	// 8. Verify the result
@@ -218,7 +224,7 @@ func TestPutGetLocal(t *testing.T) {
 	pubKey, privKey, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 
-	target, err := sync.DoPut(putServer, value, []byte{}, &pubKey, &privKey)
+	target, err := doPut(putServer, value, []byte{}, &pubKey, &privKey)
 	require.NoError(t, err)
 
 	// Wait for value to propagate
@@ -293,7 +299,7 @@ func TestPutAndSearchDHT(t *testing.T) {
 	pubKey := ed25519.PublicKey(sync.HardcodedKey.PubKey)
 	privKey := ed25519.PrivateKey(sync.HardcodedKey.PrivKey)
 
-	target, err := sync.DoPut(server, relayBytes, salt, &pubKey, &privKey)
+	target, err := doPut(server, relayBytes, salt, &pubKey, &privKey)
 	require.NoError(t, err)
 	t.Logf("put target %d: %x salt: %x", randomInt, target, salt)
 
@@ -307,4 +313,61 @@ func TestPutAndSearchDHT(t *testing.T) {
 	require.True(t, len(relays) == 1)
 	require.True(t, sync.Equals(&sampleRelay, &relays[0]))
 
+}
+
+func doPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) (krpc.ID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var target krpc.ID
+	if privKey == nil {
+		target = createTarget(value)
+		log.Printf("Derived immutable target %x from %x", target, value)
+	} else {
+		target = sync.CreateMutableTarget(*pubKey, salt)
+		log.Printf("Derived mutable target %x from pubkey %x and salt %x", target, pubKey, salt)
+	}
+
+	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
+		put := bep44.Put{
+			V:    value,
+			Salt: salt,
+			Seq:  seq,
+		}
+
+		if privKey != nil {
+			var pub [32]byte
+			copy(pub[:], *pubKey)
+			put.K = &pub
+			err := sync.SignPut(&put, *privKey)
+			if err != nil {
+				log.Printf("Unable to sign")
+			}
+		}
+
+		log.Printf("Put created %+v", put)
+
+		return put
+	})
+
+	log.Printf("DHT put stats %+v", stats)
+
+	if err != nil {
+		log.Printf("Put operation failed: %v", err)
+	} else {
+		log.Printf("Put operation successful")
+	}
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		log.Printf("Put operation timed out")
+		return target, errors.New("Put operation timed out")
+	}
+
+	return target, nil
+}
+
+// createTarget derives the target (dht-input) for a given byte array
+// NOTE: this is only used in tests, since it is not the way targets are derived in bep44
+func createTarget(value []byte) krpc.ID {
+	return sha1.Sum(bencode.MustMarshal(value))
 }

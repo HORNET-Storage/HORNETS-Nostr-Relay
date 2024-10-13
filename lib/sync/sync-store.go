@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// GORM models
+// GORM models for sync / dht related structs
 type SyncAuthor struct {
 	gorm.Model
 	PublicKey string `gorm:"uniqueIndex"`

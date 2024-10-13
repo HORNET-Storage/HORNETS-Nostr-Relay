@@ -63,7 +63,7 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		if replyingToMissingID != nil && dhtKey != nil && parentAuthor != nil {
 			relayStore := sync.GetRelayStore()
 			if relayStore != nil {
-				relays, err := relayStore.GetRelayListDHT(dhtKey)
+				relays, err := relayStore.GetRelayListFromDHT(dhtKey)
 				if err != nil {
 					log.Printf("Failed to get relay list: %v", err)
 					write("NOTICE", "Failed to get relay list.")

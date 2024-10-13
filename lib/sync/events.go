@@ -342,6 +342,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					log.Printf("Could not store event %+v skipping", event)
 					continue
 				}
+				// TODO: this needs to be more thoroughly tested
 				if event.Kind == 117 {
 					// do leaf sync
 					root, found := GetScionicRoot(event)
