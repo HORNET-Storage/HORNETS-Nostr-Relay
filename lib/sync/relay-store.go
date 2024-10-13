@@ -12,8 +12,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +30,8 @@ import (
 	"gorm.io/gorm"
 )
 
+// RelayStore struct encapsulates the connection to the dht and the db where we store relay info
+// It also handles syncing with other relays
 type RelayStore struct {
 	db           *gorm.DB
 	syncTicker   *time.Ticker
@@ -41,31 +41,6 @@ type RelayStore struct {
 	dhtServer    *dht.Server
 	uploadTicker *time.Ticker
 	stopChan     chan struct{}
-}
-
-type KeyPair struct {
-	PrivKey []byte
-	PubKey  []byte
-}
-
-// used for testing and keyless relay search (experimental)
-var HardcodedKey = KeyPair{
-	PrivKey: []byte{
-		0x51, 0x8d, 0x31, 0x74, 0x5e, 0x17, 0x14, 0x28,
-		0xf4, 0xbc, 0x5e, 0x2c, 0x88, 0xae, 0x2f, 0x36,
-		0x37, 0x7a, 0xc2, 0xf4, 0xd3, 0xe1, 0x38, 0x68,
-		0xac, 0xc6, 0x9f, 0x3f, 0x88, 0x99, 0x2b, 0xdb,
-		0x6b, 0x9f, 0x74, 0x78, 0x36, 0x89, 0x4f, 0xc2,
-		0xc6, 0xcd, 0xbe, 0x8d, 0xce, 0x52, 0xc1, 0xaf,
-		0xc1, 0xc9, 0x48, 0xb5, 0x72, 0xf0, 0xc6, 0x62,
-		0x3a, 0x07, 0xcf, 0x77, 0xb5, 0xb8, 0xf8, 0x7f,
-	},
-	PubKey: []byte{
-		0x6b, 0x9f, 0x74, 0x78, 0x36, 0x89, 0x4f, 0xc2,
-		0xc6, 0xcd, 0xbe, 0x8d, 0xce, 0x52, 0xc1, 0xaf,
-		0xc1, 0xc9, 0x48, 0xb5, 0x72, 0xf0, 0xc6, 0x62,
-		0x3a, 0x07, 0xcf, 0x77, 0xb5, 0xb8, 0xf8, 0x7f,
-	},
 }
 
 var (
@@ -107,6 +82,7 @@ func GetRelayStore() *RelayStore {
 	return store
 }
 
+// AddRelay adds a given relay to the relay db
 func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
 	log.Printf("Adding relay to relay store: %+v", relay)
 	err := PutSyncRelay(rs.db, relay.Pubkey, relay)
@@ -115,6 +91,7 @@ func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
 	}
 }
 
+// AddAuthor adds a pubkey to the relay db
 func (rs *RelayStore) AddAuthor(authorPubkey string) {
 	log.Printf("Adding author to relay store: %s", authorPubkey)
 	err := PutSyncAuthor(rs.db, authorPubkey)
@@ -123,6 +100,7 @@ func (rs *RelayStore) AddAuthor(authorPubkey string) {
 	}
 }
 
+// AddUploadable saves an DHTUploadable to the relay db
 func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) error {
 	log.Printf("Adding uploadable to sync store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
 
@@ -147,6 +125,7 @@ func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature str
 	return nil
 }
 
+// periodicSync handles periodically syncing events with known relays
 func (rs *RelayStore) periodicSync() {
 	for {
 		select {
@@ -186,6 +165,7 @@ func (rs *RelayStore) periodicSync() {
 	}
 }
 
+// periodicUpload periodically uploads the uploadables to the DHT
 func (rs *RelayStore) periodicUpload() {
 	for {
 		select {
@@ -197,7 +177,7 @@ func (rs *RelayStore) periodicUpload() {
 			}
 			log.Printf("Uploading %d user relay lists to dht", len(uploadables))
 			for _, uploadable := range uploadables {
-				target, err := rs.doPutDelegated(uploadable)
+				target, err := rs.DoPut(uploadable)
 				if err != nil {
 					log.Printf("Error uploading %v: %v", uploadable.Payload, err)
 				} else {
@@ -211,13 +191,15 @@ func (rs *RelayStore) periodicUpload() {
 	}
 }
 
-func (rs *RelayStore) GetRelayListDHT(dhtKey *string) ([]*ws.NIP11RelayInfo, error) {
+// GetRelayListFromDHT takes a dhtKey and asks the DHT for any data at the corresponding target
+// It expects this data to be in the form of relay URLs, which we can later sync to
+func (rs *RelayStore) GetRelayListFromDHT(dhtKey *string) ([]*ws.NIP11RelayInfo, error) {
 	keyBytes, err := hex.DecodeString(*dhtKey)
 	if err != nil {
 		return nil, err
 	}
 	emptySalt := []byte{}
-	target := createMutableTarget(keyBytes, emptySalt)
+	target := CreateMutableTarget(keyBytes, emptySalt)
 	data, err := DoGet(rs.dhtServer, target, emptySalt)
 	if err != nil {
 		return nil, err
@@ -231,6 +213,8 @@ func (rs *RelayStore) GetRelayListDHT(dhtKey *string) ([]*ws.NIP11RelayInfo, err
 	return relays, nil
 }
 
+// SyncWithRelay will attempt to do a negentropy event sync with a relay specified by NIP11RelayInfo
+// if the specified relay is not a hornet relay, then we do not try to sync
 func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filter) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
@@ -273,82 +257,7 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 	}
 }
 
-func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]ws.NIP11RelayInfo, []int) {
-	log.Printf("Searching for relays from %d to %d", minIndex, maxIndex)
-	type result struct {
-		index int
-		relay ws.NIP11RelayInfo
-		found bool
-	}
-
-	var relays []ws.NIP11RelayInfo
-	var unoccupiedSlots []int
-	ch := make(chan result, maxIndex-minIndex)
-
-	// Create a context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start multiple goroutines to search in parallel
-	for i := minIndex; i < maxIndex; i++ {
-		go func(i int) {
-			// Create salt
-			salt := []byte(fmt.Sprintf("nostr:relay:%d", i))
-			target := createMutableTarget(HardcodedKey.PubKey, salt)
-			fmt.Printf("get target %d: %x salt: %x\n", i, target, salt)
-
-			// Perform DHT get operation
-			data, err := DoGet(d, target, salt)
-			if err != nil {
-				ch <- result{index: i, found: false}
-				return
-			}
-
-			foundRelay := ws.NIP11RelayInfo{}
-			err = json.Unmarshal(data, &foundRelay)
-			if err != nil {
-				fmt.Printf("Could not unmarshall into NostrRelay %x : %v\n", data, err)
-				ch <- result{index: i, found: false}
-				return
-			}
-
-			err = CheckSig(&foundRelay)
-			if err != nil {
-				fmt.Printf("Signature verification failed %+v : %v\n", foundRelay, err)
-				ch <- result{index: i, found: false}
-				return
-			}
-
-			ch <- result{index: i, relay: foundRelay, found: true}
-		}(i)
-	}
-
-	// Collect results
-	foundCount := 0
-	for i := 0; i < maxIndex-minIndex; i++ {
-		//fmt.Printf("waiting for %d\n", i)
-		select {
-		case res := <-ch:
-			if res.found { // Check if a relay was found
-				//fmt.Printf("found %d\n", i)
-				relays = append(relays, res.relay)
-				foundCount++
-			} else {
-				//fmt.Printf("not found %d\n", i)
-				unoccupiedSlots = append(unoccupiedSlots, res.index)
-			}
-			if foundCount >= maxRelays && len(unoccupiedSlots) > 0 {
-				return relays, unoccupiedSlots
-			}
-		case <-ctx.Done():
-			return relays[:foundCount], unoccupiedSlots
-		}
-	}
-
-	// Trim any unfilled slots
-	return relays[:foundCount], unoccupiedSlots
-}
-
+// SignPut takes a bep44 put object and formats it and signs it, putting the signature in put.Sig
 func SignPut(put *bep44.Put, privKey ed25519.PrivateKey) error {
 	if len(privKey) != ed25519.PrivateKeySize {
 		return fmt.Errorf("invalid private key size: expected %d, got %d", ed25519.PrivateKeySize, len(privKey))
@@ -396,62 +305,18 @@ func createSignatureInput(put *bep44.Put) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func createTarget(value []byte) krpc.ID {
-	return sha1.Sum(bencode.MustMarshal(value))
-}
-
-func createMutableTarget(pubKey []byte, salt []byte) krpc.ID {
+// CreateMutableTarget derives the target (dht-input) for a given pubKey and salt
+func CreateMutableTarget(pubKey []byte, salt []byte) krpc.ID {
 	return sha1.Sum(append(pubKey[:], salt...))
 }
 
-func MarshalRelay(nr ws.NIP11RelayInfo) ([]byte, error) {
-	m := make(map[string]interface{})
-
-	v := reflect.ValueOf(nr)
-	t := v.Type()
-	for i := 0; i < v.NumField(); i++ {
-		field := t.Field(i)
-		value := v.Field(i).Interface()
-		jsonTag := field.Tag.Get("json")
-		if jsonTag != "" && jsonTag != "-" {
-			// Split the json tag to get just the field name
-			parts := strings.Split(jsonTag, ",")
-			key := parts[0]
-
-			// Only add non-empty values if "omitempty" is specified
-			if len(parts) > 1 && parts[1] == "omitempty" {
-				if !reflect.ValueOf(value).IsZero() {
-					m[key] = value
-				}
-			} else {
-				m[key] = value
-			}
-		}
-	}
-
-	// Get sorted keys
-	var keys []string
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	// Create a new map with sorted keys
-	sorted := make(map[string]interface{})
-	for _, k := range keys {
-		sorted[k] = m[k]
-	}
-
-	// Marshal the sorted map
-	return json.Marshal(sorted)
-}
-
-func (rs *RelayStore) doPutDelegated(uploadable DHTUploadable) (krpc.ID, error) {
+// DoPut takes a DHTUploadable and puts it on the DHT
+func (rs *RelayStore) DoPut(uploadable DHTUploadable) (krpc.ID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var target krpc.ID
 	emptySalt := []byte{}
-	target = createMutableTarget(uploadable.Pubkey, emptySalt)
+	target = CreateMutableTarget(uploadable.Pubkey, emptySalt)
 	log.Printf("Derived mutable target %x from pubkey %x", target, uploadable.Pubkey)
 
 	sigBytes := [64]byte{}
@@ -486,57 +351,7 @@ func (rs *RelayStore) doPutDelegated(uploadable DHTUploadable) (krpc.ID, error) 
 	return target, nil
 }
 
-func DoPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.PublicKey, privKey *ed25519.PrivateKey) (krpc.ID, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	var target krpc.ID
-	if privKey == nil {
-		target = createTarget(value)
-		log.Printf("Derived immutable target %x from %x", target, value)
-	} else {
-		target = createMutableTarget(*pubKey, salt)
-		log.Printf("Derived mutable target %x from pubkey %x and salt %x", target, pubKey, salt)
-	}
-
-	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
-		put := bep44.Put{
-			V:    value,
-			Salt: salt,
-			Seq:  seq,
-		}
-
-		if privKey != nil {
-			var pub [32]byte
-			copy(pub[:], *pubKey)
-			put.K = &pub
-			err := SignPut(&put, *privKey)
-			if err != nil {
-				log.Printf("Unable to sign")
-			}
-		}
-
-		log.Printf("Put created %+v", put)
-
-		return put
-	})
-
-	log.Printf("DHT put stats %+v", stats)
-
-	if err != nil {
-		log.Printf("Put operation failed: %v", err)
-	} else {
-		log.Printf("Put operation successful")
-	}
-
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		log.Printf("Put operation timed out")
-		return target, errors.New("Put operation timed out")
-	}
-
-	return target, nil
-}
-
+// DoGet retrieves a given target from the dht
 func DoGet(server *dht.Server, target bep44.Target, salt []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -581,6 +396,7 @@ func ParseURLs(input []byte) []string {
 	return urls
 }
 
+// PerformNIP11Request attempts to get NIP11 info from a given url
 func PerformNIP11Request(url string) *ws.NIP11RelayInfo {
 	httpURL := strings.Replace(url, "wss://", "https://", 1)
 
