@@ -17,8 +17,6 @@ func updateRelaySettings(c *fiber.Ctx) error {
 		return c.Status(400).SendString(err.Error())
 	}
 
-	log.Println("Received data:", data)
-
 	relaySettingsData, ok := data["relay_settings"]
 	if !ok {
 		log.Println("Relay settings data not provided")
@@ -31,8 +29,6 @@ func updateRelaySettings(c *fiber.Ctx) error {
 		log.Println("Error marshaling relay settings:", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
-
-	log.Println("Received relay settings JSON:", string(relaySettingsJSON))
 
 	if err := json.Unmarshal(relaySettingsJSON, &relaySettings); err != nil {
 		log.Println("Error unmarshaling relay settings:", err)
