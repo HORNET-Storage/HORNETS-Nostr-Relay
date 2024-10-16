@@ -39,39 +39,59 @@ func updateRelaySettings(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
-	// Check boolean flags and set corresponding arrays to empty if false
-	if !relaySettings.IsKindsActive {
-		relaySettings.Kinds = []string{}
-		relaySettings.DynamicKinds = []string{}
-	}
-	if !relaySettings.IsPhotosActive {
-		relaySettings.Photos = []string{}
-	}
-	if !relaySettings.IsVideosActive {
-		relaySettings.Videos = []string{}
-	}
-	if !relaySettings.IsGitNestrActive {
-		relaySettings.GitNestr = []string{}
-	}
-	if !relaySettings.IsAudioActive {
-		relaySettings.Audio = []string{}
-	}
-	if relaySettings.Mode == "smart" {
-		relaySettings.DynamicKinds = []string{}
-	}
+	// Apply logic for boolean flags
+	applyBooleanFlags(&relaySettings)
 
-	// Store in Viper
-	viper.Set("relay_settings", relaySettings)
-
-	// Save the changes to the configuration file
-	if err := viper.WriteConfig(); err != nil {
-		log.Printf("Error writing config: %s", err)
+	// Update Viper configuration
+	if err := updateViperConfig(relaySettings); err != nil {
+		log.Printf("Error updating config: %s", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to update settings")
 	}
 
 	log.Println("Stored relay settings:", relaySettings)
 
 	return c.SendStatus(fiber.StatusOK)
+}
+
+func applyBooleanFlags(settings *types.RelaySettings) {
+	if !settings.IsKindsActive {
+		settings.Kinds = []string{}
+		settings.DynamicKinds = []string{}
+	}
+	if !settings.IsPhotosActive {
+		settings.Photos = []string{}
+	}
+	if !settings.IsVideosActive {
+		settings.Videos = []string{}
+	}
+	if !settings.IsGitNestrActive {
+		settings.GitNestr = []string{}
+	}
+	if !settings.IsAudioActive {
+		settings.Audio = []string{}
+	}
+	if settings.Mode == "smart" {
+		settings.DynamicKinds = []string{}
+	}
+}
+
+func updateViperConfig(settings types.RelaySettings) error {
+	viper.Set("relay_settings.Mode", settings.Mode)
+	viper.Set("relay_settings.IsKindsActive", settings.IsKindsActive)
+	viper.Set("relay_settings.IsPhotosActive", settings.IsPhotosActive)
+	viper.Set("relay_settings.IsVideosActive", settings.IsVideosActive)
+	viper.Set("relay_settings.IsGitNestrActive", settings.IsGitNestrActive)
+	viper.Set("relay_settings.IsAudioActive", settings.IsAudioActive)
+	viper.Set("relay_settings.IsFileStorageActive", settings.IsFileStorageActive)
+	viper.Set("relay_settings.Kinds", settings.Kinds)
+	viper.Set("relay_settings.DynamicKinds", settings.DynamicKinds)
+	viper.Set("relay_settings.Photos", settings.Photos)
+	viper.Set("relay_settings.Videos", settings.Videos)
+	viper.Set("relay_settings.GitNestr", settings.GitNestr)
+	viper.Set("relay_settings.Audio", settings.Audio)
+	viper.Set("relay_settings.Protocol", settings.Protocol)
+
+	return viper.WriteConfig()
 }
 
 func getRelaySettings(c *fiber.Ctx) error {
