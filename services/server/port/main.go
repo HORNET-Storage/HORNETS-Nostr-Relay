@@ -102,6 +102,8 @@ func init() {
 		"GitNestr":            []string{},
 		"Audio":               []string{},
 		"Protocol":            []string{}, // Default empty Protocol and Chunked lists
+		"AppBuckets":          []string{},
+		"DynamicAppBuckets":   []string{},
 
 		// New default file type lists for Photos, Videos, and Audio
 		"PhotoFileTypes": []string{

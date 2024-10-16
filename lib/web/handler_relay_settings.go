@@ -66,6 +66,17 @@ func applyBooleanFlags(settings *types.RelaySettings) {
 	if !settings.IsAudioActive {
 		settings.Audio = []string{}
 	}
+
+	if settings.AppBuckets == nil {
+		settings.AppBuckets = []string{}
+	}
+
+	log.Println("Dynamic app buckets: ", settings.DynamicAppBuckets)
+
+	if settings.DynamicAppBuckets == nil {
+		settings.DynamicAppBuckets = []string{}
+	}
+
 	if settings.Mode == "smart" {
 		settings.DynamicKinds = []string{}
 	}
@@ -86,6 +97,8 @@ func updateViperConfig(settings types.RelaySettings) error {
 	viper.Set("relay_settings.GitNestr", settings.GitNestr)
 	viper.Set("relay_settings.Audio", settings.Audio)
 	viper.Set("relay_settings.Protocol", settings.Protocol)
+	viper.Set("relay_settings.AppBuckets", settings.AppBuckets)
+	viper.Set("relay_settings.DynamicAppBuckets", settings.DynamicAppBuckets)
 
 	return viper.WriteConfig()
 }
@@ -102,9 +115,16 @@ func getRelaySettings(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
 	}
 
-	// Ensure Protocol and Chunked are arrays
 	if relaySettings.Protocol == nil {
 		relaySettings.Protocol = []string{}
+	}
+
+	if relaySettings.AppBuckets == nil {
+		relaySettings.AppBuckets = []string{}
+	}
+
+	if relaySettings.DynamicAppBuckets == nil {
+		relaySettings.DynamicAppBuckets = []string{}
 	}
 
 	log.Println("Fetched relay settings:", relaySettings)

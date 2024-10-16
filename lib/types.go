@@ -183,6 +183,8 @@ type RelaySettings struct {
 	IsGitNestrActive    bool     `json:"isGitNestrActive"`
 	IsAudioActive       bool     `json:"isAudioActive"`
 	IsFileStorageActive bool     `json:"isFileStorageActive"`
+	AppBuckets          []string `json:"appBuckets"`
+	DynamicAppBuckets   []string `json:"dynamicAppBuckets"`
 
 	// New fields for the file type lists
 	PhotoTypes []string `json:"photoTypes"`
