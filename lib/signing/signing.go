@@ -170,29 +170,27 @@ func ConvertPubKeyToLibp2pPubKey(publicKey *secp256k1.PublicKey) (*crypto.PubKey
 		return nil, err
 	}
 
-	decodedKey, err := DecodeKey(*serializedKey)
+	publicKeyBytes, err := DecodeKey(*serializedKey)
 	if err != nil {
 		return nil, err
 	}
 
-	secKey, err := schnorr.ParsePubKey(decodedKey)
+	// Create compressed format by prepending 0x03
+	compressedPubKey := make([]byte, 33)
+	compressedPubKey[0] = 0x03 // Using odd y-coordinate
+	copy(compressedPubKey[1:], publicKeyBytes)
+
+	btcecPubKey, err := btcec.ParsePubKey(compressedPubKey)
 	if err != nil {
 		return nil, err
 	}
 
-	serializedPubKey := secKey.SerializeCompressed()
+	pubKeyBytes := btcecPubKey.SerializeCompressed()
 
-	btcecPubKey, err := btcec.ParsePubKey(serializedPubKey)
+	libp2pPubKey, err := crypto.UnmarshalSecp256k1PublicKey(pubKeyBytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal to libp2p key: %w", err)
 	}
 
-	btcecPubKeyBytes := btcecPubKey.SerializeCompressed()
-
-	libp2pPublicKey, err := crypto.UnmarshalSecp256k1PublicKey(btcecPubKeyBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	return &libp2pPublicKey, nil
+	return &libp2pPubKey, nil
 }
