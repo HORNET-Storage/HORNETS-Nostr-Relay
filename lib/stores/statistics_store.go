@@ -73,4 +73,7 @@ type StatisticsStore interface {
 	FetchGitNestrCount(gitNestr []string) (int, error)
 	FetchAudioCount() (int, error)
 	FetchMiscCount() (int, error)
+
+	SaveSubcriberAddress(address *types.SubscriberAddress) error
+	AllocateBitcoinAddress(npub string) (*types.Address, error)
 }

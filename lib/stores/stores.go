@@ -31,6 +31,7 @@ type Store interface {
 	StoreBlob(data []byte, hash []byte, publicKey string) error
 	GetBlob(hash string) ([]byte, error)
 	DeleteBlob(hash string) error
+	GetMasterBucketList(key string) ([]string, error)
 
 	// Panel
 	GetSubscriber(npub string) (*types.Subscriber, error)

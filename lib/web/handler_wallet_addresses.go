@@ -1,7 +1,10 @@
 package web
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -18,14 +21,19 @@ const (
 
 func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Addresses request received")
-	var addresses []types.Address
 
-	// Parse the JSON request body
-	if err := c.BodyParser(&addresses); err != nil {
+	body := c.Body()
+	log.Println("Raw JSON Body:", string(body))
+
+	var addresses []types.Address
+	if err := json.Unmarshal(body, &addresses); err != nil {
+		log.Printf("Error unmarshaling JSON directly: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
 	}
+
+	log.Println("Addresses: ", addresses)
 
 	// Get the expected wallet name from the configuration
 	expectedWalletName := viper.GetString("wallet_name")
@@ -66,15 +74,17 @@ func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 		}
 
 		// Add the address to the Graviton store
-		gravitonAddress := &types.Address{
-			Index:       addr.Index,
+		// Add the address to the Graviton store with default values
+		subscriptionAddress := &types.SubscriberAddress{
+			Index:       fmt.Sprint(addr.Index),
 			Address:     addr.Address,
 			WalletName:  addr.WalletName,
-			Status:      AddressStatusAvailable,
-			AllocatedAt: nil,
+			Status:      AddressStatusAvailable, // Default status
+			AllocatedAt: &time.Time{},           // Use zero time if not allocated
+			Npub:        "",                     // Default to empty string
 		}
 
-		if err := store.SaveAddress(gravitonAddress); err != nil {
+		if err := store.GetStatsStore().SaveSubcriberAddress(subscriptionAddress); err != nil {
 			log.Printf("Error saving address to Graviton store: %v", err)
 		}
 	}

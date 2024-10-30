@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 
@@ -22,14 +23,14 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/blossom"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	// "github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
 type connectionState struct {
 	authenticated bool
 }
 
-func BuildServer(store stores.Store) *fiber.App {
+func BuildServer(store *graviton.GravitonStore) *fiber.App {
 	app := fiber.New()
 
 	// Middleware for handling relay information requests
@@ -214,7 +215,7 @@ func PackRelayForSig(nr *NIP11RelayInfo) []byte {
 	return packed
 }
 
-func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store stores.Store) error {
+func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store *graviton.GravitonStore) error {
 	_, message, err := c.ReadMessage()
 	if err != nil {
 		return fmt.Errorf("read error: %w", err)

@@ -153,7 +153,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 // Allocate the address to a specific npub (subscriber)
 func generateUniqueBitcoinAddress(store stores.Store, npub string) (*types.Address, error) {
 	// Use the store method to allocate the address
-	address, err := store.AllocateBitcoinAddress(npub)
+	address, err := store.GetStatsStore().AllocateBitcoinAddress(npub)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate Bitcoin address: %v", err)
@@ -172,9 +172,9 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 	}
 
 	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10000"},
-		{DataLimit: "5 GB per month", Price: "40000"},
-		{DataLimit: "10 GB per month", Price: "70000"},
+		{DataLimit: "1 GB per month", Price: "8000"},
+		{DataLimit: "5 GB per month", Price: "10000"},
+		{DataLimit: "10 GB per month", Price: "15000"},
 	}
 
 	uniqueAddress, err := generateUniqueBitcoinAddress(store, userPubKey)
@@ -230,7 +230,7 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 
 func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event, error) {
 	filter := nostr.Filter{
-		Kinds: []int{88},
+		Kinds: []int{764},
 		Tags: nostr.TagMap{
 			"p": []string{userPubKey},
 		},

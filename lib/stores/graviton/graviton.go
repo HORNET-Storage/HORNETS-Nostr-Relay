@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -35,6 +36,7 @@ const (
 type GravitonStore struct {
 	Database      *graviton.Store
 	StatsDatabase stores.StatisticsStore
+	mu            sync.Mutex
 }
 
 func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
@@ -89,6 +91,7 @@ func (store *GravitonStore) QueryDag(filter map[string]string) ([]string, error)
 
 	for bucket, key := range filter {
 		cacheBucket := fmt.Sprintf("cache:%s", bucket)
+		log.Printf("Processing buckect: %s with key %s", cacheBucket, key)
 		cacheTree, err := snapshot.GetTree(cacheBucket)
 		if err == nil {
 			value, err := cacheTree.Get([]byte(key))
@@ -106,36 +109,52 @@ func (store *GravitonStore) QueryDag(filter map[string]string) ([]string, error)
 }
 
 func (store *GravitonStore) SaveAddress(addr *types.Address) error {
-	// Load the snapshot and get the "relay_addresses" tree
+	// Synchronize to prevent concurrent writes
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	// Load the latest snapshot
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
+		log.Printf("Error loading snapshot: %v", err)
 		return fmt.Errorf("failed to load snapshot: %v", err)
 	}
+	log.Println("Loaded latest snapshot")
 
+	// Use or create the 'relay_addresses' tree as needed
 	addressTree, err := snapshot.GetTree("relay_addresses")
 	if err != nil {
+		log.Printf("Error getting address tree: %v", err)
 		return fmt.Errorf("failed to get address tree: %v", err)
 	}
 
-	// Marshal the address into JSON
+	key := addr.Address
+	log.Printf("Attempting to save address: %s", addr.Address)
+
+	existingData, _ := addressTree.Get([]byte(key))
+	if len(existingData) > 0 {
+		log.Printf("Address %s already exists; skipping save", key)
+		return nil
+	}
+
 	addressData, err := json.Marshal(addr)
 	if err != nil {
+		log.Printf("Error marshaling address: %v", err)
 		return fmt.Errorf("failed to marshal address: %v", err)
 	}
 
-	// Use the index as the key for storing the address
-	key := addr.Index
-
-	// Store the address data in the tree
 	if err := addressTree.Put([]byte(key), addressData); err != nil {
+		log.Printf("Error putting address in Graviton store: %v", err)
 		return fmt.Errorf("failed to put address in Graviton store: %v", err)
 	}
 
-	// Commit the tree to persist the changes
-	if _, err := graviton.Commit(addressTree); err != nil {
+	_, err = graviton.Commit(addressTree)
+	if err != nil {
+		log.Printf("Error committing address tree: %v", err)
 		return fmt.Errorf("failed to commit address tree: %v", err)
 	}
 
+	log.Println("Address saved successfully")
 	return nil
 }
 
@@ -993,6 +1012,8 @@ func ContainsAny(tags nostr.Tags, tagName string, values []string) bool {
 }
 
 func (store *GravitonStore) SaveSubscriber(subscriber *types.Subscriber) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	// Load the snapshot and get the "subscribers" tree
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
@@ -1027,6 +1048,9 @@ func (store *GravitonStore) SaveSubscriber(subscriber *types.Subscriber) error {
 }
 
 func (store *GravitonStore) GetSubscriberByAddress(address string) (*types.Subscriber, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
@@ -1061,6 +1085,9 @@ func (store *GravitonStore) GetSubscriberByAddress(address string) (*types.Subsc
 }
 
 func (store *GravitonStore) GetSubscriber(npub string) (*types.Subscriber, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %v", err)
@@ -1111,6 +1138,8 @@ func (store *GravitonStore) AllocateBitcoinAddress(npub string) (*types.Address,
 			log.Printf("Error unmarshaling address: %v. Skipping this address.", err)
 			continue
 		}
+		log.Println("Address Index: ", addr.Index)
+		log.Println("Address: ", addr.Address)
 		if addr.Status == AddressStatusAvailable {
 			// Allocate the address to the subscriber
 			now := time.Now()

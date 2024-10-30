@@ -55,6 +55,7 @@ func StartServer(store stores.Store) error {
 		return updateWalletTransactions(c, store)
 	})
 	walletRoutes.Post("/addresses", func(c *fiber.Ctx) error {
+		log.Println("Received addresses.")
 		return saveWalletAddresses(c, store) // Pass the store instance
 	})
 
@@ -110,6 +111,15 @@ func StartServer(store stores.Store) error {
 		return getPendingTransactions(c, store)
 	})
 	secured.Post("/refresh-token", refreshToken)
+
+	// In your StartServer function
+	secured.Get("/media", func(c *fiber.Ctx) error {
+		return GetMedia(c, store)
+	})
+
+	secured.Get("/media/content/:hash", func(c *fiber.Ctx) error {
+		return GetMediaContent(c, store)
+	})
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)

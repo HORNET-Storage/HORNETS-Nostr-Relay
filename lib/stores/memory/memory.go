@@ -345,6 +345,37 @@ func (store *GravitonMemoryStore) StoreDag(dag *types.DagData) error {
 	return stores.StoreDag(store, dag)
 }
 
+func (store *GravitonMemoryStore) GetMasterBucketList(key string) ([]string, error) {
+	// Load a snapshot from the in-memory database
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return nil, err
+	}
+
+	// Access the "mbl" tree within the snapshot to retrieve the master bucket list
+	tree, err := snapshot.GetTree("mbl")
+	if err != nil {
+		return nil, err
+	}
+
+	var masterBucketList []string
+
+	// Retrieve the list of buckets corresponding to the given key
+	bytes, err := tree.Get([]byte(fmt.Sprintf("mbl_%s", key)))
+	if bytes == nil || err != nil {
+		// If the key doesn't exist or an error occurred, initialize an empty list
+		masterBucketList = []string{}
+	} else {
+		// Unmarshal the list of buckets from the retrieved bytes
+		err = cbor.Unmarshal(bytes, &masterBucketList)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return masterBucketList, nil
+}
+
 func (store *GravitonMemoryStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
 	log.Println("Processing filter:", filter)
 

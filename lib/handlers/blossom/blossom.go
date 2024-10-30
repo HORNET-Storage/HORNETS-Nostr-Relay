@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
@@ -34,6 +35,15 @@ func (s *Server) getBlob(c *fiber.Ctx) error {
 
 func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	pubkey := c.Query("pubkey")
+
+	subscriber, err := s.storage.GetSubscriber(pubkey)
+	if err != nil {
+		return err
+	}
+
+	if time.Now().After(subscriber.EndDate) {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "The subscription is inactive, unable to upload file."})
+	}
 
 	data := c.Body()
 

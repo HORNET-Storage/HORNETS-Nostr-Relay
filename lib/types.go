@@ -253,12 +253,23 @@ type ReplaceTransactionRequest struct {
 
 // Address structure to be stored in Graviton
 type Address struct {
-	Index       string     `json:"index,string"` // Use string tag to handle string-encoded integers
+	Index       string     `json:"index"` // Use string tag to handle string-encoded integers
 	Address     string     `json:"address"`
 	WalletName  string     `json:"wallet_name"`
 	Status      string     `json:"status"`
 	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
 	Npub        string     `json:"npub,omitempty"`
+}
+
+// subscriptionAddress represents the GORM-compatible model for storing addresses
+type SubscriberAddress struct {
+	ID          uint       `gorm:"primaryKey"`
+	Index       string     `gorm:"not null"`
+	Address     string     `gorm:"not null;unique"`
+	WalletName  string     `gorm:"not null"`
+	Status      string     `gorm:"default:'available'"`
+	AllocatedAt *time.Time `gorm:"default:null"`
+	Npub        string     `gorm:"default:null"`
 }
 
 // type User struct {

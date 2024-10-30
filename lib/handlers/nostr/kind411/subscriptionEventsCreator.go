@@ -211,10 +211,11 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *
 
 	tags := []nostr.Tag{
 		{"subscription-duration", "1 month"},
-		{"npub", userPubKey},
+		{"p", userPubKey},
 		{"relay-bitcoin-address", addr.Address},
 		// Add Lightning invoice if applicable
 		{"relay-dht-key", viper.GetString("RelayDHTkey")},
+		{"subscription_status", "inactive"},
 	}
 
 	for _, tier := range subscriptionTiers {

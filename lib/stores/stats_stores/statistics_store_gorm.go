@@ -21,6 +21,12 @@ type GormStatisticsStore struct {
 	DB *gorm.DB
 }
 
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+	AddressStatusUsed      = "used"
+)
+
 // InitStore initializes the GORM DB (can be swapped for another DB).
 func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}) error {
 	var err error
@@ -46,6 +52,7 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 		&types.Audio{},
 		&types.PendingTransaction{},
 		&types.ActiveToken{},
+		&types.SubscriberAddress{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -762,6 +769,104 @@ func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
 // SaveAddress saves a new wallet address to the database
 func (store *GormStatisticsStore) SaveAddress(address *types.WalletAddress) error {
 	return store.DB.Create(address).Error
+}
+
+func (store *GormStatisticsStore) SaveSubcriberAddress(address *types.SubscriberAddress) error {
+	// Convert types.Address to subscriptionAddress
+	subscriptionAddress := types.SubscriberAddress{
+		Index:       address.Index,
+		Address:     address.Address,
+		WalletName:  address.WalletName,
+		Status:      address.Status,
+		AllocatedAt: address.AllocatedAt,
+		Npub:        address.Npub,
+	}
+
+	// Check if the address already exists
+	var existingAddress types.SubscriberAddress
+	result := store.DB.Where("address = ?", subscriptionAddress.Address).First(&existingAddress)
+
+	// Handle potential errors from the query
+	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+		log.Printf("Error querying existing address: %v", result.Error)
+		return result.Error
+	}
+
+	// If the address already exists, log and skip the insert
+	if result.RowsAffected > 0 {
+		log.Printf("Address %s already exists, skipping save.", subscriptionAddress.Address)
+		return nil
+	}
+
+	// Set defaults if needed
+	if subscriptionAddress.Status == "" {
+		subscriptionAddress.Status = "available"
+	}
+	if subscriptionAddress.AllocatedAt == nil {
+		now := time.Now()
+		subscriptionAddress.AllocatedAt = &now
+	}
+
+	// Attempt to create the new address in the database
+	if err := store.DB.Create(&subscriptionAddress).Error; err != nil {
+		log.Printf("Error saving new address: %v", err)
+		return err
+	}
+
+	log.Printf("Address %s saved successfully.", subscriptionAddress.Address)
+	return nil
+}
+
+func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Address, error) {
+	// Begin a new transaction to handle concurrency safely
+	tx := store.DB.Begin()
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Find the first available address
+	var subscriptionAddress types.SubscriberAddress
+	err := tx.Where("status = ?", AddressStatusAvailable).
+		Order("id").
+		First(&subscriptionAddress).Error
+
+	if err != nil {
+		tx.Rollback()
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("no available addresses")
+		}
+		return nil, fmt.Errorf("failed to query available addresses: %v", err)
+	}
+
+	// Update the address fields to allocate it to the user
+	now := time.Now()
+	subscriptionAddress.Status = AddressStatusAllocated
+	subscriptionAddress.AllocatedAt = &now
+	subscriptionAddress.Npub = npub
+
+	// Save the updated address
+	if err := tx.Save(&subscriptionAddress).Error; err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to save allocated address: %v", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	// Convert subscriptionAddress back to types.Address for returning
+	return &types.Address{
+		Index:       subscriptionAddress.Index,
+		Address:     subscriptionAddress.Address,
+		WalletName:  subscriptionAddress.WalletName,
+		Status:      subscriptionAddress.Status,
+		AllocatedAt: subscriptionAddress.AllocatedAt,
+		Npub:        subscriptionAddress.Npub,
+	}, nil
 }
 
 // GetLatestWalletBalance retrieves the latest wallet balance from the database
