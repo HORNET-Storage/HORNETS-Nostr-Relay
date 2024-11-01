@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/spf13/viper"
 	"io"
 	"log"
 	"net/http"
@@ -101,7 +102,7 @@ func (rs *RelayStore) AddAuthor(authorPubkey string) {
 }
 
 // AddUploadable saves an DHTUploadable to the relay db
-func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) error {
+func (rs *RelayStore) AddUploadable(payload string, pubkey string, salt string, signature string, uploadNow bool) error {
 	log.Printf("Adding uploadable to sync store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
 
 	payloadBytes, err := hex.DecodeString(payload)
@@ -112,12 +113,16 @@ func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature str
 	if err != nil {
 		return err
 	}
+	saltBytes, err := hex.DecodeString(salt)
+	if err != nil {
+		return err
+	}
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil {
 		return err
 	}
 
-	err = PutDHTUploadable(rs.db, payloadBytes, pubkeyBytes, sigBytes)
+	err = PutDHTUploadable(rs.db, payloadBytes, pubkeyBytes, saltBytes, sigBytes)
 	if err != nil {
 		return err
 	}
@@ -184,11 +189,65 @@ func (rs *RelayStore) periodicUpload() {
 					log.Printf("Successfully uploaded %v to dht at target: %x", uploadable.Payload, target)
 				}
 			}
+
+			// we don't want to save this as an uploadable in the db because it can change
+			err = rs.publishAddrUploadable()
+			if err != nil {
+				log.Printf("Error publishing addr uploadable: %v", err)
+				continue
+			}
+
 		case <-rs.stopChan:
 			rs.uploadTicker.Stop()
 			return
 		}
 	}
+}
+
+func (rs *RelayStore) publishAddrUploadable() error {
+	dht_priv_key_str := viper.GetString("relaydhtkey")
+	dht_priv_key_bytes, err := hex.DecodeString(dht_priv_key_str)
+	if err != nil {
+		return err
+	}
+
+	dht_pub_key_str := viper.GetString("relaypubkey")
+	dht_pub_key_bytes, err := hex.DecodeString(dht_pub_key_str)
+	if err != nil {
+		return err
+	}
+	// Pack Addrs
+	addrStrings := []string{}
+	for _, addr := range rs.libp2pHost.Addrs() {
+		addrStrings = append(addrStrings, addr.String())
+	}
+	addrBytes, err := json.Marshal(addrStrings)
+	if err != nil {
+		return err
+	}
+
+	// this is a little awkward because DoPut makes another put, but we want to use SignPut to get the sig...
+	put := bep44.Put{
+		V:    addrBytes,
+		K:    (*[32]byte)(dht_pub_key_bytes),
+		Salt: []byte("MultiAddrs"),
+	}
+	err = SignPut(&put, dht_priv_key_bytes)
+	if err != nil {
+		return err
+	}
+
+	uploadable := DHTUploadable{
+		Payload:   addrBytes,
+		Pubkey:    dht_pub_key_bytes,
+		Signature: put.Sig[:],
+	}
+	target, err := rs.DoPut(uploadable)
+	if err != nil {
+		return err
+	}
+	log.Printf("Successfully uploaded our multiaddrs %v to %v", rs.libp2pHost.Addrs(), target)
+	return nil
 }
 
 // GetRelayListFromDHT takes a dhtKey and asks the DHT for any data at the corresponding target
@@ -315,14 +374,13 @@ func (rs *RelayStore) DoPut(uploadable DHTUploadable) (krpc.ID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var target krpc.ID
-	emptySalt := []byte{}
-	target = CreateMutableTarget(uploadable.Pubkey, emptySalt)
-	log.Printf("Derived mutable target %x from pubkey %x", target, uploadable.Pubkey)
+	target = CreateMutableTarget(uploadable.Pubkey, uploadable.Salt)
+	log.Printf("Derived mutable target %x from pubkey %x and salt %x", target, uploadable.Pubkey, uploadable.Salt)
 
 	sigBytes := [64]byte{}
 	copy(sigBytes[:], uploadable.Signature)
 
-	stats, err := getput.Put(ctx, target, rs.dhtServer, emptySalt, func(seq int64) bep44.Put {
+	stats, err := getput.Put(ctx, target, rs.dhtServer, uploadable.Salt, func(seq int64) bep44.Put {
 		put := bep44.Put{
 			V:   uploadable.Payload,
 			Seq: seq,

@@ -23,6 +23,7 @@ type DHTUploadable struct {
 	gorm.Model
 	Payload   []byte
 	Pubkey    []byte
+	Salt      []byte
 	Signature []byte
 }
 
@@ -93,7 +94,7 @@ func PutSyncRelay(db *gorm.DB, publicKey string, relayInfo interface{}) error {
 }
 
 // PutDHTUploadable adds or updates a DHTUploadable
-func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, signature []byte) error {
+func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, salt []byte, signature []byte) error {
 	var dhtUploadable DHTUploadable
 	result := db.Where("pubkey = ?", pubkey).First(&dhtUploadable)
 
@@ -103,6 +104,7 @@ func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, signature []by
 			dhtUploadable = DHTUploadable{
 				Payload:   payload,
 				Pubkey:    pubkey,
+				Salt:      salt,
 				Signature: signature,
 			}
 			return db.Create(&dhtUploadable).Error
@@ -111,6 +113,7 @@ func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, signature []by
 	}
 	// Update existing record
 	dhtUploadable.Payload = payload
+	dhtUploadable.Salt = salt
 	dhtUploadable.Signature = signature
 	return db.Save(&dhtUploadable).Error
 }
