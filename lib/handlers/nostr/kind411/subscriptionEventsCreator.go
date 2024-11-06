@@ -8,14 +8,10 @@ import (
 	"log"
 	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
-	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"github.com/deroproject/graviton"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 )
@@ -155,88 +151,4 @@ func serializeEventForID(event *nostr.Event) string {
 	compactSerialized := string(serialized)
 
 	return compactSerialized
-}
-
-func allocateAddress(store *stores_graviton.GravitonStore) (*types.Address, error) {
-	ss, err := store.Database.LoadSnapshot(0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load snapshot: %v", err)
-	}
-
-	addressTree, err := ss.GetTree("relay_addresses")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get address tree: %v", err)
-	}
-
-	cursor := addressTree.Cursor()
-	for _, v, err := cursor.First(); err == nil; _, v, err = cursor.Next() {
-		var addr types.Address
-		if err := json.Unmarshal(v, &addr); err != nil {
-			return nil, err
-		}
-		if addr.Status == AddressStatusAvailable {
-			now := time.Now()
-			addr.Status = AddressStatusAllocated
-			addr.AllocatedAt = &now
-
-			value, err := json.Marshal(addr)
-			if err != nil {
-				return nil, err
-			}
-			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
-				return nil, err
-			}
-			if _, err := graviton.Commit(addressTree); err != nil {
-				return nil, err
-			}
-			return &addr, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no available addresses")
-}
-
-func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store *stores_graviton.GravitonStore) (*nostr.Event, error) {
-	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10,000 sats"},
-		{DataLimit: "5 GB per month", Price: "40,000 sats"},
-		{DataLimit: "10 GB per month", Price: "70,000 sats"},
-	}
-
-	// Allocate a new address for this subscription
-	addr, err := allocateAddress(store)
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate address: %v", err)
-	}
-
-	tags := []nostr.Tag{
-		{"subscription-duration", "1 month"},
-		{"p", userPubKey},
-		{"relay-bitcoin-address", addr.Address},
-		// Add Lightning invoice if applicable
-		{"relay-dht-key", viper.GetString("RelayDHTkey")},
-		{"subscription_status", "inactive"},
-	}
-
-	for _, tier := range subscriptionTiers {
-		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
-	}
-
-	event := &nostr.Event{
-		PubKey:    hex.EncodeToString(relayPrivKey.PubKey().SerializeCompressed()),
-		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      764,
-		Tags:      tags,
-		Content:   "",
-	}
-
-	hash := sha256.Sum256(event.Serialize())
-	sig, err := schnorr.Sign(relayPrivKey, hash[:])
-	if err != nil {
-		return nil, fmt.Errorf("error signing event: %v", err)
-	}
-	event.ID = hex.EncodeToString(hash[:])
-	event.Sig = hex.EncodeToString(sig.Serialize())
-
-	return event, nil
 }

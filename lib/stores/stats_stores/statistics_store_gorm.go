@@ -559,7 +559,6 @@ func (store *GormStatisticsStore) ReplaceTransaction(replaceRequest types.Replac
 	var originalPendingTransaction types.PendingTransaction
 	if err := store.DB.Where("tx_id = ?", replaceRequest.OriginalTxID).First(&originalPendingTransaction).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			log.Printf("No pending transaction found with TxID %s", replaceRequest.OriginalTxID)
 			return gorm.ErrRecordNotFound
 		}
 		log.Printf("Error querying original transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
@@ -865,7 +864,7 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 		WalletName:  subscriptionAddress.WalletName,
 		Status:      subscriptionAddress.Status,
 		AllocatedAt: subscriptionAddress.AllocatedAt,
-		Npub:        subscriptionAddress.Npub,
+		Npub:        npub,
 	}, nil
 }
 

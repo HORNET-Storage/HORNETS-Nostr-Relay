@@ -77,6 +77,7 @@ func init() {
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
+	viper.SetDefault("subscriber_db", "subscriber_db.db")
 	viper.SetDefault("query_cache", map[string]string{})
 	viper.SetDefault("service_tag", "hornet-storage-service")
 	viper.SetDefault("RelayName", "HORNETS")

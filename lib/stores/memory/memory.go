@@ -72,6 +72,35 @@ func (store *GravitonMemoryStore) GetStatsStore() stores.StatisticsStore {
 	return nil
 }
 
+// Not implemented for the Memory Store
+func (store *GravitonMemoryStore) GetSubscriberStore() stores.SubscriberStore {
+	return nil
+}
+
+// Not implemented for the Memory Store
+func (store *GravitonMemoryStore) DeleteSubscriber(npub string) error {
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	tree, err := snapshot.GetTree("subscribers")
+	if err == nil {
+		err := tree.Delete([]byte(npub))
+		if err != nil {
+			log.Printf("Error during subscriber deletion: %v", err)
+			return fmt.Errorf("failed to delete subscriber: %v", err)
+		} else {
+			log.Printf("Deleted subscriber %s", npub)
+		}
+	}
+
+	// Following DeleteEvent pattern: directly commit the tree without checking result
+	graviton.Commit(tree)
+
+	return nil
+}
+
 func (store *GravitonMemoryStore) QueryDag(filter map[string]string) ([]string, error) {
 	keys := []string{}
 

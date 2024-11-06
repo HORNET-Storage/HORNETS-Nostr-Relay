@@ -19,11 +19,13 @@ const (
 	AddressStatusUsed      = "used"
 )
 
+// saveWalletAddresses processes incoming Bitcoin addresses and stores them for future
+// subscriber allocation. These addresses will be used when subscribers initialize their
+// subscription and need a payment address.
 func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Addresses request received")
 
 	body := c.Body()
-	log.Println("Raw JSON Body:", string(body))
 
 	var addresses []types.Address
 	if err := json.Unmarshal(body, &addresses); err != nil {
@@ -33,65 +35,99 @@ func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	log.Println("Addresses: ", addresses)
-
-	// Get the expected wallet name from the configuration
 	expectedWalletName := viper.GetString("wallet_name")
 	if expectedWalletName == "" {
-		log.Println("No expected wallet name set in configuration.")
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Wallet name not configured",
+		})
 	}
 
-	// Process each address
+	log.Printf("Expected wallet name: %s", expectedWalletName)
+
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		log.Println("Error: StatsStore is nil or not initialized")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "StatsStore not available",
+		})
+	}
+	log.Println("Successfully accessed StatsStore")
+
+	log.Println("Successfully accessed SubscriberStore")
+
+	processedCount := 0
+
+	// Process each address from the request
 	for _, addr := range addresses {
-		// Check if the wallet name matches the expected one
 		if addr.WalletName != expectedWalletName {
-			log.Printf("Address from unknown wallet: %s, skipping.", addr.WalletName)
+			log.Printf("Skipping address from unknown wallet: %s", addr.WalletName)
 			continue
 		}
 
-		// Check if the address already exists in the SQL database using the store method
-		addressExists, err := store.GetStatsStore().AddressExists(addr.Address)
+		// Check if the address exists in StatsStore and save if it doesn't
+		existsInStatsStore, err := statsStore.AddressExists(addr.Address)
 		if err != nil {
-			log.Printf("Error checking if address exists: %v", err)
+			log.Printf("Error checking address existence in StatsStore: %v", err)
 			continue
 		}
 
-		if addressExists {
-			log.Printf("Duplicate address found, skipping: %s", addr.Address)
+		// Save address to StatsStore if it doesn't exist
+		if !existsInStatsStore {
+			newStatsAddress := types.WalletAddress{
+				Index:   addr.Index,
+				Address: addr.Address,
+			}
+			log.Printf("Attempting to save new address to StatsStore: %v", newStatsAddress)
+			if err := statsStore.SaveAddress(&newStatsAddress); err != nil {
+				log.Printf("Error saving new address to StatsStore: %v", err)
+				continue
+			}
+			log.Printf("Address saved to StatsStore: %v", newStatsAddress)
+		}
+
+		// Check if the address exists in SubscriberStore and save if it doesn't
+		existsInSubscriberStore, err := store.GetSubscriberStore().AddressExists(addr.Address)
+		if err != nil {
+			log.Printf("Error checking address existence in SubscriberStore: %v", err)
 			continue
 		}
 
-		// Create a new address in the SQL database using the store method
-		newAddress := types.WalletAddress{
-			Index:   addr.Index,
-			Address: addr.Address,
+		// Save WalletAddress to SubscriberStore if it doesn't exist
+		if !existsInSubscriberStore {
+			newSubscriberAddress := types.WalletAddress{
+				Index:   addr.Index,
+				Address: addr.Address,
+			}
+			log.Printf("Attempting to save new WalletAddress to SubscriberStore: %v", newSubscriberAddress)
+			if err := store.GetSubscriberStore().SaveSubscriberAddresses(&newSubscriberAddress); err != nil {
+				log.Printf("Error saving WalletAddress to SubscriberStore: %v", err)
+				continue
+			}
+			log.Printf("WalletAddress saved to SubscriberStore: %v", newSubscriberAddress)
+
+			// Save Subscriber-specific data to SubscriberStore
+			subscriptionAddress := &types.SubscriberAddress{
+				Index:       fmt.Sprint(addr.Index),
+				Address:     addr.Address,
+				WalletName:  addr.WalletName,
+				Status:      AddressStatusAvailable,
+				AllocatedAt: &time.Time{},
+				Npub:        "", // Use nil for empty pointer
+			}
+			log.Printf("Attempting to save SubscriberAddress to SubscriberStore: %v", subscriptionAddress)
+			if err := store.GetSubscriberStore().SaveSubscriberAddress(subscriptionAddress); err != nil {
+				log.Printf("Error saving SubscriberAddress to SubscriberStore: %v", err)
+				continue
+			}
+			log.Printf("SubscriberAddress saved to SubscriberStore: %v", subscriptionAddress)
 		}
 
-		if err := store.GetStatsStore().SaveAddress(&newAddress); err != nil {
-			log.Printf("Error saving new address: %v", err)
-			continue
-		}
-
-		// Add the address to the Graviton store
-		// Add the address to the Graviton store with default values
-		subscriptionAddress := &types.SubscriberAddress{
-			Index:       fmt.Sprint(addr.Index),
-			Address:     addr.Address,
-			WalletName:  addr.WalletName,
-			Status:      AddressStatusAvailable, // Default status
-			AllocatedAt: &time.Time{},           // Use zero time if not allocated
-			Npub:        "",                     // Default to empty string
-		}
-
-		if err := store.GetStatsStore().SaveSubcriberAddress(subscriptionAddress); err != nil {
-			log.Printf("Error saving address to Graviton store: %v", err)
-		}
+		processedCount++
 	}
 
-	// Respond with a success message
+	// Return success response with number of addresses processed
 	return c.JSON(fiber.Map{
 		"status":  "success",
-		"message": "Addresses received and processed successfully",
+		"message": fmt.Sprintf("Processed %d addresses successfully", processedCount),
 	})
 }

@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"time"
 
+	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
@@ -41,8 +43,12 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		return err
 	}
 
-	if time.Now().After(subscriber.EndDate) {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "The subscription is inactive, unable to upload file."})
+	// Validate subscription status and storage quota
+	if err := validateUploadEligibility(s.storage, subscriber, c.Body()); err != nil {
+		log.Printf("Upload validation failed for subscriber %s: %v", pubkey, err)
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"message": err.Error(),
+		})
 	}
 
 	data := c.Body()
@@ -86,4 +92,37 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	fmt.Println("Finished a blossom blob")
 
 	return c.SendStatus(fiber.StatusOK)
+}
+
+// validateUploadEligibility checks if the subscriber can upload the file
+func validateUploadEligibility(store stores.Store, subscriber *types.Subscriber, data []byte) error {
+	// Check subscription expiration
+	if time.Now().After(subscriber.EndDate) {
+		return fmt.Errorf("subscription expired on %s", subscriber.EndDate.Format(time.RFC3339))
+	}
+
+	// Try to use subscriber store features if available
+	subscriberStore, ok := store.(stores.SubscriberStore)
+	if !ok {
+		// Fallback to basic validation if subscriber store is not available
+		return nil
+	}
+
+	// Check storage quota
+	fileSize := int64(len(data))
+	if err := subscriberStore.CheckStorageAvailability(subscriber.Npub, fileSize); err != nil {
+		// Get current usage for detailed error message
+		stats, statsErr := subscriberStore.GetSubscriberStorageStats(subscriber.Npub)
+		if statsErr != nil {
+			return fmt.Errorf("storage quota exceeded")
+		}
+
+		return fmt.Errorf("storage quota exceeded: used %d of %d bytes (%.2f%%), attempting to upload %d bytes",
+			stats.CurrentUsageBytes,
+			stats.StorageLimitBytes,
+			stats.UsagePercentage,
+			fileSize)
+	}
+
+	return nil
 }

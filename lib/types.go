@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/libp2p/go-libp2p/core/network"
+	"gorm.io/gorm"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
@@ -269,7 +270,7 @@ type SubscriberAddress struct {
 	WalletName  string     `gorm:"not null"`
 	Status      string     `gorm:"default:'available'"`
 	AllocatedAt *time.Time `gorm:"default:null"`
-	Npub        string     `gorm:"default:null"`
+	Npub        string     `gorm:"type:text"` // Change to pointer to properly handle NULL
 }
 
 // type User struct {
@@ -341,8 +342,8 @@ type Libp2pStream struct {
 }
 
 type SubscriptionTier struct {
-	DataLimit string
-	Price     string
+	DataLimit string `mapstructure:"data_limit"`
+	Price     string `mapstructure:"price"`
 }
 
 func (ls *Libp2pStream) Read(msg []byte) (int, error) {
@@ -424,4 +425,80 @@ func (ws *WebSocketStream) Context() context.Context {
 type AddressResponse struct {
 	Index   string `json:"index"`
 	Address string `json:"address"`
+}
+
+// GormSubscriber represents a subscriber in the GORM database
+type GormSubscriber struct {
+	gorm.Model                  // This embeds ID, CreatedAt, UpdatedAt, and DeletedAt
+	Npub              string    `gorm:"uniqueIndex;not null"`
+	CurrentTier       string    `gorm:"not null"`
+	StorageUsedBytes  int64     `gorm:"not null;default:0"`
+	StorageLimitBytes int64     `gorm:"not null"`
+	StartDate         time.Time `gorm:"not null"`
+	EndDate           time.Time `gorm:"not null"`
+	LastUpdated       time.Time `gorm:"not null"`
+}
+
+// SubscriptionPeriod tracks individual subscription periods
+type SubscriptionPeriod struct {
+	gorm.Model                  // This embeds ID, CreatedAt, UpdatedAt, and DeletedAt
+	SubscriberID      uint      `gorm:"not null"`
+	TransactionID     string    `gorm:"uniqueIndex;not null"`
+	Tier              string    `gorm:"not null"`
+	StorageLimitBytes int64     `gorm:"not null"`
+	StartDate         time.Time `gorm:"not null"`
+	EndDate           time.Time `gorm:"not null"`
+	PaymentAmount     string    `gorm:"not null"`
+}
+
+// FileUpload tracks individual file uploads for storage accounting
+type FileUpload struct {
+	gorm.Model        // This embeds ID, CreatedAt, UpdatedAt, and DeletedAt
+	Npub       string `gorm:"index;not null"`
+	FileHash   string `gorm:"uniqueIndex;not null"`
+	FileName   string `gorm:"not null"`
+	SizeBytes  int64  `gorm:"not null"`
+	Deleted    bool   `gorm:"not null;default:false"`
+	DeletedAt  *time.Time
+}
+
+// StorageStats represents storage statistics for a subscriber
+type StorageStats struct {
+	CurrentUsageBytes int64        `json:"current_usage_bytes"`
+	StorageLimitBytes int64        `json:"storage_limit_bytes"`
+	UsagePercentage   float64      `json:"usage_percentage"`
+	SubscriptionEnd   time.Time    `json:"subscription_end"`
+	CurrentTier       string       `json:"current_tier"`
+	LastUpdated       time.Time    `json:"last_updated"`
+	RecentFiles       []FileUpload `json:"recent_files,omitempty"`
+}
+
+type StorageUsage struct {
+	Npub           string    `json:"npub"`
+	UsedBytes      int64     `json:"used_bytes"`
+	AllocatedBytes int64     `json:"allocated_bytes"`
+	LastUpdated    time.Time `json:"last_updated"`
+}
+
+// Helper function to convert between Subscriber and GormSubscriber
+func (s *Subscriber) ToGormSubscriber(storageLimitBytes int64) *GormSubscriber {
+	return &GormSubscriber{
+		Npub:              s.Npub,
+		CurrentTier:       s.Tier,
+		StorageLimitBytes: storageLimitBytes,
+		StorageUsedBytes:  0,
+		StartDate:         s.StartDate,
+		EndDate:           s.EndDate,
+		LastUpdated:       time.Now(),
+	}
+}
+
+// Helper function to convert from GormSubscriber to Subscriber
+func (gs *GormSubscriber) ToSubscriber() *Subscriber {
+	return &Subscriber{
+		Npub:      gs.Npub,
+		Tier:      gs.CurrentTier,
+		StartDate: gs.StartDate,
+		EndDate:   gs.EndDate,
+	}
 }

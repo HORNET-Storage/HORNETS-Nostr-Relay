@@ -14,6 +14,9 @@ type Store interface {
 	// Statistics Store
 	GetStatsStore() StatisticsStore
 
+	// Subscriber Store
+	GetSubscriberStore() SubscriberStore
+
 	// Hornet Storage
 	StoreLeaf(root string, leafData *types.DagLeafData) error
 	RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error)
@@ -39,6 +42,7 @@ type Store interface {
 	SaveSubscriber(subscriber *types.Subscriber) error
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
 	SaveAddress(addr *types.Address) error
+	DeleteSubscriber(npub string) error
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {

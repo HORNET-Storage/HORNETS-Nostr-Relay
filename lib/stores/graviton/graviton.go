@@ -20,6 +20,7 @@ import (
 
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	subscriber_store "github.com/HORNET-Storage/hornet-storage/lib/stores/subscription_store"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	jsoniter "github.com/json-iterator/go"
@@ -34,39 +35,50 @@ const (
 )
 
 type GravitonStore struct {
-	Database      *graviton.Store
-	StatsDatabase stores.StatisticsStore
-	mu            sync.Mutex
+	Database        *graviton.Store
+	StatsDatabase   stores.StatisticsStore
+	SubscriberStore stores.SubscriberStore
+	mu              sync.Mutex
 }
 
 func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
 	db, err := graviton.NewDiskStore(basepath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initialize Graviton DB: %v", err)
 	}
 
 	// Initialize GORM StatsDatabase
 	store.StatsDatabase = &gorm.GormStatisticsStore{}
-	err = store.StatsDatabase.InitStore(viper.GetString("relay_stats_db"), nil)
-	if err != nil {
-		return fmt.Errorf("failed to initialize StatsDatabase: %v", err) // Proper error handling
+	if err = store.StatsDatabase.InitStore(viper.GetString("relay_stats_db"), nil); err != nil {
+		return fmt.Errorf("failed to initialize StatsDatabase: %v", err)
+	}
+
+	// Initialize SubscriberStore
+	store.SubscriberStore = &subscriber_store.GormSubscriberStore{}
+	if err = store.SubscriberStore.InitStore(viper.GetString("subscriber_db"), nil); err != nil {
+		return fmt.Errorf("failed to initialize SubscriberStore: %v", err)
+	}
+	if store.SubscriberStore == nil {
+		log.Println("Warning: SubscriberStore not initialized correctly.")
+	} else {
+		log.Println("SubscriberStore initialized successfully.")
 	}
 
 	store.Database = db
 
 	snapshot, err := db.LoadSnapshot(0)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load snapshot: %v", err)
 	}
 
 	tree, err := snapshot.GetTree("content")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get content tree: %v", err)
 	}
 
 	_, err = graviton.Commit(tree)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to commit tree: %v", err)
 	}
 
 	return nil
@@ -74,6 +86,10 @@ func (store *GravitonStore) InitStore(basepath string, args ...interface{}) erro
 
 func (store *GravitonStore) GetStatsStore() stores.StatisticsStore {
 	return store.StatsDatabase
+}
+
+func (store *GravitonStore) GetSubscriberStore() stores.SubscriberStore {
+	return store.SubscriberStore
 }
 
 // Scionic Merkletree's (Chunked data)
@@ -659,29 +675,82 @@ func (store *GravitonStore) CountFileLeavesByType() (map[string]int, error) {
 }
 
 // Blossom Blobs (unchunked data)
+// StoreBlob saves the blob data and updates storage tracking
+// Parameters:
+// - data: The actual file data to store
+// - hash: The SHA-256 hash of the data
+// - publicKey: The subscriber's public key
 func (store *GravitonStore) StoreBlob(data []byte, hash []byte, publicKey string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	// Check if storage tracking is available
+	if store.SubscriberStore != nil {
+		// Pre-check storage availability
+		fileSize := int64(len(data))
+		if err := store.SubscriberStore.CheckStorageAvailability(publicKey, fileSize); err != nil {
+			return fmt.Errorf("storage quota check failed: %v", err)
+		}
+	}
+
+	// Load snapshot and get content tree
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load snapshot: %v", err)
 	}
 
 	contentTree, err := snapshot.GetTree("content")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get content tree: %v", err)
 	}
 
+	// Generate hash string and cache keys
 	encodedHash := hex.EncodeToString(hash[:])
-
 	cacheTrees, err := store.cacheKey(publicKey, "blossom", encodedHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to generate cache keys: %v", err)
 	}
 
-	contentTree.Put(hash[:], data)
+	// Store the actual data
+	if err := contentTree.Put(hash[:], data); err != nil {
+		return fmt.Errorf("failed to store content: %v", err)
+	}
 
+	// Prepare all trees for commit
 	cacheTrees = append(cacheTrees, contentTree)
 
-	graviton.Commit(cacheTrees...)
+	// Commit the data
+	if _, err := graviton.Commit(cacheTrees...); err != nil {
+		return fmt.Errorf("failed to commit trees: %v", err)
+	}
+
+	// Update storage tracking if available
+	if store.SubscriberStore != nil {
+		fileSize := int64(len(data))
+
+		// Track the file upload
+		upload := &types.FileUpload{
+			Npub:      publicKey,
+			FileHash:  encodedHash,
+			SizeBytes: fileSize,
+		}
+
+		if err := store.SubscriberStore.TrackFileUpload(upload); err != nil {
+			log.Printf("Warning: Failed to track file upload for %s: %v", publicKey, err)
+			// Continue despite tracking failure as data is already stored
+		}
+
+		// Update storage usage
+		if err := store.SubscriberStore.UpdateStorageUsage(publicKey, fileSize); err != nil {
+			log.Printf("Warning: Failed to update storage usage for %s: %v", publicKey, err)
+		}
+
+		// Log successful upload with storage stats
+		if stats, err := store.SubscriberStore.GetSubscriberStorageStats(publicKey); err == nil {
+			log.Printf("Blob stored successfully for %s: size=%d bytes, total_used=%d bytes (%.2f%% of quota)",
+				publicKey, fileSize, stats.CurrentUsageBytes, stats.UsagePercentage)
+		}
+	}
 
 	return nil
 }
@@ -1014,6 +1083,12 @@ func ContainsAny(tags nostr.Tags, tagName string, values []string) bool {
 func (store *GravitonStore) SaveSubscriber(subscriber *types.Subscriber) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+
+	// Save to GORM first
+	if err := store.SubscriberStore.SaveSubscriber(subscriber); err != nil {
+		return fmt.Errorf("failed to save subscriber to GORM: %v", err)
+	}
+
 	// Load the snapshot and get the "subscribers" tree
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
@@ -1048,6 +1123,23 @@ func (store *GravitonStore) SaveSubscriber(subscriber *types.Subscriber) error {
 }
 
 func (store *GravitonStore) GetSubscriberByAddress(address string) (*types.Subscriber, error) {
+
+	// Try GORM store first
+	if store.SubscriberStore != nil {
+		if subscriberStore, ok := store.SubscriberStore.(interface {
+			GetSubscriberByAddress(address string) (*types.Subscriber, error)
+		}); ok {
+			subscriber, err := subscriberStore.GetSubscriberByAddress(address)
+			if err == nil {
+				return subscriber, nil
+			}
+			// Only log the error if it's not a "not found" error
+			if !strings.Contains(err.Error(), "not found") {
+				log.Printf("GORM lookup failed: %v, falling back to Graviton", err)
+			}
+		}
+	}
+
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -1114,6 +1206,41 @@ func (store *GravitonStore) GetSubscriber(npub string) (*types.Subscriber, error
 
 	// If no subscriber was found with the matching npub, return an error
 	return nil, fmt.Errorf("subscriber not found for npub: %s", npub)
+}
+
+// DeleteSubscriber removes a subscriber from both the Graviton store and GORM store
+func (store *GravitonStore) DeleteSubscriber(npub string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	// First try to delete from GORM store if available
+	if store.SubscriberStore != nil {
+		if err := store.SubscriberStore.DeleteSubscriber(npub); err != nil {
+			// Log the error but continue with Graviton deletion
+			log.Printf("Warning: Failed to delete subscriber from GORM store: %v", err)
+		}
+	}
+
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	tree, err := snapshot.GetTree("subscribers")
+	if err == nil {
+		err := tree.Delete([]byte(npub))
+		if err != nil {
+			log.Printf("Error during subscriber deletion: %v", err)
+			return fmt.Errorf("failed to delete subscriber: %v", err)
+		} else {
+			log.Printf("Deleted subscriber %s", npub)
+		}
+	}
+
+	// Following DeleteEvent pattern: directly commit the tree without checking result
+	graviton.Commit(tree)
+
+	return nil
 }
 
 // AllocateBitcoinAddress allocates an available Bitcoin address to a subscriber.
