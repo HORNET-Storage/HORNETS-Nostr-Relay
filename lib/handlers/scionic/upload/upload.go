@@ -2,7 +2,6 @@ package upload
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"github.com/gofiber/contrib/websocket"
@@ -83,30 +82,10 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		// Add subscription and storage validation here
-		if subscriberStore, ok := store.(stores.SubscriberStore); ok {
-			// Get subscriber info
-			_, err := subscriberStore.GetSubscriber(message.PublicKey)
-			if err != nil {
-				write(utils.BuildErrorMessage("Invalid or inactive subscription", err))
-				return
-			}
-
-			// Pre-validate storage quota
-			// Note: We estimate total size based on the leaf count and average leaf size
-			estimatedSize := int64(len(message.Leaf.Content))
-			if err := subscriberStore.CheckStorageAvailability(message.PublicKey, estimatedSize); err != nil {
-				stats, _ := subscriberStore.GetSubscriberStorageStats(message.PublicKey)
-				if stats != nil {
-					write(utils.BuildErrorMessage(fmt.Sprintf("Storage quota exceeded: used %d of %d bytes (%.2f%%)",
-						stats.CurrentUsageBytes,
-						stats.StorageLimitBytes,
-						stats.UsagePercentage), nil))
-				} else {
-					write(utils.BuildErrorMessage("Storage quota exceeded", nil))
-				}
-				return
-			}
+		// Add subscription and storage validation here using NIP-88 validation and update
+		if err := utils.ValidateUploadEligibility(store, message.PublicKey, message.Leaf.Content); err != nil {
+			write(utils.BuildErrorMessage("Invalid or inactive subscription", err))
+			return
 		}
 
 		err = message.Leaf.VerifyRootLeaf()
@@ -198,29 +177,6 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to verify dag", err))
 			return
-		}
-
-		// Update storage usage after successful DAG upload
-		if subscriberStore, ok := store.(stores.SubscriberStore); ok {
-			dagJson, err := dagData.Dag.ToJSON() // Get actual size after DAG is built
-			if err != nil {
-				log.Printf("Warning: failed to marshall dag to json: %s", err)
-			}
-			actualSize := int64(len(dagJson))
-			if err := subscriberStore.UpdateStorageUsage(message.PublicKey, actualSize); err != nil {
-				log.Printf("Warning: Failed to update storage usage for %s: %v", message.PublicKey, err)
-				// Continue despite tracking failure as DAG is already stored
-			}
-
-			// Track the upload
-			upload := &types.FileUpload{
-				Npub:      message.PublicKey,
-				FileHash:  message.Root,
-				SizeBytes: actualSize,
-			}
-			if err := subscriberStore.TrackFileUpload(upload); err != nil {
-				log.Printf("Warning: Failed to track file upload for %s: %v", message.PublicKey, err)
-			}
 		}
 
 		handleRecievedDag(&dagData.Dag, &message.PublicKey)

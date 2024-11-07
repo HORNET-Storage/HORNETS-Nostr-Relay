@@ -684,15 +684,6 @@ func (store *GravitonStore) StoreBlob(data []byte, hash []byte, publicKey string
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	// Check if storage tracking is available
-	if store.SubscriberStore != nil {
-		// Pre-check storage availability
-		fileSize := int64(len(data))
-		if err := store.SubscriberStore.CheckStorageAvailability(publicKey, fileSize); err != nil {
-			return fmt.Errorf("storage quota check failed: %v", err)
-		}
-	}
-
 	// Load snapshot and get content tree
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
@@ -722,34 +713,6 @@ func (store *GravitonStore) StoreBlob(data []byte, hash []byte, publicKey string
 	// Commit the data
 	if _, err := graviton.Commit(cacheTrees...); err != nil {
 		return fmt.Errorf("failed to commit trees: %v", err)
-	}
-
-	// Update storage tracking if available
-	if store.SubscriberStore != nil {
-		fileSize := int64(len(data))
-
-		// Track the file upload
-		upload := &types.FileUpload{
-			Npub:      publicKey,
-			FileHash:  encodedHash,
-			SizeBytes: fileSize,
-		}
-
-		if err := store.SubscriberStore.TrackFileUpload(upload); err != nil {
-			log.Printf("Warning: Failed to track file upload for %s: %v", publicKey, err)
-			// Continue despite tracking failure as data is already stored
-		}
-
-		// Update storage usage
-		if err := store.SubscriberStore.UpdateStorageUsage(publicKey, fileSize); err != nil {
-			log.Printf("Warning: Failed to update storage usage for %s: %v", publicKey, err)
-		}
-
-		// Log successful upload with storage stats
-		if stats, err := store.SubscriberStore.GetSubscriberStorageStats(publicKey); err == nil {
-			log.Printf("Blob stored successfully for %s: size=%d bytes, total_used=%d bytes (%.2f%% of quota)",
-				publicKey, fileSize, stats.CurrentUsageBytes, stats.UsagePercentage)
-		}
 	}
 
 	return nil
@@ -1084,11 +1047,6 @@ func (store *GravitonStore) SaveSubscriber(subscriber *types.Subscriber) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	// Save to GORM first
-	if err := store.SubscriberStore.SaveSubscriber(subscriber); err != nil {
-		return fmt.Errorf("failed to save subscriber to GORM: %v", err)
-	}
-
 	// Load the snapshot and get the "subscribers" tree
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {
@@ -1212,14 +1170,6 @@ func (store *GravitonStore) GetSubscriber(npub string) (*types.Subscriber, error
 func (store *GravitonStore) DeleteSubscriber(npub string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-
-	// First try to delete from GORM store if available
-	if store.SubscriberStore != nil {
-		if err := store.SubscriberStore.DeleteSubscriber(npub); err != nil {
-			// Log the error but continue with Graviton deletion
-			log.Printf("Warning: Failed to delete subscriber from GORM store: %v", err)
-		}
-	}
 
 	snapshot, err := store.Database.LoadSnapshot(0)
 	if err != nil {

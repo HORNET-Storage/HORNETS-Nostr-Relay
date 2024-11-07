@@ -94,17 +94,6 @@ func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 
 		// Save WalletAddress to SubscriberStore if it doesn't exist
 		if !existsInSubscriberStore {
-			newSubscriberAddress := types.WalletAddress{
-				Index:   addr.Index,
-				Address: addr.Address,
-			}
-			log.Printf("Attempting to save new WalletAddress to SubscriberStore: %v", newSubscriberAddress)
-			if err := store.GetSubscriberStore().SaveSubscriberAddresses(&newSubscriberAddress); err != nil {
-				log.Printf("Error saving WalletAddress to SubscriberStore: %v", err)
-				continue
-			}
-			log.Printf("WalletAddress saved to SubscriberStore: %v", newSubscriberAddress)
-
 			// Save Subscriber-specific data to SubscriberStore
 			subscriptionAddress := &types.SubscriberAddress{
 				Index:       fmt.Sprint(addr.Index),
@@ -112,7 +101,7 @@ func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 				WalletName:  addr.WalletName,
 				Status:      AddressStatusAvailable,
 				AllocatedAt: &time.Time{},
-				Npub:        "", // Use nil for empty pointer
+				Npub:        nil, // Use nil for empty pointer
 			}
 			log.Printf("Attempting to save SubscriberAddress to SubscriberStore: %v", subscriptionAddress)
 			if err := store.GetSubscriberStore().SaveSubscriberAddress(subscriptionAddress); err != nil {

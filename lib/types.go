@@ -262,7 +262,7 @@ type Address struct {
 	Npub        string     `json:"npub,omitempty"`
 }
 
-// subscriptionAddress represents the GORM-compatible model for storing addresses
+// SubscriberAddress represents the GORM-compatible model for storing addresses
 type SubscriberAddress struct {
 	ID          uint       `gorm:"primaryKey"`
 	Index       string     `gorm:"not null"`
@@ -270,7 +270,7 @@ type SubscriberAddress struct {
 	WalletName  string     `gorm:"not null"`
 	Status      string     `gorm:"default:'available'"`
 	AllocatedAt *time.Time `gorm:"default:null"`
-	Npub        string     `gorm:"type:text"` // Change to pointer to properly handle NULL
+	Npub        *string    `gorm:"type:text;unique"` // Pointer type and unique constraint
 }
 
 // type User struct {
@@ -501,4 +501,11 @@ func (gs *GormSubscriber) ToSubscriber() *Subscriber {
 		StartDate: gs.StartDate,
 		EndDate:   gs.EndDate,
 	}
+}
+
+// StorageInfo tracks current storage usage information for a subscriber
+type StorageInfo struct {
+	UsedBytes  int64     // Current bytes used by the subscriber
+	TotalBytes int64     // Total bytes allocated to the subscriber
+	UpdatedAt  time.Time // Last time storage information was updated
 }

@@ -5,9 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
@@ -38,13 +37,8 @@ func (s *Server) getBlob(c *fiber.Ctx) error {
 func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	pubkey := c.Query("pubkey")
 
-	subscriber, err := s.storage.GetSubscriber(pubkey)
-	if err != nil {
-		return err
-	}
-
-	// Validate subscription status and storage quota
-	if err := validateUploadEligibility(s.storage, subscriber, c.Body()); err != nil {
+	// Validate subscription status and storage quota using NIP-88
+	if err := utils.ValidateUploadEligibility(s.storage, pubkey, c.Body()); err != nil {
 		log.Printf("Upload validation failed for subscriber %s: %v", pubkey, err)
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"message": err.Error(),
@@ -53,32 +47,36 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 
 	data := c.Body()
 
+	// Compute the hash of the data
 	checkHash := sha256.Sum256(data)
 	encodedHash := hex.EncodeToString(checkHash[:])
 
+	// Filter to find matching events with the computed hash
 	filter := nostr.Filter{
-		Kinds:   []int{117},
+		Kinds:   []int{117}, // Assuming 117 is the correct kind for blossom events
 		Authors: []string{pubkey},
 		Tags:    nostr.TagMap{"blossom_hash": []string{encodedHash}},
 	}
 
-	fmt.Println("Recieved a blossom blob")
+	fmt.Println("Received a blossom blob")
 
+	// Query for events matching the filter
 	events, err := s.storage.QueryEvents(filter)
 	if err != nil {
 		return err
 	}
 
-	var event *nostr.Event
+	// Handle case where no matching events are found
 	if len(events) <= 0 {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "no events match this file upload"})
 	}
 
-	event = events[0]
+	event := events[0]
 
+	// Extract the "blossom_hash" tag value from the event
 	fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
 
-	// Check the submitted hash matches the data being submitted
+	// Check if the submitted hash matches the expected value from the event
 	if encodedHash != fileHash.Value() {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "submitted hex encoded hash does not match hex encoded hash of data"})
 	}
@@ -92,37 +90,4 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	fmt.Println("Finished a blossom blob")
 
 	return c.SendStatus(fiber.StatusOK)
-}
-
-// validateUploadEligibility checks if the subscriber can upload the file
-func validateUploadEligibility(store stores.Store, subscriber *types.Subscriber, data []byte) error {
-	// Check subscription expiration
-	if time.Now().After(subscriber.EndDate) {
-		return fmt.Errorf("subscription expired on %s", subscriber.EndDate.Format(time.RFC3339))
-	}
-
-	// Try to use subscriber store features if available
-	subscriberStore, ok := store.(stores.SubscriberStore)
-	if !ok {
-		// Fallback to basic validation if subscriber store is not available
-		return nil
-	}
-
-	// Check storage quota
-	fileSize := int64(len(data))
-	if err := subscriberStore.CheckStorageAvailability(subscriber.Npub, fileSize); err != nil {
-		// Get current usage for detailed error message
-		stats, statsErr := subscriberStore.GetSubscriberStorageStats(subscriber.Npub)
-		if statsErr != nil {
-			return fmt.Errorf("storage quota exceeded")
-		}
-
-		return fmt.Errorf("storage quota exceeded: used %d of %d bytes (%.2f%%), attempting to upload %d bytes",
-			stats.CurrentUsageBytes,
-			stats.StorageLimitBytes,
-			stats.UsagePercentage,
-			fileSize)
-	}
-
-	return nil
 }

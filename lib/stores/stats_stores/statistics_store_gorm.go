@@ -52,7 +52,7 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 		&types.Audio{},
 		&types.PendingTransaction{},
 		&types.ActiveToken{},
-		&types.SubscriberAddress{},
+		// &types.SubscriberAddress{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -844,7 +844,7 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 	now := time.Now()
 	subscriptionAddress.Status = AddressStatusAllocated
 	subscriptionAddress.AllocatedAt = &now
-	subscriptionAddress.Npub = npub
+	subscriptionAddress.Npub = &npub
 
 	// Save the updated address
 	if err := tx.Save(&subscriptionAddress).Error; err != nil {

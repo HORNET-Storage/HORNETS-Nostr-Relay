@@ -1,6 +1,8 @@
 package scionic
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -11,11 +13,13 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
 type DagWriter func(message interface{}) error
@@ -213,4 +217,124 @@ func LoadRelaySettings() (*types.RelaySettings, error) {
 	}
 
 	return &settings, nil
+}
+
+func ValidateUploadEligibility(store stores.Store, npub string, data []byte) error {
+	// Step 1: Fetch the NIP-88 event for the given subscriber
+	events, err := store.QueryEvents(nostr.Filter{
+		Kinds: []int{764}, // Assuming 764 is the NIP-88 kind
+		Tags: nostr.TagMap{
+			"p": []string{npub},
+		},
+		Limit: 1,
+	})
+	if err != nil || len(events) == 0 {
+		return fmt.Errorf("no NIP-88 event found for user %s", npub)
+	}
+
+	currentEvent := events[0]
+
+	// Step 2: Extract storage information from the NIP-88 event
+	storageInfo, err := ExtractStorageInfoFromEvent(currentEvent)
+	if err != nil {
+		return fmt.Errorf("failed to extract storage info: %v", err)
+	}
+
+	// Step 3: Check if there is enough storage available
+	fileSize := int64(len(data))
+	newUsage := storageInfo.UsedBytes + fileSize
+	if newUsage > storageInfo.TotalBytes {
+		return fmt.Errorf("storage quota exceeded: used %d of %d bytes (%.2f%%), attempting to upload %d bytes",
+			storageInfo.UsedBytes,
+			storageInfo.TotalBytes,
+			float64(storageInfo.UsedBytes)/float64(storageInfo.TotalBytes)*100,
+			fileSize)
+	}
+
+	// Step 4: Update storage usage in the NIP-88 event
+	storageInfo.UsedBytes = newUsage
+	storageInfo.UpdatedAt = time.Now()
+
+	// Step 5: Delete the old NIP-88 event
+	if err := store.DeleteEvent(currentEvent.ID); err != nil {
+		return fmt.Errorf("failed to delete old NIP-88 event: %v", err)
+	}
+
+	// Step 6: Create a new NIP-88 event with updated storage information
+	updatedEvent := CreateUpdatedNIP88Event(currentEvent, storageInfo)
+	if err := store.StoreEvent(updatedEvent); err != nil {
+		return fmt.Errorf("failed to store updated NIP-88 event: %v", err)
+	}
+
+	return nil
+}
+
+// Helper function to extract storage information from a NIP-88 event
+func ExtractStorageInfoFromEvent(event *nostr.Event) (types.StorageInfo, error) {
+	var info types.StorageInfo
+
+	for _, tag := range event.Tags {
+		if tag[0] == "storage" && len(tag) >= 4 {
+			used, err := strconv.ParseInt(tag[1], 10, 64)
+			if err != nil {
+				return info, fmt.Errorf("invalid used storage value: %v", err)
+			}
+
+			total, err := strconv.ParseInt(tag[2], 10, 64)
+			if err != nil {
+				return info, fmt.Errorf("invalid total storage value: %v", err)
+			}
+
+			updated, err := strconv.ParseInt(tag[3], 10, 64)
+			if err != nil {
+				return info, fmt.Errorf("invalid update timestamp: %v", err)
+			}
+
+			info.UsedBytes = used
+			info.TotalBytes = total
+			info.UpdatedAt = time.Unix(updated, 0)
+			return info, nil
+		}
+	}
+
+	// Return zero values if no storage tag is found
+	return types.StorageInfo{
+		UsedBytes:  0,
+		TotalBytes: 0,
+		UpdatedAt:  time.Now(),
+	}, nil
+}
+
+// Helper function to create an updated NIP-88 event
+func CreateUpdatedNIP88Event(oldEvent *nostr.Event, storageInfo types.StorageInfo) *nostr.Event {
+	// Create new tags for the updated storage information
+	tags := []nostr.Tag{
+		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+	}
+
+	// Copy other tags from the old event
+	for _, tag := range oldEvent.Tags {
+		if tag[0] != "storage" {
+			tags = append(tags, tag)
+		}
+	}
+
+	// Create a new event with the updated tags
+	newEvent := &nostr.Event{
+		PubKey:    oldEvent.PubKey,
+		CreatedAt: nostr.Timestamp(time.Now().Unix()),
+		Kind:      oldEvent.Kind,
+		Tags:      tags,
+		Content:   oldEvent.Content, // Keep the same content, if any
+	}
+
+	// Generate new event ID and sign the event (assuming signing is required)
+	serializedEvent := newEvent.Serialize()
+	hash := sha256.Sum256(serializedEvent)
+	newEvent.ID = hex.EncodeToString(hash[:])
+
+	// You would need a signing function here, e.g., using a private key
+	// For example: signEvent(newEvent, privateKey)
+
+	return newEvent
 }
