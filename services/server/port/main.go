@@ -88,22 +88,37 @@ func init() {
 
 	// Set default relay settings (including Mode)
 	viper.SetDefault("relay_settings", map[string]interface{}{
-		"Mode":             "smart", // Default mode to "smart"
-		"IsKindsActive":    false,   // Default to false for activity flags
-		"IsPhotosActive":   false,
-		"IsVideosActive":   false,
-		"IsGitNestrActive": false,
-		"IsAudioActive":    false,
-		"Kinds":            []string{}, // Default empty arrays for list fields
-		"DynamicKinds":     []string{},
-		"Photos":           []string{},
-		"Videos":           []string{},
-		"GitNestr":         []string{},
-		"Audio":            []string{},
-		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
-		"Chunked":          []string{},
-	})
+		"Mode":                "smart", // Default mode to "smart"
+		"IsKindsActive":       false,   // Default to false for activity flags
+		"IsPhotosActive":      false,
+		"IsVideosActive":      false,
+		"IsGitNestrActive":    false,
+		"IsAudioActive":       false,
+		"isFileStorageActive": false,
+		"Kinds":               []string{}, // Default empty arrays for list fields
+		"DynamicKinds":        []string{},
+		"Photos":              []string{},
+		"Videos":              []string{},
+		"GitNestr":            []string{},
+		"Audio":               []string{},
+		"Protocol":            []string{}, // Default empty Protocol and Chunked lists
+		"AppBuckets":          []string{},
+		"DynamicAppBuckets":   []string{},
 
+		// New default file type lists for Photos, Videos, and Audio
+		"PhotoFileTypes": []string{
+			"jpeg", "jpg", "png", "gif", "bmp", "tiff", "raw", "svg",
+			"eps", "psd", "ai", "pdf", "webp",
+		},
+		"VideoFileTypes": []string{
+			"avi", "mp4", "mov", "wmv", "mkv", "flv", "mpeg",
+			"3gp", "webm", "ogg",
+		},
+		"AudioFileTypes": []string{
+			"mp3", "wav", "ogg", "flac", "aac", "wma", "m4a",
+			"opus", "m4b", "midi", "mp4", "webm", "3gp",
+		},
+	})
 	// Generate a random wallet API key
 	apiKey, err := generateRandomAPIKey()
 	if err != nil {
