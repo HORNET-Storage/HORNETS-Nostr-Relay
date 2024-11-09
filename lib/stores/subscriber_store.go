@@ -13,4 +13,5 @@ type SubscriberStore interface {
 	AllocateBitcoinAddress(npub string) (*lib.Address, error)
 	AddressExists(address string) (bool, error)
 	SaveSubscriberAddress(address *lib.SubscriberAddress) error
+	CountAvailableAddresses() (int64, error)
 }

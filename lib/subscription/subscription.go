@@ -3,19 +3,32 @@
 package subscription
 
 import (
+	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+)
+
+// Address status constants
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+	AddressStatusUsed      = "used"
 )
 
 // StorageInfo tracks current storage usage information for a subscriber
@@ -50,6 +63,14 @@ func NewSubscriptionManager(
 
 // InitializeSubscriber creates a new subscriber or retrieves an existing one and creates their initial NIP-88 event.
 func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
+
+	// Run address pool check in background
+	go func() {
+		if err := m.checkAddressPoolStatus(); err != nil {
+			log.Printf("Warning: error checking address pool status: %v", err)
+		}
+	}()
+
 	// Step 1: Allocate a Bitcoin address (if necessary)
 	address, err := m.store.GetSubscriberStore().AllocateBitcoinAddress(npub)
 	if err != nil {
@@ -386,6 +407,94 @@ func (m *SubscriptionManager) extractStorageInfo(event *nostr.Event) (StorageInf
 		TotalBytes: 0,
 		UpdatedAt:  time.Now(),
 	}, nil
+}
+
+// checkAddressPoolStatus checks if we need to generate more addresses
+func (m *SubscriptionManager) checkAddressPoolStatus() error {
+	availableCount, err := m.store.GetSubscriberStore().CountAvailableAddresses()
+	if err != nil {
+		return fmt.Errorf("failed to count available addresses: %v", err)
+	}
+
+	log.Println("Available count: ", availableCount)
+
+	// If we have less than 50% of addresses available, request more
+	if availableCount < 50 {
+		log.Printf("Address pool running low (%d available). Requesting 100 new addresses", availableCount)
+		return m.requestNewAddresses(20)
+	}
+
+	return nil
+}
+
+// requestNewAddresses sends a request to the wallet to generate new addresses
+func (m *SubscriptionManager) requestNewAddresses(count int) error {
+	// Get API key from config
+	apiKey := viper.GetString("wallet_api_key")
+
+	// Generate JWT token using API key
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"api_key": apiKey,
+		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+		"iat":     time.Now().Unix(),
+	})
+
+	// Sign token with API key
+	tokenString, err := token.SignedString([]byte(apiKey))
+	if err != nil {
+		return fmt.Errorf("failed to generate token: %v", err)
+	}
+
+	reqBody := map[string]interface{}{
+		"count": count,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	// Prepare HMAC signature
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	message := apiKey + timestamp + string(jsonData)
+	h := hmac.New(sha256.New, []byte(apiKey))
+	h.Write([]byte(message))
+	signature := hex.EncodeToString(h.Sum(nil))
+
+	// Create request
+	req, err := http.NewRequest("POST",
+		"http://localhost:9003/generate-addresses",
+		bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add all required headers including the new JWT
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenString))
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("X-Timestamp", timestamp)
+	req.Header.Set("X-Signature", signature)
+
+	// Send request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("wallet service returned status: %v", resp.Status)
+	}
+
+	// Just decode the response to verify it's valid JSON but we don't need to process it
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	log.Printf("Successfully requested generation of %d addresses", count)
+	return nil
 }
 
 // getSubscriptionStatus returns the subscription status string

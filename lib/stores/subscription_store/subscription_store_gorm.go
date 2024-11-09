@@ -129,24 +129,7 @@ func (store *GormSubscriberStore) AddressExists(address string) (bool, error) {
 
 // SaveSubscriberAddress saves or updates a subscriber address in the database
 func (store *GormSubscriberStore) SaveSubscriberAddress(address *types.SubscriberAddress) error {
-	var existingAddress types.SubscriberAddress
-	result := store.DB.Where("address = ?", address.Address).First(&existingAddress)
-
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying existing address: %v", result.Error)
-		return result.Error
-	}
-
-	// If the address already exists, update it
-	if result.RowsAffected > 0 {
-		if err := store.DB.Model(&existingAddress).Updates(address).Error; err != nil {
-			return fmt.Errorf("failed to update existing address: %v", err)
-		}
-		log.Printf("Updated existing address: %s", address.Address)
-		return nil
-	}
-
-	// Create a new address record
+	// Directly create a new address record
 	if err := store.DB.Create(address).Error; err != nil {
 		log.Printf("Error saving new address: %v", err)
 		return err
@@ -154,4 +137,18 @@ func (store *GormSubscriberStore) SaveSubscriberAddress(address *types.Subscribe
 
 	log.Printf("Address %s saved successfully.", address.Address)
 	return nil
+}
+
+// CountAvailableAddresses counts the number of available addresses in the database
+func (store *GormSubscriberStore) CountAvailableAddresses() (int64, error) {
+	var count int64
+	err := store.DB.Model(&types.SubscriberAddress{}).
+		Where("status = ?", AddressStatusAvailable).
+		Count(&count).Error
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to count available addresses: %v", err)
+	}
+
+	return count, nil
 }
