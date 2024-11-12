@@ -99,6 +99,7 @@ func updateViperConfig(settings types.RelaySettings) error {
 	viper.Set("relay_settings.Protocol", settings.Protocol)
 	viper.Set("relay_settings.AppBuckets", settings.AppBuckets)
 	viper.Set("relay_settings.DynamicAppBuckets", settings.DynamicAppBuckets)
+	viper.Set("subscription_tiers", settings.SubscriptionTiers)
 
 	return viper.WriteConfig()
 }
@@ -115,6 +116,7 @@ func getRelaySettings(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
 	}
 
+	// Initialize empty slices if nil
 	if relaySettings.Protocol == nil {
 		relaySettings.Protocol = []string{}
 	}
@@ -126,6 +128,13 @@ func getRelaySettings(c *fiber.Ctx) error {
 	if relaySettings.DynamicAppBuckets == nil {
 		relaySettings.DynamicAppBuckets = []string{}
 	}
+
+	// Get subscription tiers
+	var subscriptionTiers []types.SubscriptionTier
+	if err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers); err != nil {
+		log.Printf("Error unmarshaling subscription tiers: %s", err)
+	}
+	relaySettings.SubscriptionTiers = subscriptionTiers
 
 	log.Println("Fetched relay settings:", relaySettings)
 

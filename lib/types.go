@@ -169,23 +169,29 @@ type BitcoinRate struct {
 	Timestamp time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
 }
 
+type SubscriptionTier struct {
+	DataLimit string `json:"data_limit" mapstructure:"data_limit"`
+	Price     string `json:"price" mapstructure:"price"`
+}
+
 type RelaySettings struct {
-	Mode                string   `json:"mode"`
-	Protocol            []string `json:"protocol"`
-	Kinds               []string `json:"kinds"`
-	DynamicKinds        []string `json:"dynamicKinds"`
-	Photos              []string `json:"photos"`
-	Videos              []string `json:"videos"`
-	GitNestr            []string `json:"gitNestr"`
-	Audio               []string `json:"audio"`
-	IsKindsActive       bool     `json:"isKindsActive"`
-	IsPhotosActive      bool     `json:"isPhotosActive"`
-	IsVideosActive      bool     `json:"isVideosActive"`
-	IsGitNestrActive    bool     `json:"isGitNestrActive"`
-	IsAudioActive       bool     `json:"isAudioActive"`
-	IsFileStorageActive bool     `json:"isFileStorageActive"`
-	AppBuckets          []string `json:"appBuckets"`
-	DynamicAppBuckets   []string `json:"dynamicAppBuckets"`
+	Mode                string             `json:"mode"`
+	Protocol            []string           `json:"protocol"`
+	Kinds               []string           `json:"kinds"`
+	DynamicKinds        []string           `json:"dynamicKinds"`
+	Photos              []string           `json:"photos"`
+	Videos              []string           `json:"videos"`
+	GitNestr            []string           `json:"gitNestr"`
+	Audio               []string           `json:"audio"`
+	IsKindsActive       bool               `json:"isKindsActive"`
+	IsPhotosActive      bool               `json:"isPhotosActive"`
+	IsVideosActive      bool               `json:"isVideosActive"`
+	IsGitNestrActive    bool               `json:"isGitNestrActive"`
+	IsAudioActive       bool               `json:"isAudioActive"`
+	IsFileStorageActive bool               `json:"isFileStorageActive"`
+	AppBuckets          []string           `json:"appBuckets"`
+	DynamicAppBuckets   []string           `json:"dynamicAppBuckets"`
+	SubscriptionTiers   []SubscriptionTier `json:"subscription_tiers"`
 
 	// New fields for the file type lists
 	PhotoTypes []string `json:"photoTypes"`
@@ -339,11 +345,6 @@ type JWTClaims struct {
 type Libp2pStream struct {
 	Stream network.Stream
 	Ctx    context.Context
-}
-
-type SubscriptionTier struct {
-	DataLimit string `mapstructure:"data_limit"`
-	Price     string `mapstructure:"price"`
 }
 
 func (ls *Libp2pStream) Read(msg []byte) (int, error) {
