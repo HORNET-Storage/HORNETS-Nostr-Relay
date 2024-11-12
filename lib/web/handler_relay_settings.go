@@ -63,7 +63,7 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 		// Create kind 411 event using the provided store instance
 		if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
 			log.Println("Error creating kind 411 event:", err)
-			return c.Status(fiber.StatusInternalServerError).SendString("Failed to create kind 411 event")
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to create kind 411 event.")
 		}
 	}
 
