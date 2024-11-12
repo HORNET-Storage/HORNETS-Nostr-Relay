@@ -68,7 +68,11 @@ func StartServer(store stores.Store) error {
 	secured.Get("/relaycount", func(c *fiber.Ctx) error {
 		return getRelayCount(c, store)
 	})
-	secured.Post("/relay-settings", updateRelaySettings)
+
+	secured.Post("/relay-settings", func(c *fiber.Ctx) error {
+		return updateRelaySettings(c, store)
+	})
+
 	secured.Get("/relay-settings", getRelaySettings)
 	secured.Get("/timeseries", func(c *fiber.Ctx) error {
 		return getProfilesTimeSeriesData(c, store)
