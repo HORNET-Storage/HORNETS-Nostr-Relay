@@ -4,15 +4,12 @@ import (
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/viper"
 )
 
-func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
+func updateRelaySettings(c *fiber.Ctx) error {
 	log.Println("Relay settings request received")
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	var data map[string]interface{}
@@ -45,26 +42,6 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 	var existingTiers []types.SubscriptionTier
 	if err := viper.UnmarshalKey("subscription_tiers", &existingTiers); err != nil {
 		log.Println("Error fetching existing subscription tiers:", err)
-	}
-
-	// Compare existing tiers with the new tiers
-	if tiersChanged(existingTiers, relaySettings.SubscriptionTiers) {
-		log.Println("Subscription tiers have changed, creating a new kind 411 event")
-
-		serializedPrivateKey := viper.GetString("private_key")
-
-		// Load private and public keys
-		privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
-		if err != nil {
-			log.Println("Error loading keys:", err)
-			return c.Status(fiber.StatusInternalServerError).SendString("Failed to load keys")
-		}
-
-		// Create kind 411 event using the provided store instance
-		if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
-			log.Println("Error creating kind 411 event:", err)
-			return c.Status(fiber.StatusInternalServerError).SendString("Failed to create kind 411 event.")
-		}
 	}
 
 	// Update Viper configuration
@@ -170,19 +147,4 @@ func getRelaySettings(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"relay_settings": relaySettings,
 	})
-}
-
-// Function to compare existing tiers with new tiers
-func tiersChanged(existing, new []types.SubscriptionTier) bool {
-	if len(existing) != len(new) {
-		return true
-	}
-
-	for i := range existing {
-		if existing[i].DataLimit != new[i].DataLimit || existing[i].Price != new[i].Price {
-			return true
-		}
-	}
-
-	return false
 }
