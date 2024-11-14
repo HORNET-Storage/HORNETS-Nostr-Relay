@@ -256,6 +256,33 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
 	}
 
+	// Fetch and add subscription_tier tags based on values from Viper
+	rawTiers := viper.Get("subscription_tiers")
+	if rawTiers != nil {
+		if tiers, ok := rawTiers.([]interface{}); ok {
+			for _, tier := range tiers {
+				if tierMap, ok := tier.(map[string]interface{}); ok {
+					dataLimit, okDataLimit := tierMap["data_limit"].(string)
+					price, okPrice := tierMap["price"].(string)
+					if okDataLimit && okPrice {
+						priceInt, err := strconv.Atoi(price) // Convert string price to integer
+						if err != nil {
+							log.Printf("error converting price %s to integer: %v", price, err)
+							continue
+						}
+						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, strconv.Itoa(priceInt)})
+					} else {
+						log.Printf("invalid data structure for tier: %v", tierMap)
+					}
+				} else {
+					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
+				}
+			}
+		} else {
+			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
+		}
+	}
+
 	if activeTier != "" {
 		tags = append(tags, nostr.Tag{
 			"active_subscription", activeTier, fmt.Sprintf("%d", expirationDate.Unix()),
@@ -316,6 +343,33 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		{"relay_bitcoin_address", subscriber.Address},
 		{"relay_dht_key", m.relayDHTKey},
 		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+	}
+
+	// Fetch and add subscription_tier tags based on the values from Viper
+	rawTiers := viper.Get("subscription_tiers")
+	if rawTiers != nil {
+		if tiers, ok := rawTiers.([]interface{}); ok {
+			for _, tier := range tiers {
+				if tierMap, ok := tier.(map[string]interface{}); ok {
+					dataLimit, okDataLimit := tierMap["data_limit"].(string)
+					price, okPrice := tierMap["price"].(string)
+					if okDataLimit && okPrice {
+						priceInt, err := strconv.Atoi(price) // Convert string price to integer
+						if err != nil {
+							log.Printf("error converting price %s to integer: %v", price, err)
+							continue
+						}
+						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, strconv.Itoa(priceInt)})
+					} else {
+						log.Printf("invalid data structure for tier: %v", tierMap)
+					}
+				} else {
+					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
+				}
+			}
+		} else {
+			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
+		}
 	}
 
 	if activeTier != "" {
