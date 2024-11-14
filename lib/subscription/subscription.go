@@ -105,7 +105,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 	// Step 2: Fetch NIP-88 event data to retrieve subscriber information
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{764},
+		Kinds: []int{888},
 		Tags: nostr.TagMap{
 			"p": []string{npub},
 		},
@@ -146,7 +146,7 @@ func (m *SubscriptionManager) ProcessPayment(
 func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) error {
 	// Fetch current NIP-88 event data
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{764},
+		Kinds: []int{888},
 		Tags: nostr.TagMap{
 			"p": []string{npub},
 		},
@@ -184,7 +184,7 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 func (m *SubscriptionManager) CheckStorageAvailability(npub string, requestedBytes int64) error {
 	// Step 1: Fetch the user's NIP-88 event
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{764},
+		Kinds: []int{888},
 		Tags: nostr.TagMap{
 			"p": []string{npub},
 		},
@@ -234,7 +234,7 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 ) error {
 	// Delete existing NIP-88 event if it exists
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{764},
+		Kinds: []int{888},
 		Tags: nostr.TagMap{
 			"p": []string{subscriber.Npub},
 		},
@@ -265,7 +265,7 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	event := &nostr.Event{
 		PubKey:    hex.EncodeToString(m.relayPrivateKey.PubKey().SerializeCompressed()),
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      764,
+		Kind:      888,
 		Tags:      tags,
 		Content:   "",
 	}
@@ -292,7 +292,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 ) error {
 	// Check if an existing NIP-88 event for the subscriber already exists
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{764}, // Assuming 764 is the NIP-88 event kind
+		Kinds: []int{888}, // Assuming 888 is the NIP-88 event kind
 		Tags: nostr.TagMap{
 			"p": []string{subscriber.Npub},
 		},
@@ -327,7 +327,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	event := &nostr.Event{
 		PubKey:    hex.EncodeToString(m.relayPrivateKey.PubKey().SerializeCompressed()),
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      764,
+		Kind:      888,
 		Tags:      tags,
 		Content:   "",
 	}

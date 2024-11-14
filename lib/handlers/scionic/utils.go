@@ -222,7 +222,7 @@ func LoadRelaySettings() (*types.RelaySettings, error) {
 func ValidateUploadEligibility(store stores.Store, npub string, data []byte) error {
 	// Step 1: Fetch the NIP-88 event for the given subscriber
 	events, err := store.QueryEvents(nostr.Filter{
-		Kinds: []int{764}, // Assuming 764 is the NIP-88 kind
+		Kinds: []int{888}, // Assuming 888 is the NIP-88 kind
 		Tags: nostr.TagMap{
 			"p": []string{npub},
 		},
