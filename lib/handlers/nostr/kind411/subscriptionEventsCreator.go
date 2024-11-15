@@ -26,14 +26,15 @@ const (
 )
 
 type RelayInfo struct {
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Pubkey        string `json:"pubkey"`
-	Contact       string `json:"contact"`
-	SupportedNIPs []int  `json:"supported_nips"`
-	Software      string `json:"software"`
-	Version       string `json:"version"`
-	DHTkey        string `json:"dhtkey,omitempty"`
+	Name              string                   `json:"name"`
+	Description       string                   `json:"description,omitempty"`
+	Pubkey            string                   `json:"pubkey"`
+	Contact           string                   `json:"contact"`
+	SupportedNIPs     []int                    `json:"supported_nips"`
+	Software          string                   `json:"software"`
+	Version           string                   `json:"version"`
+	DHTkey            string                   `json:"dhtkey,omitempty"`
+	SubscriptionTiers []map[string]interface{} `json:"subscription_tiers,omitempty"` // New field
 }
 
 func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
@@ -56,16 +57,34 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 		}
 	}
 
+	// Retrieve subscription tiers from Viper
+	var subscriptionTiers []map[string]interface{}
+	rawTiers := viper.Get("subscription_tiers")
+	if rawTiers != nil {
+		if tiers, ok := rawTiers.([]interface{}); ok {
+			for _, tier := range tiers {
+				if tierMap, ok := tier.(map[string]interface{}); ok {
+					subscriptionTiers = append(subscriptionTiers, tierMap)
+				} else {
+					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
+				}
+			}
+		} else {
+			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
+		}
+	}
+
 	// Get relay info
 	relayInfo := RelayInfo{
-		Name:          viper.GetString("RelayName"),
-		Description:   viper.GetString("RelayDescription"),
-		Pubkey:        viper.GetString("RelayPubkey"),
-		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116},
-		Software:      viper.GetString("RelaySoftware"),
-		Version:       viper.GetString("RelayVersion"),
-		DHTkey:        viper.GetString("RelayDHTkey"),
+		Name:              viper.GetString("RelayName"),
+		Description:       viper.GetString("RelayDescription"),
+		Pubkey:            viper.GetString("RelayPubkey"),
+		Contact:           viper.GetString("RelayContact"),
+		SupportedNIPs:     []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116},
+		Software:          viper.GetString("RelaySoftware"),
+		Version:           viper.GetString("RelayVersion"),
+		DHTkey:            viper.GetString("RelayDHTkey"),
+		SubscriptionTiers: subscriptionTiers,
 	}
 
 	// Convert relay info to JSON
