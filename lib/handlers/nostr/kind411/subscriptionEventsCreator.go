@@ -57,21 +57,12 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 		}
 	}
 
-	// Retrieve subscription tiers from Viper
+	// Retrieve subscription tiers from Viper using UnmarshalKey
 	var subscriptionTiers []map[string]interface{}
-	rawTiers := viper.Get("subscription_tiers")
-	if rawTiers != nil {
-		if tiers, ok := rawTiers.([]interface{}); ok {
-			for _, tier := range tiers {
-				if tierMap, ok := tier.(map[string]interface{}); ok {
-					subscriptionTiers = append(subscriptionTiers, tierMap)
-				} else {
-					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
-				}
-			}
-		} else {
-			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
-		}
+	if err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers); err != nil {
+		log.Printf("Error unmarshaling subscription tiers: %v", err)
+	} else {
+		log.Println("Successfully fetched subscription tiers:", subscriptionTiers)
 	}
 
 	// Get relay info
