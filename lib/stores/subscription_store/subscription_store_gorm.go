@@ -152,3 +152,18 @@ func (store *GormSubscriberStore) CountAvailableAddresses() (int64, error) {
 
 	return count, nil
 }
+
+// GetSubscriberByAddress retrieves subscriber information by Bitcoin address
+func (store *GormSubscriberStore) GetSubscriberByAddress(address string) (*types.SubscriberAddress, error) {
+	var subscriber types.SubscriberAddress
+
+	err := store.DB.Where("address = ?", address).First(&subscriber).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("no subscriber found for address: %s", address)
+		}
+		return nil, fmt.Errorf("failed to query subscriber: %v", err)
+	}
+
+	return &subscriber, nil
+}

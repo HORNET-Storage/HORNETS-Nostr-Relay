@@ -14,4 +14,5 @@ type SubscriberStore interface {
 	AddressExists(address string) (bool, error)
 	SaveSubscriberAddress(address *lib.SubscriberAddress) error
 	CountAvailableAddresses() (int64, error)
+	GetSubscriberByAddress(address string) (*lib.SubscriberAddress, error)
 }

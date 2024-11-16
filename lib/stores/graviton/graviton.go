@@ -1082,22 +1082,6 @@ func (store *GravitonStore) SaveSubscriber(subscriber *types.Subscriber) error {
 
 func (store *GravitonStore) GetSubscriberByAddress(address string) (*types.Subscriber, error) {
 
-	// Try GORM store first
-	if store.SubscriberStore != nil {
-		if subscriberStore, ok := store.SubscriberStore.(interface {
-			GetSubscriberByAddress(address string) (*types.Subscriber, error)
-		}); ok {
-			subscriber, err := subscriberStore.GetSubscriberByAddress(address)
-			if err == nil {
-				return subscriber, nil
-			}
-			// Only log the error if it's not a "not found" error
-			if !strings.Contains(err.Error(), "not found") {
-				log.Printf("GORM lookup failed: %v, falling back to Graviton", err)
-			}
-		}
-	}
-
 	store.mu.Lock()
 	defer store.mu.Unlock()
 

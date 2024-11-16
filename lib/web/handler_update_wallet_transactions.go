@@ -107,7 +107,7 @@ func processTransaction(store stores.Store, subManager *subscription.Subscriptio
 	}
 
 	// After subscriber retrieval in processTransaction
-	subscriber, err := store.GetSubscriberByAddress(txDetails.output)
+	subscriber, err := store.GetSubscriberStore().GetSubscriberByAddress(txDetails.output)
 	if err != nil {
 		log.Printf("Error: subscriber not found for address %s: %v", txDetails.output, err)
 		return fmt.Errorf("subscriber not found for address %s: %v", txDetails.output, err)
@@ -119,12 +119,12 @@ func processTransaction(store stores.Store, subManager *subscription.Subscriptio
 	satoshis := int64(txDetails.value * 100_000_000)
 
 	// Process the subscription payment
-	if err := subManager.ProcessPayment(subscriber.Npub, txID, satoshis); err != nil {
+	if err := subManager.ProcessPayment(*subscriber.Npub, txID, satoshis); err != nil {
 		return fmt.Errorf("failed to process subscription: %v", err)
 	}
 
 	log.Printf("Successfully processed subscription payment for %s: %s sats",
-		subscriber.Npub, txDetails.valueStr)
+		*subscriber.Npub, txDetails.valueStr)
 	return nil
 }
 
