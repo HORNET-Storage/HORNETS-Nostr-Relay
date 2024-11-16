@@ -39,27 +39,6 @@ func updateRelaySettings(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
-	// Check boolean flags and set corresponding arrays to empty if false
-	if !relaySettings.IsKindsActive {
-		relaySettings.Kinds = []string{}
-		relaySettings.DynamicKinds = []string{}
-	}
-	if !relaySettings.IsPhotosActive {
-		relaySettings.Photos = []string{}
-	}
-	if !relaySettings.IsVideosActive {
-		relaySettings.Videos = []string{}
-	}
-	if !relaySettings.IsGitNestrActive {
-		relaySettings.GitNestr = []string{}
-	}
-	if !relaySettings.IsAudioActive {
-		relaySettings.Audio = []string{}
-	}
-	if relaySettings.Mode == "smart" {
-		relaySettings.DynamicKinds = []string{}
-	}
-
 	// Store in Viper
 	viper.Set("relay_settings", relaySettings)
 

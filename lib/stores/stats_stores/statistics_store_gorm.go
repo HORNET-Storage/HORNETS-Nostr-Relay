@@ -3,8 +3,8 @@ package gorm
 import (
 	"fmt"
 	"log"
+	"math"
 	"sort"
-	"strings"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -32,10 +32,7 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 	// Auto migrate the schema
 	err = store.DB.AutoMigrate(
 		&types.Kind{},
-		&types.Photo{},
-		&types.Video{},
-		&types.GitNestr{},
-		&types.Misc{}, // Add the Misc type here
+		&types.FileInfo{},
 		&types.UserProfile{},
 		&types.User{},
 		&types.WalletBalance{},
@@ -43,7 +40,6 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 		&types.BitcoinRate{},
 		&types.WalletAddress{},
 		&types.UserChallenge{},
-		&types.Audio{},
 		&types.PendingTransaction{},
 		&types.ActiveToken{},
 	)
@@ -155,7 +151,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 	}
 
 	// If the event kind matches relay settings, store it in the database
-	if contains(relaySettings.Kinds, kindStr) {
+	if contains(relaySettings.KindWhitelist, kindStr) {
 		sizeBytes := len(event.ID) + len(event.PubKey) + len(event.Content) + len(event.Sig)
 		for _, tag := range event.Tags {
 			for _, t := range tag {
@@ -214,66 +210,16 @@ func contains(slice []string, item string) bool {
 }
 
 // SaveFile saves the file (photo, video, audio, or misc) based on its type and processing mode (smart or unlimited).
-func (store *GormStatisticsStore) SaveFile(kindName string, relaySettings types.RelaySettings, hash string, leafCount int, sizeMB float64, itemName string) error {
-	mode := relaySettings.Mode
-	kindNameLower := strings.ToLower(kindName)
-
-	// Blocked types
-	blockedTypes := append(append(relaySettings.Photos, relaySettings.Videos...), relaySettings.Audio...)
-
-	// Mode: Smart
-	if mode == "smart" {
-		// Check if the file type is blocked in smart mode
-		if contains(blockedTypes, kindNameLower) {
-			return fmt.Errorf("file type not permitted in smart mode: %s", kindName)
-		}
-		// Proceed to save based on file category
-	} else if mode == "unlimited" {
-		// Check if the file type is blocked in unlimited mode
-		if contains(blockedTypes, kindNameLower) {
-			return fmt.Errorf("blocked file type in unlimited mode: %s", kindName)
-		}
-		// Proceed to save based on file category
-	} else {
-		return fmt.Errorf("unknown mode: %s", mode)
+func (store *GormStatisticsStore) SaveFile(root string, hash string, fileName string, mimeType string, leafCount int, size int64) error {
+	file := types.FileInfo{
+		Root:      root,
+		Hash:      hash,
+		FileName:  fileName,
+		MimeType:  mimeType,
+		LeafCount: leafCount,
+		Size:      size,
 	}
-
-	// Save file in the appropriate category
-	switch {
-	case contains(relaySettings.Photos, kindNameLower):
-		photo := types.Photo{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  kindName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&photo).Error
-	case contains(relaySettings.Videos, kindNameLower):
-		video := types.Video{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  kindName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&video).Error
-	case contains(relaySettings.Audio, kindNameLower):
-		audio := types.Audio{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  kindName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&audio).Error
-	default:
-		// Save under Misc if no specific category is matched
-		misc := types.Misc{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  itemName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&misc).Error
-	}
+	return store.DB.Create(&file).Error
 }
 
 func (store *GormStatisticsStore) DeleteEventByID(eventID string) error {
@@ -415,13 +361,7 @@ func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityDa
 		FROM (
 			SELECT timestamp, size FROM kinds
 			UNION ALL
-			SELECT timestamp, size FROM photos
-			UNION ALL
-			SELECT timestamp, size FROM videos
-			UNION ALL
-			SELECT timestamp, size FROM git_nestrs
-			UNION ALL
-			SELECT timestamp, size FROM audios
+			SELECT timestamp, size FROM file_info
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -447,13 +387,7 @@ func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChart
 		FROM (
 			SELECT timestamp, size, kind_number FROM kinds
 			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM photos
-			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM videos
-			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM git_nestrs
-			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM audios
+			SELECT timestamp, size, NULL as kind_number FROM file_info
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -511,39 +445,53 @@ func (store *GormStatisticsStore) FetchKindCount() (int, error) {
 	return int(count), err
 }
 
-// FetchPhotoCount retrieves the count of photos from the database
-func (store *GormStatisticsStore) FetchPhotoCount() (int, error) {
+// FetchFileCountByType retrieves the count of stored files for a specific mime type
+func (store *GormStatisticsStore) FetchFileCountByType(mimeType string) (int, error) {
 	var count int64
-	err := store.DB.Model(&types.Photo{}).Count(&count).Error
+	err := store.DB.Model(&types.FileInfo{}).Where("mime_type = ?", mimeType).Count(&count).Error
 	return int(count), err
 }
 
-// FetchVideoCount retrieves the count of videos from the database
-func (store *GormStatisticsStore) FetchVideoCount() (int, error) {
-	var count int64
-	err := store.DB.Model(&types.Video{}).Count(&count).Error
-	return int(count), err
-}
+func (store *GormStatisticsStore) FetchFilesByType(mimeType string, page int, pageSize int) ([]types.FileInfo, *types.PaginationMetadata, error) {
+	var total int64
 
-// FetchGitNestrCount retrieves the count of git_nestr based on the git types from the database
-func (store *GormStatisticsStore) FetchGitNestrCount(gitNestr []string) (int, error) {
-	var count int64
-	err := store.DB.Model(&types.GitNestr{}).Where("git_type IN ?", gitNestr).Count(&count).Error
-	return int(count), err
-}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
 
-// FetchAudioCount retrieves the count of audio entries from the database
-func (store *GormStatisticsStore) FetchAudioCount() (int, error) {
-	var count int64
-	err := store.DB.Model(&types.Audio{}).Count(&count).Error
-	return int(count), err
-}
+	offset := (page - 1) * pageSize
 
-// FetchMiscCount retrieves the count of miscellaneous entries from the database
-func (store *GormStatisticsStore) FetchMiscCount() (int, error) {
-	var count int64
-	err := store.DB.Model(&types.Misc{}).Count(&count).Error
-	return int(count), err
+	result := store.DB.Model(&types.FileInfo{}).Where("mime_type = ?", mimeType).Count(&total)
+	if result.Error != nil {
+		return nil, nil, result.Error
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+
+	var files []types.FileInfo
+	result = store.DB.Where("mime_type = ?", mimeType).
+		Order("timestamp DESC").
+		Limit(pageSize).
+		Offset(offset).
+		Find(&files)
+
+	if result.Error != nil {
+		return nil, nil, result.Error
+	}
+
+	metaData := &types.PaginationMetadata{
+		CurrentPage: page,
+		PageSize:    pageSize,
+		TotalItems:  total,
+		TotalPages:  totalPages,
+		HasNext:     page < totalPages,
+		HasPrevious: page > 1,
+	}
+
+	return files, metaData, nil
 }
 
 // ReplaceTransaction handles replacing a pending transaction with a new one

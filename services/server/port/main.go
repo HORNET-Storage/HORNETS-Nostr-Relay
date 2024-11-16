@@ -199,6 +199,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	defer func() {
+		err := store.Cleanup()
+		if err != nil {
+			log.Printf("Failed to cleanup temp database: %v", err)
+		}
+	}()
+
 	// Create and store kind 411 event
 	if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
 		log.Printf("Failed to create kind 411 event: %v", err)
@@ -240,6 +247,7 @@ func main() {
 	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
 
 	query.AddQueryHandler(host, store)
+	query.AddAdvancedQueryHandler(host, store)
 
 	settings, err := nostr.LoadRelaySettings()
 	if err != nil {
@@ -392,6 +400,9 @@ func main() {
 
 	go func() {
 		<-sigs
+
+		store.Cleanup()
+
 		os.Exit(0)
 	}()
 

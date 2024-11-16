@@ -1,8 +1,7 @@
 package web
 
 import (
-	"log"
-
+	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
@@ -10,64 +9,48 @@ import (
 
 // Refactored getRelayCount function
 func getRelayCount(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Relay count request received")
-
-	// Retrieve relay settings from the config file using Viper
-	var relaySettings struct {
-		GitNestr []string `mapstructure:"gitNestr"`
-	}
-	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-		log.Fatalf("Error unmarshaling relay settings: %v", err)
-	}
-
 	// Initialize the response data
-	responseData := map[string]int{
-		"kinds":    0,
-		"photos":   0,
-		"videos":   0,
-		"gitNestr": 0,
-		"audio":    0,
-		"misc":     0,
+	responseData := map[string]int{}
+
+	relaySettings, err := RetrieveSettings()
+	if err != nil {
+		return err
 	}
 
 	// Fetch counts from the statistics store
-	var err error
-	responseData["kinds"], err = store.GetStatsStore().FetchKindCount()
-	if err != nil {
-		log.Printf("Error getting kind counts: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Error getting kind counts")
-	}
+	for group, types := range relaySettings.MimeTypeGroups {
+		for _, mimeType := range types {
+			amount, err := store.GetStatsStore().FetchFileCountByType(mimeType)
+			if err == nil {
+				continue
+			}
 
-	responseData["photos"], err = store.GetStatsStore().FetchPhotoCount()
-	if err != nil {
-		log.Printf("Error getting photo counts: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Error getting photo counts")
-	}
+			if _, ok := responseData[group]; !ok {
+				responseData[group] = 0
+			}
 
-	responseData["videos"], err = store.GetStatsStore().FetchVideoCount()
-	if err != nil {
-		log.Printf("Error getting video counts: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Error getting video counts")
-	}
-
-	responseData["gitNestr"], err = store.GetStatsStore().FetchGitNestrCount(relaySettings.GitNestr)
-	if err != nil {
-		log.Printf("Error getting gitNestr counts: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Error getting gitNestr counts")
-	}
-
-	responseData["audio"], err = store.GetStatsStore().FetchAudioCount()
-	if err != nil {
-		log.Printf("Error getting audio counts: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Error getting audio counts")
-	}
-
-	responseData["misc"], err = store.GetStatsStore().FetchMiscCount()
-	if err != nil {
-		log.Printf("Error getting misc counts: %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Error getting misc counts")
+			responseData[group] += amount
+		}
 	}
 
 	// Respond with the aggregated counts
 	return c.JSON(responseData)
+}
+
+func RetrieveSettings() (*types.RelaySettings, error) {
+	var settings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return nil, err
+	}
+
+	return &settings, nil
+}
+
+func contains(list []string, item string) bool {
+	for _, element := range list {
+		if element == item {
+			return true
+		}
+	}
+	return false
 }

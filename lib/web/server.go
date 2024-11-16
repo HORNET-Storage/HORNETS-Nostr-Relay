@@ -111,6 +111,10 @@ func StartServer(store stores.Store) error {
 	})
 	secured.Post("/refresh-token", refreshToken)
 
+	secured.Get("/files", func(c *fiber.Ctx) error {
+		return HandleGetFilesByType(c, store)
+	})
+
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
 	if err != nil {

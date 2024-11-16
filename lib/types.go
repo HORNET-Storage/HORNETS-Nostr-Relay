@@ -61,8 +61,19 @@ type DownloadFilter struct {
 	IncludeContent bool // IncludeContent from LeafLabelRange always overrides this
 }
 
+type QueryFilter struct {
+	Buckets []string
+	Names   []string
+	PubKeys []string
+	Tags    map[string]string
+}
+
 type QueryMessage struct {
 	QueryFilter map[string]string
+}
+
+type AdvancedQueryMessage struct {
+	Filter QueryFilter
 }
 
 type QueryResponse struct {
@@ -95,51 +106,27 @@ type Kind struct {
 	KindNumber int
 	EventID    string
 	Timestamp  time.Time `gorm:"autoCreateTime"`
-	Size       float64   `gorm:"default:0"` // Size in MB
+	Size       float64   `gorm:"default:0"`
 }
 
-type Photo struct {
+type FileInfo struct {
 	ID        uint   `gorm:"primaryKey"`
+	Root      string `gorm:"index"`
 	Hash      string `gorm:"uniqueIndex"`
+	FileName  string
+	MimeType  string `gorm:"index"`
 	LeafCount int
-	KindName  string
+	Size      int64     `gorm:"default:0"`
 	Timestamp time.Time `gorm:"autoCreateTime"`
-	Size      float64   `gorm:"default:0"` // Size in MB
 }
 
-type Video struct {
-	ID        uint   `gorm:"primaryKey"`
-	Hash      string `gorm:"uniqueIndex"`
-	LeafCount int
-	KindName  string
-	Timestamp time.Time `gorm:"autoCreateTime"`
-	Size      float64   `gorm:"default:0"` // Size in MB
-}
-
-type Audio struct {
-	ID        uint   `gorm:"primaryKey"`
-	Hash      string `gorm:"uniqueIndex"`
-	LeafCount int
-	KindName  string
-	Timestamp time.Time `gorm:"autoCreateTime"`
-	Size      float64   `gorm:"default:0"` // Size in MB
-}
-
-type GitNestr struct {
-	ID        uint `gorm:"primaryKey"`
-	GitType   string
-	EventID   string
-	Timestamp time.Time `gorm:"autoCreateTime"`
-	Size      float64   `gorm:"default:0"` // Size in MB
-}
-
-type Misc struct {
-	ID        uint   `gorm:"primaryKey"`
-	Hash      string `gorm:"uniqueIndex"`
-	LeafCount int
-	KindName  string
-	Timestamp time.Time `gorm:"autoCreateTime"`
-	Size      float64   `gorm:"default:0"` // Size in MB
+type PaginationMetadata struct {
+	CurrentPage int   `json:"currentPage"`
+	PageSize    int   `json:"pageSize"`
+	TotalItems  int64 `json:"totalItems"`
+	TotalPages  int   `json:"totalPages"`
+	HasNext     bool  `json:"hasNext"`
+	HasPrevious bool  `json:"hasPrevious"`
 }
 
 type WalletBalance struct {
@@ -169,23 +156,36 @@ type BitcoinRate struct {
 }
 
 type RelaySettings struct {
-	Mode             string   `json:"mode"`
-	Protocol         []string `json:"protocol"`
-	Chunked          []string `json:"chunked"`
-	Chunksize        string   `json:"chunksize"`
-	MaxFileSize      int      `json:"maxFileSize"`
-	MaxFileSizeUnit  string   `json:"maxFileSizeUnit"`
-	Kinds            []string `json:"kinds"`
-	DynamicKinds     []string `json:"dynamicKinds"`
-	Photos           []string `json:"photos"`
-	Videos           []string `json:"videos"`
-	GitNestr         []string `json:"gitNestr"`
-	Audio            []string `json:"audio"`
-	IsKindsActive    bool     `json:"isKindsActive"`
-	IsPhotosActive   bool     `json:"isPhotosActive"`
-	IsVideosActive   bool     `json:"isVideosActive"`
-	IsGitNestrActive bool     `json:"isGitNestrActive"`
-	IsAudioActive    bool     `json:"isAudioActive"`
+	Mode            string   `json:"mode"`
+	Protocol        []string `json:"protocol"`
+	Chunked         []string `json:"chunked"`
+	Chunksize       string   `json:"chunksize"`
+	MaxFileSize     int      `json:"maxFileSize"`
+	MaxFileSizeUnit string   `json:"maxFileSizeUnit"`
+
+	// Common type groups used for determining what types are considered audio, videos, images etc
+	MimeTypeGroups map[string][]string
+
+	// Whitelist will be disabled if this is empty allowing any file types to be stored
+	MimeTypeWhitelist []string
+
+	// Whitelist will be disabled if this is empty allowing any kind handlers available to work (will accept any kind if in unlimited mode)
+	KindWhitelist []string
+
+	// To be replaced by clearer definitions above
+	/*
+		IsKindsActive    bool     `json:"isKindsActive"`
+		IsPhotosActive   bool     `json:"isPhotosActive"`
+		IsVideosActive   bool     `json:"isVideosActive"`
+		IsGitNestrActive bool     `json:"isGitNestrActive"`
+		IsAudioActive    bool     `json:"isAudioActive"`
+		Photos           []string `json:"photos"`
+		Videos           []string `json:"videos"`
+		GitNestr         []string `json:"gitNestr"`
+		Audio            []string `json:"audio"`
+		Kinds            []string `json:"kinds"`
+		DynamicKinds     []string `json:"dynamicKinds"`
+	*/
 }
 
 type TimeSeriesData struct {

@@ -36,7 +36,7 @@ type StatisticsStore interface {
 	GetUserByID(userID uint) (types.User, error)
 
 	// File-related statistics (photos, videos, etc.)
-	SaveFile(kindName string, relaySettings types.RelaySettings, hash string, leafCount int, sizeMB float64, itemName string) error
+	SaveFile(root string, hash string, fileName string, mimeType string, leafCount int, size int64) error
 	FetchKindData() ([]types.AggregatedKindData, error)
 	FetchKindTrendData(kindNumber int) ([]types.MonthlyKindData, error)
 
@@ -68,9 +68,6 @@ type StatisticsStore interface {
 
 	// Fetch counts for various file types
 	FetchKindCount() (int, error)
-	FetchPhotoCount() (int, error)
-	FetchVideoCount() (int, error)
-	FetchGitNestrCount(gitNestr []string) (int, error)
-	FetchAudioCount() (int, error)
-	FetchMiscCount() (int, error)
+	FetchFileCountByType(mimeType string) (int, error)
+	FetchFilesByType(mimeType string, page int, pageSize int) ([]types.FileInfo, *types.PaginationMetadata, error)
 }

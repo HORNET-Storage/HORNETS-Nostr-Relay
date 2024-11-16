@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -14,6 +16,8 @@ import (
 
 	"github.com/deroproject/graviton"
 	"github.com/fxamacker/cbor/v2"
+	"github.com/gabriel-vasile/mimetype"
+	"github.com/google/uuid"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
@@ -33,36 +37,48 @@ const (
 )
 
 type GravitonStore struct {
-	Database      *graviton.Store
+	DatabasePath string
+	Database     *graviton.Store
+
+	TempDatabasePath string
+	TempDatabase     *graviton.Store
+
 	StatsDatabase stores.StatisticsStore
 }
 
 func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
-	db, err := graviton.NewDiskStore(basepath)
+	var err error
+
+	store.DatabasePath = basepath
+	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("%s-%s", "temp", uuid.New()))
+
+	// Initialize main long term storage database
+	store.Database, err = graviton.NewDiskStore(store.DatabasePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create new graviton disk store for main database: %v", err)
 	}
 
-	// Initialize GORM StatsDatabase
+	// Initialize temp cache database for storing data temporarily
+	store.TempDatabase, err = graviton.NewDiskStore(store.TempDatabasePath)
+	if err != nil {
+		return fmt.Errorf("failed to create new graviton disk store for temp database: %v", err)
+	}
+
+	// Initialize gorm statistics database
 	store.StatsDatabase = &gorm.GormStatisticsStore{}
 	err = store.StatsDatabase.InitStore(viper.GetString("relay_stats_db"), nil)
 	if err != nil {
-		return fmt.Errorf("failed to initialize StatsDatabase: %v", err) // Proper error handling
+		return fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}
 
-	store.Database = db
+	return nil
+}
 
-	snapshot, err := db.LoadSnapshot(0)
-	if err != nil {
-		return err
-	}
+func (store *GravitonStore) Cleanup() error {
+	store.Database.Close()
+	store.TempDatabase.Close()
 
-	tree, err := snapshot.GetTree("content")
-	if err != nil {
-		return err
-	}
-
-	_, err = graviton.Commit(tree)
+	err := os.RemoveAll(store.TempDatabasePath)
 	if err != nil {
 		return err
 	}
@@ -79,8 +95,16 @@ func (store *GravitonStore) GetStatsStore() stores.StatisticsStore {
 // An example would be "npub:app": "filetype" because the trees are cached in buckets per user per app and filetypes
 // You can only query trees that have been cached through supported caching methods as itterating all of the trees
 // Would create a significant performance impact if the data set gets too big
-func (store *GravitonStore) QueryDag(filter map[string]string) ([]string, error) {
-	snapshot, err := store.Database.LoadSnapshot(0)
+// DEPRECATED: Use QueryDagAdvanced
+func (store *GravitonStore) QueryDag(filter map[string]string, temp bool) ([]string, error) {
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -105,57 +129,129 @@ func (store *GravitonStore) QueryDag(filter map[string]string) ([]string, error)
 	return keys, nil
 }
 
-func (store *GravitonStore) SaveAddress(addr *types.Address) error {
-	// Load the snapshot and get the "relay_addresses" tree
-	snapshot, err := store.Database.LoadSnapshot(0)
+// Query dag using a filter object similar to how nostr works to keep things familiar.
+// This should be used over QueryDag if you don't understand how the caching works.
+// TODO: Implement cache checks where available to speed up iteration
+func (store *GravitonStore) QueryDagAdvanced(filter types.QueryFilter, temp bool) ([]string, error) {
+	results := []string{}
+
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to load snapshot: %v", err)
+		return nil, err
 	}
 
-	addressTree, err := snapshot.GetTree("relay_addresses")
+	buckets, err := store.GetMasterBucketList("files", temp)
 	if err != nil {
-		return fmt.Errorf("failed to get address tree: %v", err)
+		return results, err
 	}
 
-	// Marshal the address into JSON
-	addressData, err := json.Marshal(addr)
-	if err != nil {
-		return fmt.Errorf("failed to marshal address: %v", err)
+	for _, bucket := range buckets {
+		// Skip buckets that don't exist in the filter if the filter contains any buckets
+		if len(filter.Buckets) > 0 && !contains(filter.Buckets, bucket) {
+			continue
+		}
+
+		// Retrieve the bucket from the snapshot and continue if it fails
+		tree, err := snapshot.GetTree(bucket)
+		if err != nil {
+			continue
+		}
+
+		cursor := tree.Cursor()
+
+		// Seek to the first key
+		key, leafBytes, err := cursor.First()
+		if err == nil {
+			// Iterate through all key-value pairs
+			for {
+				root := string(key)
+
+				// Skip leaves that are not the root leaf
+				if b, err := store.retrieveBucket(root, temp); b != "" {
+					if err != nil {
+						fmt.Println("Failed to check for root in scionic_index")
+					}
+					continue
+				}
+
+				var leafData *types.DagLeafData = &types.DagLeafData{}
+
+				err = cbor.Unmarshal(leafBytes, leafData)
+				if err != nil {
+					return nil, err
+				}
+
+				/*
+					leafData, err := store.RetrieveLeaf(root, root, false)
+					if err != nil {
+						fmt.Println(err)
+						fmt.Println("Failed to retrieve leaf")
+						continue
+					}
+				*/
+
+				// Match PubKey
+				if len(filter.PubKeys) > 0 && contains(filter.PubKeys, leafData.PublicKey) {
+					results = append(results, root)
+				}
+
+				// Match Names
+				if len(filter.Names) > 0 && !contains(filter.Names, leafData.Leaf.ItemName) {
+					results = append(results, root)
+				}
+
+				// Match AdditionalData (Tags)
+				if len(filter.Tags) > 0 {
+					for k, v := range filter.Tags {
+						if value, ok := leafData.Leaf.AdditionalData[k]; ok && value == v {
+							results = append(results, root)
+
+							break
+						}
+					}
+				}
+
+				key, leafBytes, err = cursor.Next()
+				if err != nil {
+					fmt.Println("Finished cursor.Next()")
+					break
+				}
+			}
+		}
+
 	}
 
-	// Use the index as the key for storing the address
-	key := addr.Index
-
-	// Store the address data in the tree
-	if err := addressTree.Put([]byte(key), addressData); err != nil {
-		return fmt.Errorf("failed to put address in Graviton store: %v", err)
-	}
-
-	// Commit the tree to persist the changes
-	if _, err := graviton.Commit(addressTree); err != nil {
-		return fmt.Errorf("failed to commit address tree: %v", err)
-	}
-
-	return nil
+	return results, nil
 }
 
 // Store an individual scionic merkletree leaf
 // If the root leaf is the leaf being stored, the root will be cached depending on the data in the root leaf
-func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) error {
+func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData, temp bool) error {
 	// Don't allow a leaf to be submitted without content if it contains a content hash
 	if leafData.Leaf.ContentHash != nil && leafData.Leaf.Content == nil {
 		return fmt.Errorf("leaf has content hash but no content")
 	}
 
-	snapshot, err := store.Database.LoadSnapshot(0)
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
 	if err != nil {
 		return err
 	}
 
 	var contentTree *graviton.Tree = nil
-
-	// TODO: Block leaves that have content over the configured chunk limit
-	leafContentSize := len(hex.EncodeToString(leafData.Leaf.Content))
 
 	// Store the content of the leaf in the content bucket if the leaf has any
 	// Remove the data from the leaf so we aren't storing double the data for no reason
@@ -181,7 +277,7 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 		// If it is the root leafthen just assign it and skip a retrieval
 		rootLeaf = &leafData.Leaf
 	} else {
-		_rootLeaf, err := store.RetrieveLeaf(root, root, false)
+		_rootLeaf, err := store.RetrieveLeaf(root, root, false, temp)
 		if err != nil {
 			return err
 		}
@@ -226,7 +322,7 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 
 		// Cache the root against the user and the file type
 		if leafData.PublicKey != "" {
-			_trees, err := store.cacheKey(leafData.PublicKey, bucket, root)
+			_trees, err := store.cacheKey(leafData.PublicKey, bucket, root, temp)
 			if err == nil {
 				trees = append(trees, _trees...)
 			}
@@ -238,38 +334,21 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 			appName := GetAppNameFromPath(folder)
 			if appName != "" {
 				// TODO: Check if app is supported by this relay
-				_trees, err := store.cacheKey(fmt.Sprintf("%s:%s", leafData.PublicKey, appName), folder, rootLeaf.Hash)
+				_trees, err := store.cacheKey(fmt.Sprintf("%s:%s", leafData.PublicKey, appName), folder, rootLeaf.Hash, temp)
 				if err == nil {
 					trees = append(trees, _trees...)
 				}
 			}
 		}
 
-		// Store photo or video based on file extension if it's a root leaf
-		itemName := rootLeaf.ItemName
-		leafCount := rootLeaf.LeafCount
-		hash := rootLeaf.Hash
-
-		kindName := GetKindFromItemName(itemName)
-
-		ChunkSize := 2048 * 1024
-
-		var relaySettings types.RelaySettings
-		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-			log.Fatalf("Error unmarshaling relay settings: %v", err)
-		}
-
-		var sizeMB float64
-		if leafCount > 0 {
-			sizeMB = float64(leafCount*ChunkSize) / (1024 * 1024) // Convert to MB
-		} else {
-			sizeBytes := leafContentSize
-			sizeMB = float64(sizeBytes) / (1024 * 1024) // Convert to MB
-		}
-
-		err = store.StatsDatabase.SaveFile(kindName, relaySettings, hash, leafCount, sizeMB, itemName)
+		// Update master bucket list
+		masterBucketListTree, err := store.UpdateMasterBucketList("files", bucket, temp)
 		if err != nil {
-			return err
+			return nil
+		}
+
+		if masterBucketListTree != nil {
+			trees = append(trees, masterBucketListTree)
 		}
 	}
 
@@ -286,15 +365,22 @@ func (store *GravitonStore) StoreLeaf(root string, leafData *types.DagLeafData) 
 }
 
 // Retrieve an individual scionic merkletree leaf from the tree's root hash and the leaf hash
-func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error) {
+func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeContent bool, temp bool) (*types.DagLeafData, error) {
 	key := []byte(hash) // merkle_dag.GetHash(hash)
 
-	snapshot, err := store.Database.LoadSnapshot(0)
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	bucket, err := store.retrieveBucket(root)
+	bucket, err := store.retrieveBucket(root, temp)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +390,6 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 		return nil, err
 	}
 
-	//log.Printf("Searching for leaf with key: %s\nFrom bucket: %s", key, bucket)
 	bytes, err := tree.Get(key)
 	if err != nil {
 		return nil, err
@@ -318,17 +403,13 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 	}
 
 	if includeContent && data.Leaf.ContentHash != nil {
-		//fmt.Println("Fetching  leaf content")
-
-		content, err := store.RetrieveLeafContent(data.Leaf.ContentHash)
+		content, err := store.RetrieveLeafContent(data.Leaf.ContentHash, temp)
 		if err != nil {
 			return nil, err
 		}
 
 		data.Leaf.Content = content
 	}
-
-	//fmt.Println("Leaf found")
 
 	return data, nil
 }
@@ -337,8 +418,15 @@ func (store *GravitonStore) RetrieveLeaf(root string, hash string, includeConten
 // We can reduce the total data stored by ensuring all data is content addressed as sometimes
 // leaves will have different data which changes the root hash but the actual content could be
 // the same as other leaves already stored on this relay
-func (store *GravitonStore) RetrieveLeafContent(contentHash []byte) ([]byte, error) {
-	snapshot, err := store.Database.LoadSnapshot(0)
+func (store *GravitonStore) RetrieveLeafContent(contentHash []byte, temp bool) ([]byte, error) {
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -362,8 +450,15 @@ func (store *GravitonStore) RetrieveLeafContent(contentHash []byte) ([]byte, err
 
 // This is for finding which bucket a scionic merkletree leaf belongs to
 // This is required due to the root leaf being the only leaf that can determine the bucket
-func (store *GravitonStore) retrieveBucket(root string) (string, error) {
-	snapshot, err := store.Database.LoadSnapshot(0)
+func (store *GravitonStore) retrieveBucket(root string, temp bool) (string, error) {
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -382,13 +477,13 @@ func (store *GravitonStore) retrieveBucket(root string) (string, error) {
 }
 
 // Retrieve and build an entire scionic merkletree from the root hash
-func (store *GravitonStore) BuildDagFromStore(root string, includeContent bool) (*types.DagData, error) {
-	return stores.BuildDagFromStore(store, root, includeContent)
+func (store *GravitonStore) BuildDagFromStore(root string, includeContent bool, temp bool) (*types.DagData, error) {
+	return stores.BuildDagFromStore(store, root, includeContent, temp)
 }
 
 // Store an entire scionic merkltree (not implemented currently as not required, leaves are stored as received)
-func (store *GravitonStore) StoreDag(dag *types.DagData) error {
-	return stores.StoreDag(store, dag)
+func (store *GravitonStore) StoreDag(dag *types.DagData, temp bool) error {
+	return stores.StoreDag(store, dag, temp)
 }
 
 // Nostr events
@@ -406,7 +501,7 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 	for _, author := range filter.Authors {
 		for key := range filter.Tags {
 			if IsTagQueryTag(key) {
-				hashes, err := store.getCache(author, key)
+				hashes, err := store.getCache(author, key, false)
 				if err == nil {
 					queryFilter := nostr.Filter{
 						IDs: hashes,
@@ -438,7 +533,7 @@ func (store *GravitonStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, er
 		// Convert search term to lowercase for case-insensitive comparison
 		searchTerm := strings.ToLower(filter.Search)
 
-		masterBucketList, err := store.GetMasterBucketList("kinds")
+		masterBucketList, err := store.GetMasterBucketList("kinds", false)
 		if err != nil {
 			return nil, err
 		}
@@ -522,7 +617,7 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 	trees = append(trees, tree)
 
 	// Cache event against pubkey and kind bucket
-	_trees, err := store.cacheKey(event.PubKey, bucket, event.ID)
+	_trees, err := store.cacheKey(event.PubKey, bucket, event.ID, false)
 	if err == nil {
 		trees = append(trees, _trees...)
 	}
@@ -531,7 +626,7 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 	for _, tag := range event.Tags {
 		key := tag.Key()
 		if IsSingleLetter(key) {
-			_trees, err := store.cacheKey(event.PubKey, fmt.Sprintf("#%s", key), event.ID)
+			_trees, err := store.cacheKey(event.PubKey, fmt.Sprintf("#%s", key), event.ID, false)
 			if err == nil {
 				trees = append(trees, _trees...)
 			}
@@ -543,7 +638,7 @@ func (store *GravitonStore) StoreEvent(event *nostr.Event) error {
 		return err
 	}
 
-	masterBucketListTree, err := store.UpdateMasterBucketList("kinds", bucket)
+	masterBucketListTree, err := store.UpdateMasterBucketList("kinds", bucket, false)
 	if err != nil {
 		return err
 	}
@@ -653,10 +748,21 @@ func (store *GravitonStore) StoreBlob(data []byte, hash []byte, publicKey string
 
 	encodedHash := hex.EncodeToString(hash[:])
 
-	cacheTrees, err := store.cacheKey(publicKey, "blossom", encodedHash)
+	cacheTrees, err := store.cacheKey(publicKey, "blossom", encodedHash, false)
 	if err != nil {
 		return err
 	}
+
+	mtype := mimetype.Detect(data)
+
+	mimeCacheTrees, err := store.cacheKey("files-blossom", mtype.String(), encodedHash, false)
+	if err != nil {
+		return err
+	}
+
+	cacheTrees = append(cacheTrees, mimeCacheTrees...)
+
+	fmt.Println("Blossom data cached as: " + mtype.String() + " for a " + mtype.Extension())
 
 	contentTree.Put(hash[:], data)
 
@@ -714,16 +820,32 @@ func (store *GravitonStore) DeleteBlob(hash string) error {
 	return nil
 }
 
-// This is used to create / update cache buckets with hashes that point to nostr notes or
-// scionic merkletree data depending on where it is called from
-// All cache buckets are prefixed with cache: and stored in the "cache" master bucket list
-func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]*graviton.Tree, error) {
-	snapshot, err := store.Database.LoadSnapshot(0)
+func (store *GravitonStore) QueryBlobs(mimeType string) ([]string, error) {
+	results, err := store.getCache("files-blossom", mimeType, false)
 	if err != nil {
 		return nil, err
 	}
 
+	return results, nil
+}
+
+// This is used to create / update cache buckets with hashes that point to nostr notes or
+// scionic merkletree data depending on where it is called from
+// All cache buckets are prefixed with cache: and stored in the "cache" master bucket list
+func (store *GravitonStore) cacheKey(bucket string, key string, root string, temp bool) ([]*graviton.Tree, error) {
 	trees := []*graviton.Tree{}
+
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
+	if err != nil {
+		return trees, err
+	}
 
 	cacheBucket := fmt.Sprintf("cache:%s", bucket)
 
@@ -759,7 +881,7 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 		}
 	}
 
-	masterBucketListTree, err := store.UpdateMasterBucketList("cache", cacheBucket)
+	masterBucketListTree, err := store.UpdateMasterBucketList("cache", cacheBucket, temp)
 	if err != nil {
 		return trees, nil
 	}
@@ -772,34 +894,52 @@ func (store *GravitonStore) cacheKey(bucket string, key string, root string) ([]
 }
 
 // Retrieve a cache (list of hashes) given the bucket and key
-func (store *GravitonStore) getCache(bucket string, key string) ([]string, error) {
-	snapshot, err := store.Database.LoadSnapshot(0)
-	if err == nil {
-		cacheBucket := fmt.Sprintf("cache:%s", bucket)
-		cacheTree, err := snapshot.GetTree(cacheBucket)
-		if err == nil {
-			value, err := cacheTree.Get([]byte(key))
-			if err == nil {
-				if value != nil {
-					var cacheData *types.CacheData = &types.CacheData{}
+func (store *GravitonStore) getCache(bucket string, key string, temp bool) ([]string, error) {
+	var snapshot *graviton.Snapshot
+	var err error
 
-					err = cbor.Unmarshal(value, cacheData)
-					if err == nil {
-						return cacheData.Keys, nil
-					}
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	cacheBucket := fmt.Sprintf("cache:%s", bucket)
+	cacheTree, err := snapshot.GetTree(cacheBucket)
+	if err == nil {
+		value, err := cacheTree.Get([]byte(key))
+		if err == nil {
+			if value != nil {
+				var cacheData *types.CacheData = &types.CacheData{}
+
+				err = cbor.Unmarshal(value, cacheData)
+				if err == nil {
+					return cacheData.Keys, nil
 				}
 			}
 		}
 	}
 
-	fmt.Printf("Failed to unmrashal cache bucket %s with key %s\n", bucket, key)
 	return nil, nil
 }
 
 // The master bucket list is a bucket that contains lists of all other buckets
 // This allows us to retrieve and itterate buckets without the need for graviton to support it
-func (store *GravitonStore) UpdateMasterBucketList(key string, bucket string) (*graviton.Tree, error) {
-	snapshot, _ := store.Database.LoadSnapshot(0)
+func (store *GravitonStore) UpdateMasterBucketList(key string, bucket string, temp bool) (*graviton.Tree, error) {
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	tree, err := snapshot.GetTree("mbl")
 	if err != nil {
@@ -834,14 +974,26 @@ func (store *GravitonStore) UpdateMasterBucketList(key string, bucket string) (*
 		}
 	}
 
+	fmt.Println("Master bucket list updated for " + key + ": " + bucket)
+
 	return tree, nil
 }
 
 // You can get an array of bucket keys by specifying which list of buckets you want
 // We break the master bucket list up to speed up itteration depending on what buckets you want
 // An example of this would be to pass in "cache" as the key to get all the cache buckets
-func (store *GravitonStore) GetMasterBucketList(key string) ([]string, error) {
-	snapshot, _ := store.Database.LoadSnapshot(0)
+func (store *GravitonStore) GetMasterBucketList(key string, temp bool) ([]string, error) {
+	var snapshot *graviton.Snapshot
+	var err error
+
+	if temp {
+		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+	} else {
+		snapshot, err = store.Database.LoadSnapshot(0)
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	tree, err := snapshot.GetTree("mbl")
 	if err != nil {
@@ -1176,4 +1328,38 @@ func (store *GravitonStore) AllocateAddress() (*types.Address, error) {
 	}
 
 	return nil, fmt.Errorf("no available addresses")
+}
+
+func (store *GravitonStore) SaveAddress(addr *types.Address) error {
+	// Load the snapshot and get the "relay_addresses" tree
+	snapshot, err := store.Database.LoadSnapshot(0)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot: %v", err)
+	}
+
+	addressTree, err := snapshot.GetTree("relay_addresses")
+	if err != nil {
+		return fmt.Errorf("failed to get address tree: %v", err)
+	}
+
+	// Marshal the address into JSON
+	addressData, err := json.Marshal(addr)
+	if err != nil {
+		return fmt.Errorf("failed to marshal address: %v", err)
+	}
+
+	// Use the index as the key for storing the address
+	key := addr.Index
+
+	// Store the address data in the tree
+	if err := addressTree.Put([]byte(key), addressData); err != nil {
+		return fmt.Errorf("failed to put address in Graviton store: %v", err)
+	}
+
+	// Commit the tree to persist the changes
+	if _, err := graviton.Commit(addressTree); err != nil {
+		return fmt.Errorf("failed to commit address tree: %v", err)
+	}
+
+	return nil
 }
