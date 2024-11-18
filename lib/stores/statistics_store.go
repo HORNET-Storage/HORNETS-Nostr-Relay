@@ -52,6 +52,8 @@ type StatisticsStore interface {
 	GetLatestBitcoinRate() (types.BitcoinRate, error)
 	UpdateBitcoinRate(rate float64) error
 	SaveUnconfirmedTransaction(pendingTransaction *types.PendingTransaction) error
+	CountAvailableAddresses() (int64, error)
+	AllocateBitcoinAddress(npub string) (*types.Address, error)
 
 	// User challenge and token management
 	SaveUserChallenge(userChallenge *types.UserChallenge) error

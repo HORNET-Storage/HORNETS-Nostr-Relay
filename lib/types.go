@@ -277,6 +277,17 @@ type Subscriber struct {
 	LastTransactionID string    `json:"last_transaction_id"` // The ID of the last processed transaction
 }
 
+// SubscriberAddress represents the GORM-compatible model for storing addresses
+type SubscriberAddress struct {
+	ID          uint       `gorm:"primaryKey"`
+	Index       string     `gorm:"not null"`
+	Address     string     `gorm:"not null;unique"`
+	WalletName  string     `gorm:"not null"`
+	Status      string     `gorm:"default:'available'"`
+	AllocatedAt *time.Time `gorm:"default:null"`
+	Npub        *string    `gorm:"type:text;unique"` // Pointer type and unique constraint
+}
+
 type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
 	UserID    uint   `gorm:"index"`

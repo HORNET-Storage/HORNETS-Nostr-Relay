@@ -12,6 +12,7 @@ require (
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.6.0
+	github.com/gabriel-vasile/mimetype v1.4.6
 	github.com/gofiber/contrib/websocket v1.3.2
 	github.com/illuzen/go-negentropy v0.0.0-20240715064232-a46d8ae31fc0
 	github.com/json-iterator/go v1.1.12
@@ -52,7 +53,6 @@ require (
 	github.com/fasthttp/websocket v1.5.10 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.6 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
@@ -162,7 +162,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/golang-jwt/jwt/v4 v4.5.0
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.2 // indirect
 	github.com/ipfs/go-cid v0.4.1
 	github.com/klauspost/compress v1.17.10 // indirect
