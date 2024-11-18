@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/base64"
+	"log"
 	"strconv"
 	"time"
 
@@ -58,6 +59,7 @@ func AddContent(fileInfo *types.FileInfo, content []byte) *FileInfoWithContent {
 }
 
 func HandleGetFilesByType(c *fiber.Ctx, store stores.Store) error {
+	log.Println("files by type request made.")
 	mimeType := c.Query("type")
 	if mimeType == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

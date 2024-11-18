@@ -54,6 +54,8 @@ type StatisticsStore interface {
 	SaveUnconfirmedTransaction(pendingTransaction *types.PendingTransaction) error
 	CountAvailableAddresses() (int64, error)
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
+	GetSubscriberByAddress(address string) (*types.SubscriberAddress, error)
+	SaveSubscriberAddress(address *types.SubscriberAddress) error
 
 	// User challenge and token management
 	SaveUserChallenge(userChallenge *types.UserChallenge) error

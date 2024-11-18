@@ -120,6 +120,10 @@ type FileInfo struct {
 	Timestamp time.Time `gorm:"autoCreateTime"`
 }
 
+func (FileInfo) TableName() string {
+	return "file_info"
+}
+
 type PaginationMetadata struct {
 	CurrentPage int   `json:"currentPage"`
 	PageSize    int   `json:"pageSize"`

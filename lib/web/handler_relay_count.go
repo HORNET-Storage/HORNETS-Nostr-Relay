@@ -46,11 +46,11 @@ func RetrieveSettings() (*types.RelaySettings, error) {
 	return &settings, nil
 }
 
-func contains(list []string, item string) bool {
-	for _, element := range list {
-		if element == item {
-			return true
-		}
-	}
-	return false
-}
+// func contains(list []string, item string) bool {
+// 	for _, element := range list {
+// 		if element == item {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }

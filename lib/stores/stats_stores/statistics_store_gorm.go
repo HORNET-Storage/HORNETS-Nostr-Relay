@@ -325,6 +325,8 @@ func (store *GormStatisticsStore) FetchKindData() ([]types.AggregatedKindData, e
 		return nil, err
 	}
 
+	log.Println("Stats DB kinds: ", kinds)
+
 	aggregatedData := make(map[int]types.AggregatedKindData)
 
 	// Aggregate the data by kind number
@@ -500,7 +502,7 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 			COUNT(CASE WHEN dht_key THEN 1 ELSE NULL END) as dht_key,
 			COUNT(CASE WHEN lightning_addr AND dht_key THEN 1 ELSE NULL END) as lightning_and_dht
 		FROM user_profiles
-		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) < ?
+		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) <= ?
 		GROUP BY month
 		ORDER BY month ASC;
     `, startDate, endDate).Scan(&data).Error
@@ -781,17 +783,18 @@ func (store *GormStatisticsStore) UserExists() (bool, error) {
 	return count > 0, nil
 }
 
-// AddressExists checks if a wallet address already exists in the database
+// AddressExists checks if a given Bitcoin address exists in the database
 func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
-	var existingAddress types.WalletAddress
-	result := store.DB.Where("address = ?", address).First(&existingAddress)
-	if result.Error == nil {
-		return true, nil
+	var count int64
+	err := store.DB.Model(&types.SubscriberAddress{}).
+		Where("address = ?", address).
+		Count(&count).Error
+
+	if err != nil {
+		return false, fmt.Errorf("failed to check address existence: %v", err)
 	}
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		return false, result.Error
-	}
-	return false, nil
+
+	return count > 0, nil
 }
 
 // SaveAddress saves a new wallet address to the database
@@ -878,4 +881,31 @@ func (store *GormStatisticsStore) IsActiveToken(token string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// GetSubscriberByAddress retrieves subscriber information by Bitcoin address
+func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types.SubscriberAddress, error) {
+	var subscriber types.SubscriberAddress
+
+	err := store.DB.Where("address = ?", address).First(&subscriber).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("no subscriber found for address: %s", address)
+		}
+		return nil, fmt.Errorf("failed to query subscriber: %v", err)
+	}
+
+	return &subscriber, nil
+}
+
+// SaveSubscriberAddress saves or updates a subscriber address in the database
+func (store *GormStatisticsStore) SaveSubscriberAddress(address *types.SubscriberAddress) error {
+	// Directly create a new address record
+	if err := store.DB.Create(address).Error; err != nil {
+		log.Printf("Error saving new address: %v", err)
+		return err
+	}
+
+	log.Printf("Address %s saved successfully.", address.Address)
+	return nil
 }
