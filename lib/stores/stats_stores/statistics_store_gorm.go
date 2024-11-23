@@ -3,8 +3,8 @@ package gorm
 import (
 	"fmt"
 	"log"
+	"math"
 	"sort"
-	"strings"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -21,6 +21,11 @@ type GormStatisticsStore struct {
 	DB *gorm.DB
 }
 
+const (
+	AddressStatusAvailable = "available"
+	AddressStatusAllocated = "allocated"
+)
+
 // InitStore initializes the GORM DB (can be swapped for another DB).
 func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}) error {
 	var err error
@@ -32,10 +37,7 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 	// Auto migrate the schema
 	err = store.DB.AutoMigrate(
 		&types.Kind{},
-		&types.Photo{},
-		&types.Video{},
-		&types.GitNestr{},
-		&types.Misc{}, // Add the Misc type here
+		&types.FileInfo{},
 		&types.UserProfile{},
 		&types.User{},
 		&types.WalletBalance{},
@@ -43,15 +45,96 @@ func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}
 		&types.BitcoinRate{},
 		&types.WalletAddress{},
 		&types.UserChallenge{},
-		&types.Audio{},
 		&types.PendingTransaction{},
 		&types.ActiveToken{},
+		&types.SubscriberAddress{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
 	}
 
 	return nil
+}
+
+func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Address, error) {
+	tx := store.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Step 1: Check if the npub already has an allocated address
+	var existingAddressRecord types.SubscriberAddress
+	err := tx.Where("npub = ?", npub).First(&existingAddressRecord).Error
+	if err == nil {
+		// If an existing record is found, return it
+		return &types.Address{
+			Index:       existingAddressRecord.Index,
+			Address:     existingAddressRecord.Address,
+			WalletName:  existingAddressRecord.WalletName,
+			Status:      existingAddressRecord.Status,
+			AllocatedAt: existingAddressRecord.AllocatedAt,
+			Npub:        npub,
+		}, nil
+	} else if err != gorm.ErrRecordNotFound {
+		// If another error occurred (not record not found), rollback and return error
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to query existing address for npub: %v", err)
+	}
+
+	// Step 2: Allocate a new address if no existing address is found
+	var addressRecord types.SubscriberAddress
+	err = tx.Where("status = ? AND (npub IS NULL OR npub = '')", AddressStatusAvailable).
+		Order("id").
+		First(&addressRecord).Error
+
+	if err != nil {
+		tx.Rollback()
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("no available addresses")
+		}
+		return nil, fmt.Errorf("failed to query available addresses: %v", err)
+	}
+
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":       AddressStatusAllocated,
+		"allocated_at": &now,
+		"npub":         npub,
+	}
+
+	if err := tx.Model(&addressRecord).Updates(updates).Error; err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to update address allocation: %v", err)
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return &types.Address{
+		Index:       addressRecord.Index,
+		Address:     addressRecord.Address,
+		WalletName:  addressRecord.WalletName,
+		Status:      addressRecord.Status,
+		AllocatedAt: addressRecord.AllocatedAt,
+		Npub:        npub,
+	}, nil
+}
+
+// CountAvailableAddresses counts the number of available addresses in the database
+func (store *GormStatisticsStore) CountAvailableAddresses() (int64, error) {
+	var count int64
+	err := store.DB.Model(&types.SubscriberAddress{}).
+		Where("status = ?", AddressStatusAvailable).
+		Count(&count).Error
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to count available addresses: %v", err)
+	}
+
+	return count, nil
 }
 
 // SaveBitcoinRate checks if the rate has changed and updates it in the database
@@ -155,7 +238,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 	}
 
 	// If the event kind matches relay settings, store it in the database
-	if contains(relaySettings.Kinds, kindStr) {
+	if contains(relaySettings.KindWhitelist, kindStr) {
 		sizeBytes := len(event.ID) + len(event.PubKey) + len(event.Content) + len(event.Sig)
 		for _, tag := range event.Tags {
 			for _, t := range tag {
@@ -214,66 +297,16 @@ func contains(slice []string, item string) bool {
 }
 
 // SaveFile saves the file (photo, video, audio, or misc) based on its type and processing mode (smart or unlimited).
-func (store *GormStatisticsStore) SaveFile(kindName string, relaySettings types.RelaySettings, hash string, leafCount int, sizeMB float64, itemName string) error {
-	mode := relaySettings.Mode
-	kindNameLower := strings.ToLower(kindName)
-
-	// Blocked types
-	blockedTypes := append(append(relaySettings.Photos, relaySettings.Videos...), relaySettings.Audio...)
-
-	// Mode: Smart
-	if mode == "smart" {
-		// Check if the file type is blocked in smart mode
-		if contains(blockedTypes, kindNameLower) {
-			return fmt.Errorf("file type not permitted in smart mode: %s", kindName)
-		}
-		// Proceed to save based on file category
-	} else if mode == "unlimited" {
-		// Check if the file type is blocked in unlimited mode
-		if contains(blockedTypes, kindNameLower) {
-			return fmt.Errorf("blocked file type in unlimited mode: %s", kindName)
-		}
-		// Proceed to save based on file category
-	} else {
-		return fmt.Errorf("unknown mode: %s", mode)
+func (store *GormStatisticsStore) SaveFile(root string, hash string, fileName string, mimeType string, leafCount int, size int64) error {
+	file := types.FileInfo{
+		Root:      root,
+		Hash:      hash,
+		FileName:  fileName,
+		MimeType:  mimeType,
+		LeafCount: leafCount,
+		Size:      size,
 	}
-
-	// Save file in the appropriate category
-	switch {
-	case contains(relaySettings.Photos, kindNameLower):
-		photo := types.Photo{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  kindName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&photo).Error
-	case contains(relaySettings.Videos, kindNameLower):
-		video := types.Video{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  kindName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&video).Error
-	case contains(relaySettings.Audio, kindNameLower):
-		audio := types.Audio{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  kindName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&audio).Error
-	default:
-		// Save under Misc if no specific category is matched
-		misc := types.Misc{
-			Hash:      hash,
-			LeafCount: leafCount,
-			KindName:  itemName,
-			Size:      sizeMB,
-		}
-		return store.DB.Create(&misc).Error
-	}
+	return store.DB.Create(&file).Error
 }
 
 func (store *GormStatisticsStore) DeleteEventByID(eventID string) error {
@@ -291,6 +324,8 @@ func (store *GormStatisticsStore) FetchKindData() ([]types.AggregatedKindData, e
 		log.Println("Error fetching kinds:", err)
 		return nil, err
 	}
+
+	log.Println("Stats DB kinds: ", kinds)
 
 	aggregatedData := make(map[int]types.AggregatedKindData)
 
@@ -415,13 +450,7 @@ func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityDa
 		FROM (
 			SELECT timestamp, size FROM kinds
 			UNION ALL
-			SELECT timestamp, size FROM photos
-			UNION ALL
-			SELECT timestamp, size FROM videos
-			UNION ALL
-			SELECT timestamp, size FROM git_nestrs
-			UNION ALL
-			SELECT timestamp, size FROM audios
+			SELECT timestamp, size FROM file_info
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -447,13 +476,7 @@ func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChart
 		FROM (
 			SELECT timestamp, size, kind_number FROM kinds
 			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM photos
-			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM videos
-			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM git_nestrs
-			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM audios
+			SELECT timestamp, size, NULL as kind_number FROM file_info
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -479,7 +502,7 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 			COUNT(CASE WHEN dht_key THEN 1 ELSE NULL END) as dht_key,
 			COUNT(CASE WHEN lightning_addr AND dht_key THEN 1 ELSE NULL END) as lightning_and_dht
 		FROM user_profiles
-		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) < ?
+		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) <= ?
 		GROUP BY month
 		ORDER BY month ASC;
     `, startDate, endDate).Scan(&data).Error
@@ -511,39 +534,53 @@ func (store *GormStatisticsStore) FetchKindCount() (int, error) {
 	return int(count), err
 }
 
-// FetchPhotoCount retrieves the count of photos from the database
-func (store *GormStatisticsStore) FetchPhotoCount() (int, error) {
+// FetchFileCountByType retrieves the count of stored files for a specific mime type
+func (store *GormStatisticsStore) FetchFileCountByType(mimeType string) (int, error) {
 	var count int64
-	err := store.DB.Model(&types.Photo{}).Count(&count).Error
+	err := store.DB.Model(&types.FileInfo{}).Where("mime_type = ?", mimeType).Count(&count).Error
 	return int(count), err
 }
 
-// FetchVideoCount retrieves the count of videos from the database
-func (store *GormStatisticsStore) FetchVideoCount() (int, error) {
-	var count int64
-	err := store.DB.Model(&types.Video{}).Count(&count).Error
-	return int(count), err
-}
+func (store *GormStatisticsStore) FetchFilesByType(mimeType string, page int, pageSize int) ([]types.FileInfo, *types.PaginationMetadata, error) {
+	var total int64
 
-// FetchGitNestrCount retrieves the count of git_nestr based on the git types from the database
-func (store *GormStatisticsStore) FetchGitNestrCount(gitNestr []string) (int, error) {
-	var count int64
-	err := store.DB.Model(&types.GitNestr{}).Where("git_type IN ?", gitNestr).Count(&count).Error
-	return int(count), err
-}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
 
-// FetchAudioCount retrieves the count of audio entries from the database
-func (store *GormStatisticsStore) FetchAudioCount() (int, error) {
-	var count int64
-	err := store.DB.Model(&types.Audio{}).Count(&count).Error
-	return int(count), err
-}
+	offset := (page - 1) * pageSize
 
-// FetchMiscCount retrieves the count of miscellaneous entries from the database
-func (store *GormStatisticsStore) FetchMiscCount() (int, error) {
-	var count int64
-	err := store.DB.Model(&types.Misc{}).Count(&count).Error
-	return int(count), err
+	result := store.DB.Model(&types.FileInfo{}).Where("mime_type = ?", mimeType).Count(&total)
+	if result.Error != nil {
+		return nil, nil, result.Error
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+
+	var files []types.FileInfo
+	result = store.DB.Where("mime_type = ?", mimeType).
+		Order("timestamp DESC").
+		Limit(pageSize).
+		Offset(offset).
+		Find(&files)
+
+	if result.Error != nil {
+		return nil, nil, result.Error
+	}
+
+	metaData := &types.PaginationMetadata{
+		CurrentPage: page,
+		PageSize:    pageSize,
+		TotalItems:  total,
+		TotalPages:  totalPages,
+		HasNext:     page < totalPages,
+		HasPrevious: page > 1,
+	}
+
+	return files, metaData, nil
 }
 
 // ReplaceTransaction handles replacing a pending transaction with a new one
@@ -746,17 +783,18 @@ func (store *GormStatisticsStore) UserExists() (bool, error) {
 	return count > 0, nil
 }
 
-// AddressExists checks if a wallet address already exists in the database
+// AddressExists checks if a given Bitcoin address exists in the database
 func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
-	var existingAddress types.WalletAddress
-	result := store.DB.Where("address = ?", address).First(&existingAddress)
-	if result.Error == nil {
-		return true, nil
+	var count int64
+	err := store.DB.Model(&types.SubscriberAddress{}).
+		Where("address = ?", address).
+		Count(&count).Error
+
+	if err != nil {
+		return false, fmt.Errorf("failed to check address existence: %v", err)
 	}
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		return false, result.Error
-	}
-	return false, nil
+
+	return count > 0, nil
 }
 
 // SaveAddress saves a new wallet address to the database
@@ -843,4 +881,31 @@ func (store *GormStatisticsStore) IsActiveToken(token string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// GetSubscriberByAddress retrieves subscriber information by Bitcoin address
+func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types.SubscriberAddress, error) {
+	var subscriber types.SubscriberAddress
+
+	err := store.DB.Where("address = ?", address).First(&subscriber).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("no subscriber found for address: %s", address)
+		}
+		return nil, fmt.Errorf("failed to query subscriber: %v", err)
+	}
+
+	return &subscriber, nil
+}
+
+// SaveSubscriberAddress saves or updates a subscriber address in the database
+func (store *GormStatisticsStore) SaveSubscriberAddress(address *types.SubscriberAddress) error {
+	// Directly create a new address record
+	if err := store.DB.Create(address).Error; err != nil {
+		log.Printf("Error saving new address: %v", err)
+		return err
+	}
+
+	log.Printf("Address %s saved successfully.", address.Address)
+	return nil
 }

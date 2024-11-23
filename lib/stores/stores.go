@@ -10,22 +10,25 @@ import (
 
 type Store interface {
 	InitStore(basepath string, args ...interface{}) error
+	Cleanup() error
 
 	// Statistics Store
 	GetStatsStore() StatisticsStore
 
 	// Hornet Storage
-	StoreLeaf(root string, leafData *types.DagLeafData) error
-	RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error)
-	QueryDag(filter map[string]string) ([]string, error)
-	StoreDag(dag *types.DagData) error
-	BuildDagFromStore(root string, includeContent bool) (*types.DagData, error)
-	RetrieveLeafContent(contentHash []byte) ([]byte, error)
+	StoreLeaf(root string, leafData *types.DagLeafData, temp bool) error
+	RetrieveLeaf(root string, hash string, includeContent bool, temp bool) (*types.DagLeafData, error)
+	QueryDag(filter map[string]string, temp bool) ([]string, error)
+	QueryDagAdvanced(filter types.QueryFilter, temp bool) ([]string, error)
+	StoreDag(dag *types.DagData, temp bool) error
+	BuildDagFromStore(root string, includeContent bool, temp bool) (*types.DagData, error)
+	RetrieveLeafContent(contentHash []byte, temp bool) ([]byte, error)
 
 	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
 	StoreEvent(event *nostr.Event) error
 	DeleteEvent(eventID string) error
+	QueryBlobs(mimeType string) ([]string, error)
 
 	// Blossom
 	StoreBlob(data []byte, hash []byte, publicKey string) error
@@ -41,7 +44,7 @@ type Store interface {
 	AllocateAddress() (*types.Address, error)
 }
 
-func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {
+func BuildDagFromStore(store Store, root string, includeContent bool, temp bool) (*types.DagData, error) {
 	builder := merkle_dag.CreateDagBuilder()
 
 	var publicKey *string
@@ -49,7 +52,7 @@ func BuildDagFromStore(store Store, root string, includeContent bool) (*types.Da
 	var addLeavesRecursively func(builder *merkle_dag.DagBuilder, hash string) error
 
 	addLeavesRecursively = func(builder *merkle_dag.DagBuilder, hash string) error {
-		data, err := store.RetrieveLeaf(root, hash, includeContent)
+		data, err := store.RetrieveLeaf(root, hash, includeContent, temp)
 
 		leaf := data.Leaf
 
@@ -100,7 +103,19 @@ func BuildDagFromStore(store Store, root string, includeContent bool) (*types.Da
 	return data, nil
 }
 
-func StoreDag(store Store, dag *types.DagData) error {
+func StoreDag(store Store, dag *types.DagData, temp bool) error {
+	err := dag.Dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) error {
+		store.StoreLeaf(dag.Dag.Root, &types.DagLeafData{
+			PublicKey: dag.PublicKey,
+			Signature: dag.Signature,
+			Leaf:      *dag.Dag.Leafs[dag.Dag.Root],
+		}, temp)
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

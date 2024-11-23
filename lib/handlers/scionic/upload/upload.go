@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -99,7 +100,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			Leaf:      message.Leaf,
 		}
 
-		err = store.StoreLeaf(message.Root, rootData)
+		err = store.StoreLeaf(message.Root, rootData, true)
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to verify root leaf", err))
 			return
@@ -126,7 +127,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 				break
 			}
 
-			parentData, err := store.RetrieveLeaf(message.Root, message.Parent, false)
+			parentData, err := store.RetrieveLeaf(message.Root, message.Parent, false, true)
 			if err != nil {
 				write(utils.BuildErrorMessage("Failed to find parent leaf", err))
 				break
@@ -146,7 +147,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 				Leaf: message.Leaf,
 			}
 
-			err = store.StoreLeaf(message.Root, data)
+			err = store.StoreLeaf(message.Root, data, true)
 			if err != nil {
 				write(utils.BuildErrorMessage("Failed to add leaf to block database", err))
 				return
@@ -161,16 +162,47 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			}
 		}
 
-		dagData, err := store.BuildDagFromStore(message.Root, true)
+		// Rebuild the dag from the temporary database
+		dagData, err := store.BuildDagFromStore(message.Root, true, true)
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to build dag from provided leaves", err))
 			return
 		}
 
+		// Verify the dag
 		err = dagData.Dag.Verify()
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to verify dag", err))
 			return
+		}
+
+		// Check to see if any data in the dag is not allows to be stored by this relay
+		for _, leaf := range dagData.Dag.Leafs {
+			if leaf.Type == "File" {
+				data, err := dagData.Dag.GetContentFromLeaf(leaf)
+				if err != nil {
+					write(utils.BuildErrorMessage("Failed to extract content from file leaf", err))
+					return
+				}
+
+				mimeType := mimetype.Detect(data)
+
+				if !utils.IsMimeTypePermitted(mimeType.String()) {
+					write(utils.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", err))
+					return
+				}
+
+				err = store.GetStatsStore().SaveFile(dagData.Dag.Root, leaf.Hash, leaf.ItemName, mimeType.String(), len(leaf.Links), int64(len(data)))
+				if err != nil {
+
+				}
+			}
+		}
+
+		// Store dag in the long term database
+		err = store.StoreDag(dagData, false)
+		if err != nil {
+			write(utils.BuildErrorMessage("Failed to commit dag to long term store", err))
 		}
 
 		handleRecievedDag(&dagData.Dag, &message.PublicKey)

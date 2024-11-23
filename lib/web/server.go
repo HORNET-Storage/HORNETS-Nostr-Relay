@@ -67,7 +67,10 @@ func StartServer(store stores.Store) error {
 	secured.Get("/relaycount", func(c *fiber.Ctx) error {
 		return getRelayCount(c, store)
 	})
-	secured.Post("/relay-settings", updateRelaySettings)
+	secured.Post("/relay-settings", func(c *fiber.Ctx) error {
+		return updateRelaySettings(c, store)
+	})
+
 	secured.Get("/relay-settings", getRelaySettings)
 	secured.Get("/timeseries", func(c *fiber.Ctx) error {
 		return getProfilesTimeSeriesData(c, store)
@@ -110,6 +113,10 @@ func StartServer(store stores.Store) error {
 		return getPendingTransactions(c, store)
 	})
 	secured.Post("/refresh-token", refreshToken)
+
+	secured.Get("/files", func(c *fiber.Ctx) error {
+		return HandleGetFilesByType(c, store)
+	})
 
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
