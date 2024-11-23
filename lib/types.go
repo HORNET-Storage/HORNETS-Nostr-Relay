@@ -160,12 +160,13 @@ type BitcoinRate struct {
 }
 
 type RelaySettings struct {
-	Mode            string   `json:"mode"`
-	Protocol        []string `json:"protocol"`
-	Chunked         []string `json:"chunked"`
-	Chunksize       string   `json:"chunksize"`
-	MaxFileSize     int      `json:"maxFileSize"`
-	MaxFileSizeUnit string   `json:"maxFileSizeUnit"`
+	Mode              string             `json:"mode"`
+	Protocol          []string           `json:"protocol"`
+	Chunked           []string           `json:"chunked"`
+	Chunksize         string             `json:"chunksize"`
+	MaxFileSize       int                `json:"maxFileSize"`
+	MaxFileSizeUnit   string             `json:"maxFileSizeUnit"`
+	SubscriptionTiers []SubscriptionTier `json:"subscription_tiers"`
 
 	// Common type groups used for determining what types are considered audio, videos, images etc
 	MimeTypeGroups map[string][]string

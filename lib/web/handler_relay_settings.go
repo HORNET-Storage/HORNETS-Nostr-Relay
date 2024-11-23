@@ -4,12 +4,15 @@ import (
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/viper"
 )
 
-func updateRelaySettings(c *fiber.Ctx) error {
+func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Relay settings request received")
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	var data map[string]interface{}
@@ -39,6 +42,34 @@ func updateRelaySettings(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
+	var currentRelaySettings types.RelaySettings
+
+	// Fetch settings from Viper
+	err = viper.UnmarshalKey("relay_settings", &currentRelaySettings)
+	if err != nil {
+		log.Printf("Error unmarshaling relay settings: %s", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
+	}
+
+	// Compare existing tiers with the new tiers
+	if tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers) {
+		log.Println("Subscription tiers have changed, creating a new kind 411 event")
+
+		serializedPrivateKey := viper.GetString("private_key")
+		// Load private and public keys
+		privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey) // Assume a function to load private and public keys
+		if err != nil {
+			log.Println("Error loading keys:", err)
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to load keys")
+		}
+
+		// Create kind 411 event using the provided store instance
+		if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
+			log.Println("Error creating kind 411 event:", err)
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to create kind 411 event")
+		}
+	}
+
 	// Store in Viper
 	viper.Set("relay_settings", relaySettings)
 
@@ -51,6 +82,21 @@ func updateRelaySettings(c *fiber.Ctx) error {
 	log.Println("Stored relay settings:", relaySettings)
 
 	return c.SendStatus(fiber.StatusOK)
+}
+
+// Function to compare existing tiers with new tiers
+func tiersChanged(existing, new []types.SubscriptionTier) bool {
+	if len(existing) != len(new) {
+		return true
+	}
+
+	for i := range existing {
+		if existing[i].DataLimit != new[i].DataLimit || existing[i].Price != new[i].Price {
+			return true
+		}
+	}
+
+	return false
 }
 
 func getRelaySettings(c *fiber.Ctx) error {
