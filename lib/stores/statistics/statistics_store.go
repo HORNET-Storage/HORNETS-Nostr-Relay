@@ -1,4 +1,4 @@
-package stores
+package statistics
 
 import (
 	"time"
@@ -9,9 +9,6 @@ import (
 
 // StatisticsStore defines the interface for storing and retrieving statistical data.
 type StatisticsStore interface {
-	// General initialization for the store
-	InitStore(basepath string, args ...interface{}) error
-
 	// Bitcoin-related statistics
 	SaveBitcoinRate(rate float64) error
 	GetBitcoinRatesLast30Days() ([]types.BitcoinRate, error)
@@ -31,9 +28,9 @@ type StatisticsStore interface {
 	// User registration and authentication
 	SignUpUser(npub string, password string) error
 	ComparePasswords(hashedPassword, password string) error
-	FindUserByNpub(npub string) (*types.User, error)
+	FindUserByNpub(npub string) (*types.AdminUser, error)
 	UserExists() (bool, error)
-	GetUserByID(userID uint) (types.User, error)
+	GetUserByID(userID uint) (types.AdminUser, error)
 
 	// File-related statistics (photos, videos, etc.)
 	SaveFile(root string, hash string, fileName string, mimeType string, leafCount int, size int64) error

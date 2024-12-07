@@ -102,22 +102,22 @@ type CacheData struct {
 }
 
 type Kind struct {
-	ID         uint `gorm:"primaryKey"`
-	KindNumber int
-	EventID    string
-	Timestamp  time.Time `gorm:"autoCreateTime"`
-	Size       float64   `gorm:"default:0"`
+	ID               uint `gorm:"primaryKey"`
+	KindNumber       int
+	EventID          string
+	TimestampHornets time.Time `gorm:"autoCreateTime"`
+	Size             float64
 }
 
 type FileInfo struct {
-	ID        uint   `gorm:"primaryKey"`
-	Root      string `gorm:"index"`
-	Hash      string `gorm:"uniqueIndex"`
-	FileName  string
-	MimeType  string `gorm:"index"`
-	LeafCount int
-	Size      int64     `gorm:"default:0"`
-	Timestamp time.Time `gorm:"autoCreateTime"`
+	ID               uint   `gorm:"primaryKey"`
+	Root             string `gorm:"size:64;index"`
+	Hash             string `gorm:"size:64;uniqueIndex"`
+	FileName         string
+	MimeType         string `gorm:"size:64;index"`
+	LeafCount        int
+	Size             int64     `gorm:"default:0"`
+	TimestampHornets time.Time `gorm:"autoCreateTime"`
 }
 
 func (FileInfo) TableName() string {
@@ -134,9 +134,9 @@ type PaginationMetadata struct {
 }
 
 type WalletBalance struct {
-	ID        uint      `gorm:"primaryKey"`
-	Balance   string    `gorm:"not null"`
-	Timestamp time.Time `gorm:"autoCreateTime"`
+	ID               uint      `gorm:"primaryKey"`
+	Balance          string    `gorm:"not null"`
+	TimestampHornets time.Time `gorm:"autoCreateTime"`
 }
 
 type WalletTransactions struct {
@@ -148,15 +148,15 @@ type WalletTransactions struct {
 }
 
 type WalletAddress struct {
-	ID      uint   `gorm:"primaryKey"`
-	Index   string `gorm:"not null"`
-	Address string `gorm:"not null;unique"`
+	ID           uint   `gorm:"primaryKey"`
+	IndexHornets string `gorm:"not null"`
+	Address      string `gorm:"not null;unique"`
 }
 
 type BitcoinRate struct {
-	ID        uint      `gorm:"primaryKey"`
-	Rate      float64   `gorm:"not null"`
-	Timestamp time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
+	ID               uint      `gorm:"primaryKey"`
+	Rate             float64   `gorm:"not null"`
+	TimestampHornets time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
 }
 
 type RelaySettings struct {
@@ -202,16 +202,16 @@ type TimeSeriesData struct {
 }
 
 type UserProfile struct {
-	ID            uint      `gorm:"primaryKey"`
-	NpubKey       string    `gorm:"uniqueIndex"`
-	LightningAddr bool      `gorm:"default:false"`
-	DHTKey        bool      `gorm:"default:false"`
-	Timestamp     time.Time `gorm:"autoCreateTime"`
+	ID               uint      `gorm:"primaryKey"`
+	NpubKey          string    `gorm:"size:128;uniqueIndex"`
+	LightningAddr    bool      `gorm:"default:false"`
+	DHTKey           bool      `gorm:"default:false"`
+	TimestampHornets time.Time `gorm:"autoCreateTime"`
 }
 
 type ActiveToken struct {
-	UserID    uint   `gorm:"index"`
-	Token     string `gorm:"uniqueIndex"`
+	UserID    uint   `gorm:"primaryKey"`
+	Token     string `gorm:"size:512;uniqueIndex"`
 	ExpiresAt time.Time
 }
 
@@ -226,21 +226,21 @@ type BarChartData struct {
 	MediaGB float64 `json:"media_gb"`
 }
 
-type User struct {
+type AdminUser struct {
 	ID        uint      `gorm:"primaryKey"`
-	Password  string    // Store hashed passwords
-	Npub      string    `gorm:"uniqueIndex"`
+	Pass      string    // Store hashed passwords
+	Npub      string    `gorm:"size:128;uniqueIndex"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
 
 type PendingTransaction struct {
 	ID               uint      `gorm:"primaryKey"`
-	TxID             string    `gorm:"not null;uniqueIndex" json:"txid"`
+	TxID             string    `gorm:"not null;size:128;uniqueIndex" json:"txid"`
 	FeeRate          int       `gorm:"not null" json:"feeRate"`
 	Amount           int       `gorm:"not null" json:"amount"`
 	RecipientAddress string    `gorm:"not null" json:"recipient_address"`
-	Timestamp        time.Time `gorm:"not null" json:"timestamp"`
+	TimestampHornets time.Time `gorm:"not null" json:"timestamp"`
 	EnableRBF        bool      `gorm:"not null" json:"enable_rbf"` // New field for RBF
 }
 
@@ -254,12 +254,12 @@ type ReplaceTransactionRequest struct {
 
 // Address structure to be stored in Graviton
 type Address struct {
-	Index       string     `json:"index,string"` // Use string tag to handle string-encoded integers
-	Address     string     `json:"address"`
-	WalletName  string     `json:"wallet_name"`
-	Status      string     `json:"status"`
-	AllocatedAt *time.Time `json:"allocated_at,omitempty"`
-	Npub        string     `json:"npub,omitempty"`
+	IndexHornets string     `json:"index,string"` // Use string tag to handle string-encoded integers
+	Address      string     `json:"address"`
+	WalletName   string     `json:"wallet_name"`
+	Status       string     `json:"status"`
+	AllocatedAt  *time.Time `json:"allocated_at,omitempty"`
+	Npub         string     `json:"npub,omitempty"`
 }
 
 // type User struct {
@@ -284,20 +284,20 @@ type Subscriber struct {
 
 // SubscriberAddress represents the GORM-compatible model for storing addresses
 type SubscriberAddress struct {
-	ID          uint       `gorm:"primaryKey"`
-	Index       string     `gorm:"not null"`
-	Address     string     `gorm:"not null;unique"`
-	WalletName  string     `gorm:"not null"`
-	Status      string     `gorm:"default:'available'"`
-	AllocatedAt *time.Time `gorm:"default:null"`
-	Npub        *string    `gorm:"type:text;unique"` // Pointer type and unique constraint
+	ID           uint       `gorm:"primaryKey"`
+	IndexHornets string     `gorm:"not null"`
+	Address      string     `gorm:"not null;size:128;unique"`
+	WalletName   string     `gorm:"not null"`
+	Status       string     `gorm:"default:'available'"`
+	AllocatedAt  *time.Time `gorm:"default:null"`
+	Npub         *string    `gorm:"type:text;unique"` // Pointer type and unique constraint
 }
 
 type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
 	UserID    uint   `gorm:"index"`
-	Npub      string `gorm:"index"`
-	Challenge string `gorm:"uniqueIndex"`
+	Npub      string `gorm:"size:128;index"`
+	Challenge string `gorm:"size:512;uniqueIndex"`
 	Hash      string
 	Expired   bool      `gorm:"default:false"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
@@ -375,9 +375,9 @@ type AggregatedKindData struct {
 }
 
 type KindData struct {
-	Month     string
-	Size      float64
-	Timestamp time.Time
+	Month            string
+	Size             float64
+	TimestampHornets time.Time
 }
 
 type MonthlyKindData struct {
@@ -423,6 +423,6 @@ func (ws *WebSocketStream) Context() context.Context {
 }
 
 type AddressResponse struct {
-	Index   string `json:"index"`
-	Address string `json:"address"`
+	IndexHornets string `json:"index"`
+	Address      string `json:"address"`
 }

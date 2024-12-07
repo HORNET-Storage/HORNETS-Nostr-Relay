@@ -18,14 +18,12 @@
 
 data
 
-
-leaves
-content
-gravitondb
-hornet-storage
+/gravitondb
+/immudb
 
 config.json
 
 
 **/.DS_Store
 
+/temp-*

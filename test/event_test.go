@@ -35,11 +35,12 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 
 	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/immudb"
 	net "github.com/libp2p/go-libp2p/core/network"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	// 	negentropy "github.com/illuzen/go-negentropy"
@@ -143,15 +144,15 @@ func deleteFileIfExists(filename string) error {
 	return nil
 }
 
-func setupStore(basepath string) *stores_graviton.GravitonStore {
-	store := &stores_graviton.GravitonStore{}
+func setupStore(basepath string) stores.Store {
 	err := deleteFileIfExists(basepath)
 	if err != nil {
 		return nil
 	}
-	err = store.InitStore(basepath)
+
+	store, err := immudb.InitStore(basepath)
 	if err != nil {
-		return nil
+		log.Fatal(err)
 	}
 
 	handlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
@@ -193,7 +194,7 @@ func EventsEqual(a, b *nostr.Event) bool {
 		reflect.DeepEqual(a.Tags, b.Tags)
 }
 
-func GenerateRandomEvents(numEvents int, stores []*stores_graviton.GravitonStore) error {
+func GenerateRandomEvents(numEvents int, stores []stores.Store) error {
 	log.Printf("Generating %d random events and storing in graviton\n", numEvents)
 	for i := 0; i < numEvents; i++ {
 		event := GenerateRandomEvent()
@@ -224,7 +225,7 @@ func TestEventGenerationStorageRetrieval(t *testing.T) {
 	store := setupStore("test")
 	numEvents := 1000
 
-	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store})
+	err := GenerateRandomEvents(numEvents, []stores.Store{store})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestHostCommunication(t *testing.T) {
 
 	store1 := setupStore("test")
 	numEvents := 100
-	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1})
+	err := GenerateRandomEvents(numEvents, []stores.Store{store1})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
@@ -350,15 +351,15 @@ func TestNegentropyEventSync(t *testing.T) {
 	store2 := setupStore("store2")
 	numEvents := 1000
 	// give some events to both, so total events at end should be 3 * numEvents each
-	err := GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1, store2})
+	err := GenerateRandomEvents(numEvents, []stores.Store{store1, store2})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
-	err = GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store1})
+	err = GenerateRandomEvents(numEvents, []stores.Store{store1})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}
-	err = GenerateRandomEvents(numEvents, []*stores_graviton.GravitonStore{store2})
+	err = GenerateRandomEvents(numEvents, []stores.Store{store2})
 	if err != nil {
 		t.Fatalf("Error generating events: %v", err)
 	}

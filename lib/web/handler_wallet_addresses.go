@@ -10,6 +10,7 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 )
@@ -90,7 +91,7 @@ func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 }
 
 // processAddress handles individual address processing, ensuring atomicity and reducing contention.
-func processAddress(addr types.Address, expectedWalletName string, statsStore stores.StatisticsStore) error {
+func processAddress(addr types.Address, expectedWalletName string, statsStore statistics.StatisticsStore) error {
 	if addr.WalletName != expectedWalletName {
 		log.Printf("Skipping address from unknown wallet: %s", addr.WalletName)
 		return nil
@@ -104,8 +105,8 @@ func processAddress(addr types.Address, expectedWalletName string, statsStore st
 	}
 	if !existsInStatsStore {
 		newStatsAddress := types.WalletAddress{
-			Index:   addr.Index,
-			Address: addr.Address,
+			IndexHornets: addr.IndexHornets,
+			Address:      addr.Address,
 		}
 		if err := statsStore.SaveAddress(&newStatsAddress); err != nil {
 			log.Printf("Error saving new address to StatsStore: %v", err)
@@ -122,12 +123,12 @@ func processAddress(addr types.Address, expectedWalletName string, statsStore st
 	}
 	if !existsInSubscriberStore {
 		subscriptionAddress := &types.SubscriberAddress{
-			Index:       fmt.Sprint(addr.Index),
-			Address:     addr.Address,
-			WalletName:  addr.WalletName,
-			Status:      AddressStatusAvailable,
-			AllocatedAt: &time.Time{},
-			Npub:        nil,
+			IndexHornets: fmt.Sprint(addr.IndexHornets),
+			Address:      addr.Address,
+			WalletName:   addr.WalletName,
+			Status:       AddressStatusAvailable,
+			AllocatedAt:  &time.Time{},
+			Npub:         nil,
 		}
 		if err := statsStore.SaveSubscriberAddress(subscriptionAddress); err != nil {
 			log.Printf("Error saving SubscriberAddress to SubscriberStore: %v", err)

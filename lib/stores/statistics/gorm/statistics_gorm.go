@@ -12,7 +12,6 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -26,20 +25,13 @@ const (
 	AddressStatusAllocated = "allocated"
 )
 
-// InitStore initializes the GORM DB (can be swapped for another DB).
-func (store *GormStatisticsStore) InitStore(basepath string, args ...interface{}) error {
-	var err error
-	store.DB, err = gorm.Open(sqlite.Open(basepath), &gorm.Config{})
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %v", err)
-	}
-
-	// Auto migrate the schema
-	err = store.DB.AutoMigrate(
+// Generic Init for gorm
+func (store *GormStatisticsStore) Init() error {
+	err := store.DB.AutoMigrate(
 		&types.Kind{},
 		&types.FileInfo{},
 		&types.UserProfile{},
-		&types.User{},
+		&types.AdminUser{},
 		&types.WalletBalance{},
 		&types.WalletTransactions{},
 		&types.BitcoinRate{},
@@ -70,12 +62,12 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 	if err == nil {
 		// If an existing record is found, return it
 		return &types.Address{
-			Index:       existingAddressRecord.Index,
-			Address:     existingAddressRecord.Address,
-			WalletName:  existingAddressRecord.WalletName,
-			Status:      existingAddressRecord.Status,
-			AllocatedAt: existingAddressRecord.AllocatedAt,
-			Npub:        npub,
+			IndexHornets: existingAddressRecord.IndexHornets,
+			Address:      existingAddressRecord.Address,
+			WalletName:   existingAddressRecord.WalletName,
+			Status:       existingAddressRecord.Status,
+			AllocatedAt:  existingAddressRecord.AllocatedAt,
+			Npub:         npub,
 		}, nil
 	} else if err != gorm.ErrRecordNotFound {
 		// If another error occurred (not record not found), rollback and return error
@@ -114,12 +106,12 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 	}
 
 	return &types.Address{
-		Index:       addressRecord.Index,
-		Address:     addressRecord.Address,
-		WalletName:  addressRecord.WalletName,
-		Status:      addressRecord.Status,
-		AllocatedAt: addressRecord.AllocatedAt,
-		Npub:        npub,
+		IndexHornets: addressRecord.IndexHornets,
+		Address:      addressRecord.Address,
+		WalletName:   addressRecord.WalletName,
+		Status:       addressRecord.Status,
+		AllocatedAt:  addressRecord.AllocatedAt,
+		Npub:         npub,
 	}, nil
 }
 
@@ -141,7 +133,7 @@ func (store *GormStatisticsStore) CountAvailableAddresses() (int64, error) {
 func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 	// Query the latest Bitcoin rate
 	var latestBitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp desc").First(&latestBitcoinRate)
+	result := store.DB.Order("timestamp_hornets desc").First(&latestBitcoinRate)
 
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
 		log.Printf("Error querying bitcoin rate: %v", result.Error)
@@ -156,8 +148,8 @@ func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 
 	// Add the new rate
 	newRate := types.BitcoinRate{
-		Rate:      rate,
-		Timestamp: time.Now(),
+		Rate:             rate,
+		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
 		log.Printf("Error saving new rate: %v", err)
@@ -175,7 +167,7 @@ func (store *GormStatisticsStore) GetBitcoinRatesLast30Days() ([]types.BitcoinRa
 
 	// Query the Bitcoin rates for the last 30 days
 	var bitcoinRates []types.BitcoinRate
-	result := store.DB.Where("timestamp >= ?", thirtyDaysAgo).Order("timestamp asc").Find(&bitcoinRates)
+	result := store.DB.Where("timestamp_hornets >= ?", thirtyDaysAgo).Order("timestamp_hornets asc").Find(&bitcoinRates)
 
 	if result.Error != nil {
 		log.Printf("Error querying Bitcoin rates: %v", result.Error)
@@ -269,10 +261,10 @@ func (store *GormStatisticsStore) UpsertUserProfile(npubKey string, lightningAdd
 		if result.Error == gorm.ErrRecordNotFound {
 			// Create new user profile
 			userProfile = types.UserProfile{
-				NpubKey:       npubKey,
-				LightningAddr: lightningAddr,
-				DHTKey:        dhtKey,
-				Timestamp:     createdAt,
+				NpubKey:          npubKey,
+				LightningAddr:    lightningAddr,
+				DHTKey:           dhtKey,
+				TimestampHornets: createdAt,
 			}
 			return store.DB.Create(&userProfile).Error
 		}
@@ -282,7 +274,7 @@ func (store *GormStatisticsStore) UpsertUserProfile(npubKey string, lightningAdd
 	// Update existing user profile
 	userProfile.LightningAddr = lightningAddr
 	userProfile.DHTKey = dhtKey
-	userProfile.Timestamp = createdAt
+	userProfile.TimestampHornets = createdAt
 	return store.DB.Save(&userProfile).Error
 }
 
@@ -362,9 +354,9 @@ func (store *GormStatisticsStore) FetchKindData() ([]types.AggregatedKindData, e
 func (store *GormStatisticsStore) FetchKindTrendData(kindNumber int) ([]types.MonthlyKindData, error) {
 	var data []types.KindData
 	query := `
-		SELECT timestamp, size
+		SELECT timestamp_hornets, size
 		FROM kinds
-		WHERE kind_number = ? AND timestamp >= date('now', '-12 months')
+		WHERE kind_number = ? AND timestamp_hornets >= date('now', '-12 months')
 	`
 	err := store.DB.Raw(query, kindNumber).Scan(&data).Error
 	if err != nil {
@@ -380,7 +372,7 @@ func (store *GormStatisticsStore) FetchKindTrendData(kindNumber int) ([]types.Mo
 	// Aggregate data by month
 	monthlyData := make(map[string]float64)
 	for _, row := range data {
-		month := row.Timestamp.Format("2006-01")
+		month := row.TimestampHornets.Format("2006-01")
 		monthlyData[month] += row.Size
 	}
 
@@ -399,8 +391,8 @@ func (store *GormStatisticsStore) FetchKindTrendData(kindNumber int) ([]types.Mo
 }
 
 // FindUserByNpub finds a user by their npub (public key)
-func (store *GormStatisticsStore) FindUserByNpub(npub string) (*types.User, error) {
-	var user types.User
+func (store *GormStatisticsStore) FindUserByNpub(npub string) (*types.AdminUser, error) {
+	var user types.AdminUser
 	if err := store.DB.Where("npub = ?", npub).First(&user).Error; err != nil {
 		log.Printf("User not found: %v", err)
 		return nil, err
@@ -445,12 +437,12 @@ func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityDa
 	// Query to get the total GBs per month across different tables
 	err := store.DB.Raw(`
 		SELECT 
-			strftime('%Y-%m', timestamp) as month,
+			strftime('%Y-%m', timestamp_hornets) as month,
 			ROUND(SUM(size) / 1024.0, 3) as total_gb
 		FROM (
-			SELECT timestamp, size FROM kinds
+			SELECT timestamp_hornets, size FROM kinds
 			UNION ALL
-			SELECT timestamp, size FROM file_info
+			SELECT timestamp_hornets, size FROM file_info
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -470,13 +462,13 @@ func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChart
 	// Query to get the total GBs per month for notes and media
 	err := store.DB.Raw(`
 		SELECT 
-			strftime('%Y-%m', timestamp) as month,
+			strftime('%Y-%m', timestamp_hornets) as month,
 			ROUND(SUM(CASE WHEN kind_number IS NOT NULL THEN size ELSE 0 END) / 1024.0, 3) as notes_gb,  -- Convert to GB and round to 2 decimal places
 			ROUND(SUM(CASE WHEN kind_number IS NULL THEN size ELSE 0 END) / 1024.0, 3) as media_gb  -- Convert to GB and round to 2 decimal places
 		FROM (
-			SELECT timestamp, size, kind_number FROM kinds
+			SELECT timestamp_hornets, size, kind_number FROM kinds
 			UNION ALL
-			SELECT timestamp, size, NULL as kind_number FROM file_info
+			SELECT timestamp_hornets, size, NULL as kind_number FROM file_info
 		)
 		GROUP BY month
 	`).Scan(&data).Error
@@ -496,13 +488,13 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 	// Query to get profile data from the last 6 months
 	err := store.DB.Raw(`
         SELECT
-			strftime('%Y-%m', timestamp) as month,
+			strftime('%Y-%m', timestamp_hornets) as month,
 			COUNT(*) as profiles,
 			COUNT(CASE WHEN lightning_addr THEN 1 ELSE NULL END) as lightning_addr,
 			COUNT(CASE WHEN dht_key THEN 1 ELSE NULL END) as dht_key,
 			COUNT(CASE WHEN lightning_addr AND dht_key THEN 1 ELSE NULL END) as lightning_and_dht
 		FROM user_profiles
-		WHERE strftime('%Y-%m', timestamp) >= ? AND strftime('%Y-%m', timestamp) <= ?
+		WHERE strftime('%Y-%m', timestamp_hornets) >= ? AND strftime('%Y-%m', timestamp_hornets) <= ?
 		GROUP BY month
 		ORDER BY month ASC;
     `, startDate, endDate).Scan(&data).Error
@@ -562,7 +554,7 @@ func (store *GormStatisticsStore) FetchFilesByType(mimeType string, page int, pa
 
 	var files []types.FileInfo
 	result = store.DB.Where("mime_type = ?", mimeType).
-		Order("timestamp DESC").
+		Order("timestamp_hornets DESC").
 		Limit(pageSize).
 		Offset(offset).
 		Find(&files)
@@ -608,7 +600,7 @@ func (store *GormStatisticsStore) ReplaceTransaction(replaceRequest types.Replac
 		FeeRate:          replaceRequest.NewFeeRate,
 		Amount:           replaceRequest.Amount,
 		RecipientAddress: replaceRequest.RecipientAddress,
-		Timestamp:        time.Now(),
+		TimestampHornets: time.Now(),
 	}
 
 	if err := store.DB.Create(&newPendingTransaction).Error; err != nil {
@@ -622,7 +614,7 @@ func (store *GormStatisticsStore) ReplaceTransaction(replaceRequest types.Replac
 // SaveUnconfirmedTransaction saves an unconfirmed transaction to the database
 func (store *GormStatisticsStore) SaveUnconfirmedTransaction(pendingTransaction *types.PendingTransaction) error {
 	// Ensure Timestamp is populated
-	pendingTransaction.Timestamp = time.Now()
+	pendingTransaction.TimestampHornets = time.Now()
 
 	// Save the pending transaction to the database
 	if err := store.DB.Create(pendingTransaction).Error; err != nil {
@@ -643,9 +635,9 @@ func (store *GormStatisticsStore) SignUpUser(npub string, password string) error
 	}
 
 	// Create the user object
-	user := types.User{
-		Password: string(hashedPassword),
-		Npub:     npub,
+	user := types.AdminUser{
+		Pass: string(hashedPassword),
+		Npub: npub,
 	}
 
 	// Save the user in the database
@@ -662,7 +654,7 @@ func (store *GormStatisticsStore) GetPendingTransactions() ([]types.PendingTrans
 	var pendingTransactions []types.PendingTransaction
 
 	// Query all pending transactions ordered by timestamp (descending)
-	result := store.DB.Order("timestamp desc").Find(&pendingTransactions)
+	result := store.DB.Order("timestamp_hornets desc").Find(&pendingTransactions)
 	if result.Error != nil {
 		log.Printf("Error querying pending transactions: %v", result.Error)
 		return nil, result.Error
@@ -675,7 +667,7 @@ func (store *GormStatisticsStore) GetPendingTransactions() ([]types.PendingTrans
 func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 	// Query the latest Bitcoin rate
 	var latestBitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp desc").First(&latestBitcoinRate)
+	result := store.DB.Order("timestamp_hornets desc").First(&latestBitcoinRate)
 
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
 		log.Printf("Error querying bitcoin rate: %v", result.Error)
@@ -690,8 +682,8 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 
 	// Add the new rate
 	newRate := types.BitcoinRate{
-		Rate:      rate,
-		Timestamp: time.Now(),
+		Rate:             rate,
+		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
 		log.Printf("Error saving new rate: %v", err)
@@ -706,7 +698,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string) error {
 	// Query the latest wallet balance
 	var latestBalance types.WalletBalance
-	result := store.DB.Order("timestamp desc").First(&latestBalance)
+	result := store.DB.Order("timestamp_hornets desc").First(&latestBalance)
 
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
 		log.Printf("Error querying latest balance: %v", result.Error)
@@ -721,8 +713,8 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 
 	// Add a new balance entry
 	newBalance := types.WalletBalance{
-		Balance:   balance,
-		Timestamp: time.Now(),
+		Balance:          balance,
+		TimestampHornets: time.Now(),
 	}
 
 	if err := store.DB.Create(&newBalance).Error; err != nil {
@@ -776,7 +768,7 @@ func (store *GormStatisticsStore) TransactionExists(address string, date time.Ti
 // UserExists checks if any user exists in the database
 func (store *GormStatisticsStore) UserExists() (bool, error) {
 	var count int64
-	err := store.DB.Model(&types.User{}).Count(&count).Error
+	err := store.DB.Model(&types.AdminUser{}).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
@@ -805,7 +797,7 @@ func (store *GormStatisticsStore) SaveAddress(address *types.WalletAddress) erro
 // GetLatestWalletBalance retrieves the latest wallet balance from the database
 func (store *GormStatisticsStore) GetLatestWalletBalance() (types.WalletBalance, error) {
 	var latestBalance types.WalletBalance
-	result := store.DB.Order("timestamp desc").First(&latestBalance)
+	result := store.DB.Order("timestamp_hornets desc").First(&latestBalance)
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
@@ -820,7 +812,7 @@ func (store *GormStatisticsStore) GetLatestWalletBalance() (types.WalletBalance,
 // GetLatestBitcoinRate retrieves the latest Bitcoin rate from the database
 func (store *GormStatisticsStore) GetLatestBitcoinRate() (types.BitcoinRate, error) {
 	var bitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp desc").First(&bitcoinRate)
+	result := store.DB.Order("timestamp_hornets desc").First(&bitcoinRate)
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
@@ -847,8 +839,8 @@ func (store *GormStatisticsStore) MarkChallengeExpired(userChallenge *types.User
 }
 
 // GetUserByID retrieves a user by their ID
-func (store *GormStatisticsStore) GetUserByID(userID uint) (types.User, error) {
-	var user types.User
+func (store *GormStatisticsStore) GetUserByID(userID uint) (types.AdminUser, error) {
+	var user types.AdminUser
 	if err := store.DB.Where("id = ?", userID).First(&user).Error; err != nil {
 		return user, err
 	}

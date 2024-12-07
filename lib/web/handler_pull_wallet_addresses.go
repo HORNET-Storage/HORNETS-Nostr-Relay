@@ -23,8 +23,8 @@ func pullWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	var addresses []types.AddressResponse
 	for _, wa := range walletAddresses {
 		addresses = append(addresses, types.AddressResponse{
-			Index:   wa.Index,
-			Address: wa.Address,
+			IndexHornets: wa.IndexHornets,
+			Address:      wa.Address,
 		})
 	}
 

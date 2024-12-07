@@ -8,8 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
-	"github.com/spf13/viper"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
 type CoinGeckoResponse struct {
@@ -110,14 +109,8 @@ func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 	return 0, apiIndex, fmt.Errorf("all API calls failed")
 }
 
-func pullBitcoinPrice() {
+func pullBitcoinPrice(store stores.Store) {
 	// Fetch the initial Bitcoin rate immediately
-	store := &gorm.GormStatisticsStore{}
-	err := store.InitStore(viper.GetString("relay_stats_db"), nil) // Provide the correct path to your SQLite DB here
-	if err != nil {
-		fmt.Println("Error initializing database:", err)
-		return
-	}
 	apiIndex := 0
 	price, newIndex, err := fetchBitcoinPrice(apiIndex)
 	if err != nil {
@@ -125,7 +118,7 @@ func pullBitcoinPrice() {
 	} else {
 		fmt.Printf("Initial Bitcoin Price from APIs: $%.2f\n", price)
 		apiIndex = newIndex
-		store.SaveBitcoinRate(price)
+		store.GetStatsStore().SaveBitcoinRate(price)
 	}
 
 	// Set up the ticker for subsequent fetches
@@ -139,7 +132,7 @@ func pullBitcoinPrice() {
 		} else {
 			fmt.Printf("Bitcoin Price from APIs: $%.2f\n", price)
 			apiIndex = newIndex
-			store.SaveBitcoinRate(price)
+			store.GetStatsStore().SaveBitcoinRate(price)
 		}
 	}
 }

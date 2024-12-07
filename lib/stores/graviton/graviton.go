@@ -21,8 +21,10 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/database/immudb/documents"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
-	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/stats_stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
+	statistics_gorm_immudb "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/immudb"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	jsoniter "github.com/json-iterator/go"
@@ -43,11 +45,14 @@ type GravitonStore struct {
 	TempDatabasePath string
 	TempDatabase     *graviton.Store
 
-	StatsDatabase stores.StatisticsStore
+	StatsDatabase statistics.StatisticsStore
+
+	NostrEventDatabase documents.Client
 }
 
-func (store *GravitonStore) InitStore(basepath string, args ...interface{}) error {
+func InitStore(basepath string, args ...interface{}) (*GravitonStore, error) {
 	var err error
+	store := &GravitonStore{}
 
 	store.DatabasePath = basepath
 	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("%s-%s", "temp", uuid.New()))
@@ -55,23 +60,22 @@ func (store *GravitonStore) InitStore(basepath string, args ...interface{}) erro
 	// Initialize main long term storage database
 	store.Database, err = graviton.NewDiskStore(store.DatabasePath)
 	if err != nil {
-		return fmt.Errorf("failed to create new graviton disk store for main database: %v", err)
+		return nil, fmt.Errorf("failed to create new graviton disk store for main database: %v", err)
 	}
 
 	// Initialize temp cache database for storing data temporarily
 	store.TempDatabase, err = graviton.NewDiskStore(store.TempDatabasePath)
 	if err != nil {
-		return fmt.Errorf("failed to create new graviton disk store for temp database: %v", err)
+		return nil, fmt.Errorf("failed to create new graviton disk store for temp database: %v", err)
 	}
 
 	// Initialize gorm statistics database
-	store.StatsDatabase = &gorm.GormStatisticsStore{}
-	err = store.StatsDatabase.InitStore(viper.GetString("relay_stats_db"), nil)
+	store.StatsDatabase, err = statistics_gorm_immudb.InitStore(viper.GetString("relay_stats_db"), nil)
 	if err != nil {
-		return fmt.Errorf("failed to initialize gorm statistics database: %v", err)
+		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}
 
-	return nil
+	return store, nil
 }
 
 func (store *GravitonStore) Cleanup() error {
@@ -86,7 +90,7 @@ func (store *GravitonStore) Cleanup() error {
 	return nil
 }
 
-func (store *GravitonStore) GetStatsStore() stores.StatisticsStore {
+func (store *GravitonStore) GetStatsStore() statistics.StatisticsStore {
 	return store.StatsDatabase
 }
 
@@ -688,7 +692,7 @@ func (store *GravitonStore) DeleteEvent(eventID string) error {
 	}
 	graviton.Commit(tree)
 
-	// Delete the event from the GORM SQLite database using statisticsStore
+	// Delete the event from the database using statisticsStore
 	if err := store.StatsDatabase.DeleteEventByID(eventID); err != nil {
 		log.Printf("error deleting event, %s", err)
 	}
@@ -1275,7 +1279,7 @@ func (store *GravitonStore) AllocateBitcoinAddress(npub string) (*types.Address,
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal address: %v", err)
 			}
-			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
+			if err := addressTree.Put([]byte(addr.IndexHornets), value); err != nil {
 				return nil, fmt.Errorf("failed to put address in tree: %v", err)
 			}
 
@@ -1317,7 +1321,7 @@ func (store *GravitonStore) AllocateAddress() (*types.Address, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := addressTree.Put([]byte(addr.Index), value); err != nil {
+			if err := addressTree.Put([]byte(addr.IndexHornets), value); err != nil {
 				return nil, err
 			}
 			if _, err := graviton.Commit(addressTree); err != nil {
@@ -1349,7 +1353,7 @@ func (store *GravitonStore) SaveAddress(addr *types.Address) error {
 	}
 
 	// Use the index as the key for storing the address
-	key := addr.Index
+	key := addr.IndexHornets
 
 	// Store the address data in the tree
 	if err := addressTree.Put([]byte(key), addressData); err != nil {

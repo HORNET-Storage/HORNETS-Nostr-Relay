@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -65,7 +67,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
-	stores_graviton "github.com/HORNET-Storage/hornet-storage/lib/stores/graviton"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/immudb"
 	//negentropy "github.com/illuzen/go-negentropy"
 )
 
@@ -152,6 +155,41 @@ func generateRandomAPIKey() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
+func generateDHTKey(privateKeyHex string) (string, error) {
+	// Convert hex string to bytes
+	privateKeyBytes, err := hex.DecodeString(privateKeyHex)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode private key hex: %v", err)
+	}
+
+	// Ensure we have the correct length
+	if len(privateKeyBytes) != 32 {
+		return "", fmt.Errorf("invalid private key length: expected 32 bytes, got %d", len(privateKeyBytes))
+	}
+
+	// Create a copy for clamping
+	clampedPrivateKey := make([]byte, len(privateKeyBytes))
+	copy(clampedPrivateKey, privateKeyBytes)
+
+	// Apply clamping as per Ed25519 specification
+	clampedPrivateKey[0] &= 248  // Clear the lowest 3 bits
+	clampedPrivateKey[31] &= 127 // Clear the highest bit
+	clampedPrivateKey[31] |= 64  // Set the second highest bit
+
+	// Calculate hash using SHA-512
+	hash := sha512.Sum512(clampedPrivateKey[:32])
+
+	// In Ed25519, the first 32 bytes of the hash are used as the scalar
+	// and the public key is derived using this scalar
+	scalar := hash[:32]
+
+	// For DHT key, we'll use the hex encoding of the scalar
+	// This matches the behavior of the TypeScript implementation
+	dhtKey := hex.EncodeToString(scalar)
+
+	return dhtKey, nil
+}
+
 func main() {
 	ctx := context.Background()
 	wg := new(sync.WaitGroup)
@@ -177,6 +215,26 @@ func main() {
 		}
 	}
 
+	if serializedPrivateKey != "" {
+		// Generate DHT key from private key
+		dhtKey, err := generateDHTKey(serializedPrivateKey)
+		if err != nil {
+			log.Printf("Failed to generate DHT key: %v", err)
+		} else {
+			err = viper.ReadInConfig()
+			if err != nil {
+				log.Println("Error reading viper config: ", err)
+			}
+			viper.Set("RelayDHTkey", dhtKey)
+			err = viper.WriteConfig()
+			if err != nil {
+				log.Println("Error reading viper config: ", err)
+			}
+			log.Println("DHT key: ", dhtKey)
+
+		}
+	}
+
 	privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
 		log.Printf("failed to deserialize private key")
@@ -192,9 +250,7 @@ func main() {
 	host := libp2p.GetHostOnPort(serializedPrivateKey, viper.GetString("port"))
 
 	// Create and initialize database
-	store := &stores_graviton.GravitonStore{}
-	queryCache := viper.GetStringMapString("query_cache")
-	err = store.InitStore("gravitondb", queryCache)
+	store, err := immudb.InitStore("data")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -258,9 +314,9 @@ func main() {
 	log.Printf("Host started with id: %s\n", host.ID())
 	log.Printf("Host started with address: %s\n", host.Addrs())
 
-	syncDB, err := negentropy.InitSyncDB("sync_store.db")
+	syncDB, err := negentropy.InitSyncDB(store.Client)
 	if err != nil {
-		log.Fatal("failed to connect database")
+		log.Fatal("failed to connect database: %w", err)
 	}
 
 	negentropy.SetupNegentropyEventHandler(host, "host", store)

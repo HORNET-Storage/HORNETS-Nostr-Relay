@@ -17,7 +17,7 @@ import (
 func StartServer(store stores.Store) error {
 	app := fiber.New()
 
-	go pullBitcoinPrice()
+	go pullBitcoinPrice(store)
 
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"

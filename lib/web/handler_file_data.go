@@ -18,12 +18,12 @@ const (
 )
 
 type FileInfoWithContent struct {
-	Hash      string
-	FileName  string
-	MimeType  string
-	Content   string
-	Size      int64
-	Timestamp time.Time
+	Hash             string
+	FileName         string
+	MimeType         string
+	Content          string
+	Size             int64
+	TimestampHornets time.Time
 }
 
 type PaginationMeta struct {
@@ -42,11 +42,11 @@ func AddContent(fileInfo *types.FileInfo, content []byte) *FileInfoWithContent {
 	encodedContent := base64.StdEncoding.EncodeToString(content)
 
 	data := &FileInfoWithContent{
-		FileName:  fileInfo.FileName,
-		MimeType:  fileInfo.MimeType,
-		Content:   encodedContent,
-		Size:      fileInfo.Size,
-		Timestamp: fileInfo.Timestamp,
+		FileName:         fileInfo.FileName,
+		MimeType:         fileInfo.MimeType,
+		Content:          encodedContent,
+		Size:             fileInfo.Size,
+		TimestampHornets: fileInfo.TimestampHornets,
 	}
 
 	if fileInfo.Root == "blossom" {

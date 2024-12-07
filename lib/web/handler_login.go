@@ -32,7 +32,7 @@ func loginUser(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	// Compare passwords
-	if err := store.GetStatsStore().ComparePasswords(user.Password, loginPayload.Password); err != nil {
+	if err := store.GetStatsStore().ComparePasswords(user.Pass, loginPayload.Password); err != nil {
 		log.Printf("Invalid password for user %s: %v", user.Npub, err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid npub or password",

@@ -4,16 +4,16 @@ import (
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 	"github.com/nbd-wtf/go-nostr"
 )
 
 type Store interface {
-	InitStore(basepath string, args ...interface{}) error
 	Cleanup() error
 
 	// Statistics Store
-	GetStatsStore() StatisticsStore
+	GetStatsStore() statistics.StatisticsStore
 
 	// Hornet Storage
 	StoreLeaf(root string, leafData *types.DagLeafData, temp bool) error

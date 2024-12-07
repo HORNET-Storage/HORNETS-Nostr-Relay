@@ -1,21 +1,28 @@
 package sync
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"gorm.io/driver/sqlite"
+	"fmt"
+
+	"github.com/codenotary/immudb/pkg/api/schema"
+	immugorm "github.com/codenotary/immugorm"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	immudb "github.com/codenotary/immudb/pkg/client"
 )
 
 // GORM models for sync / dht related structs
 type SyncAuthor struct {
 	gorm.Model
-	PublicKey string `gorm:"uniqueIndex"`
+	PublicKey string `gorm:"size:128;uniqueIndex"`
 }
 
 type SyncRelay struct {
 	gorm.Model
-	PublicKey string `gorm:"uniqueIndex"`
+	PublicKey string `gorm:"size:128;uniqueIndex"`
 	RelayInfo string `gorm:"type:text"`
 }
 
@@ -116,8 +123,20 @@ func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, signature []by
 }
 
 // Helper function to initialize database connection
-func InitSyncDB(dbPath string) (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+func InitSyncDB(client immudb.ImmuClient) (*gorm.DB, error) {
+	username := "immudb"
+	password := "immudb"
+	host := "127.0.0.1"
+	port := "3322"
+	database := "sync"
+
+	dsn := fmt.Sprintf("immudb://%s:%s@%s:%s/%s?sslmode=disable", username, password, host, port, database)
+
+	createDatabaseIfNotExists(client, "sync")
+
+	db, err := gorm.Open(immugorm.Open(dsn, &immugorm.ImmuGormConfig{Verify: false}), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -129,4 +148,22 @@ func InitSyncDB(dbPath string) (*gorm.DB, error) {
 	}
 
 	return db, nil
+}
+
+func createDatabaseIfNotExists(client immudb.ImmuClient, dbName string) error {
+	ctx := context.Background()
+	// Use the system database to create new databases
+	_, err := client.UseDatabase(ctx, &schema.Database{
+		DatabaseName: "systemdb",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to use systemdb: %w", err)
+	}
+
+	_, err = client.CreateDatabaseV2(ctx, dbName, &schema.DatabaseNullableSettings{})
+	if err != nil {
+		return fmt.Errorf("failed to create database: %w", err)
+	}
+
+	return nil
 }
