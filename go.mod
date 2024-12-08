@@ -2,7 +2,7 @@ module github.com/HORNET-Storage/hornet-storage
 
 go 1.22.1
 
-replace github.com/codenotary/immugorm => ..\immugorm
+replace github.com/codenotary/immugorm => /Users/siphiwetapisi/immugorm
 
 require (
 	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20240727220204-7da57d9ad146

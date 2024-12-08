@@ -45,6 +45,10 @@ func (store *GormStatisticsStore) Init() error {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
 	}
 
+	var result map[string]interface{}
+	store.DB.Raw("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'bitcoin_rates'").Scan(&result)
+	log.Printf("Bitcoin rates table schema: %+v", result)
+
 	return nil
 }
 
@@ -140,15 +144,18 @@ func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 		return result.Error
 	}
 
+	// Convert current rate to string for comparison
+	rateStr := fmt.Sprintf("%.8f", rate)
+
 	// If the rate is the same as the latest entry, no update needed
-	if result.Error == nil && latestBitcoinRate.Rate == rate {
+	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
 		log.Println("Rate is the same as the latest entry, no update needed")
 		return nil
 	}
 
 	// Add the new rate
 	newRate := types.BitcoinRate{
-		Rate:             rate,
+		Rate:             rateStr,
 		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
@@ -674,7 +681,10 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 		return result.Error
 	}
 
-	if result.Error == nil && latestBitcoinRate.Rate == rate {
+	// Convert current rate to string for comparison
+	rateStr := fmt.Sprintf("%.8f", rate)
+
+	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
 		// If the rate is the same as the latest entry, no update needed
 		log.Println("Rate is the same as the latest entry, no update needed")
 		return nil
@@ -682,7 +692,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 
 	// Add the new rate
 	newRate := types.BitcoinRate{
-		Rate:             rate,
+		Rate:             rateStr,
 		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
@@ -816,7 +826,7 @@ func (store *GormStatisticsStore) GetLatestBitcoinRate() (types.BitcoinRate, err
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			bitcoinRate.Rate = 0.0 // Default rate if not found
+			bitcoinRate.Rate = "0.00000000" // Default rate if not found
 			return bitcoinRate, nil
 		}
 		return types.BitcoinRate{}, result.Error

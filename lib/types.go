@@ -155,7 +155,7 @@ type WalletAddress struct {
 
 type BitcoinRate struct {
 	ID               uint      `gorm:"primaryKey"`
-	Rate             float64   `gorm:"not null"`
+	Rate             string    `gorm:"not null"`
 	TimestampHornets time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
 }
 

@@ -61,7 +61,7 @@ func updateWalletBalance(c *fiber.Ctx, store stores.Store) error {
 
 	// Respond with the received data
 	return c.JSON(fiber.Map{
-		"message": "Wallet balance updated successfully",
+		"message": "success",
 		"balance": balance,
 	})
 }
