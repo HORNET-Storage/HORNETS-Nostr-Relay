@@ -21,12 +21,22 @@ func logoutUser(c *fiber.Ctx, store stores.Store) error {
 	// Remove "Bearer " prefix if present
 	token = strings.TrimPrefix(token, "Bearer ")
 
-	// Delete the token from ActiveTokens using the statistics store
-	if err := store.GetStatsStore().DeleteActiveToken(token); err != nil {
-		log.Printf("Failed to delete token: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to logout",
+	// Find the user associated with this token
+	user, err := store.GetStatsStore().FindUserByToken(token)
+	if err != nil {
+		log.Printf("Failed to find user for token during logout: %v", err)
+		// Still return success as we want to log out anyway
+		return c.JSON(fiber.Map{
+			"message": "Successfully logged out",
 		})
+	}
+
+	// If we found the user, delete all their active tokens
+	if user != nil {
+		if err := store.GetStatsStore().DeleteActiveToken(user.ID); err != nil {
+			log.Printf("Failed to delete tokens for user %d: %v", user.ID, err)
+			// Still return success as we want to log out anyway
+		}
 	}
 
 	// Return a successful logout message

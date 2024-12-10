@@ -55,6 +55,17 @@ func (store *GormStatisticsStore) Init() error {
 	store.DB.Raw("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'bitcoin_rates'").Scan(&result)
 	log.Printf("Bitcoin rates table schema: %+v", result)
 
+	// Create indexes after table creation
+	err = store.DB.Exec("CREATE INDEX ON active_tokens (user_id)").Error
+	if err != nil {
+		log.Printf("Warning: failed to create user_id index: %v", err)
+	}
+
+	err = store.DB.Exec("CREATE UNIQUE INDEX ON active_tokens (token)").Error
+	if err != nil {
+		log.Printf("Warning: failed to create token index: %v", err)
+	}
+
 	return nil
 }
 
@@ -428,37 +439,49 @@ func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserCha
 }
 
 // DeleteActiveToken deletes the given token from the ActiveTokens table
-func (store *GormStatisticsStore) DeleteActiveToken(token string) error {
-	result := store.DB.Where("token = ?", token).Delete(&types.ActiveToken{})
+func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
+	result := store.DB.Where("user_id = ?", userID).Delete(&types.ActiveToken{})
 	if result.Error != nil {
-		log.Printf("Failed to delete token: %v", result.Error)
+		log.Printf("Failed to delete tokens for user %d: %v", userID, result.Error)
 		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		// Token wasn't found, but we'll still consider this a successful logout
-		log.Printf("Token not found in ActiveTokens, but proceeding with logout")
+		// No tokens found for this user, but we'll still consider this successful
+		log.Printf("No tokens found for user %d, but proceeding with cleanup", userID)
+	} else {
+		log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
 	}
 
 	return nil
+}
+
+func (store *GormStatisticsStore) FindUserByToken(token string) (*types.AdminUser, error) {
+	var activeToken types.ActiveToken
+	if err := store.DB.Where("token = ? AND expires_at > NOW()", token).First(&activeToken).Error; err != nil {
+		return nil, err
+	}
+
+	var user types.AdminUser
+	if err := store.DB.First(&user, activeToken.UserID).Error; err != nil {
+		return nil, err
+	}
+
+	return &user, nil
 }
 
 // FetchMonthlyStorageStats retrieves the monthly storage stats (total GBs per month)
 func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityData, error) {
 	var data []types.ActivityData
 
-	// Query to get the total GBs per month across different tables
+	// Simpler query without UNION and strftime
 	err := store.DB.Raw(`
-		SELECT 
-			strftime('%Y-%m', timestamp_hornets) as month,
-			ROUND(SUM(size) / 1024.0, 3) as total_gb
-		FROM (
-			SELECT timestamp_hornets, size FROM kinds
-			UNION ALL
-			SELECT timestamp_hornets, size FROM file_info
-		)
-		GROUP BY month
-	`).Scan(&data).Error
+        SELECT 
+            timestamp_hornets as month,
+            ROUND(SUM(size) / 1024.0, 3) as total_gb
+        FROM kinds
+        GROUP BY timestamp_hornets
+    `).Scan(&data).Error
 
 	if err != nil {
 		log.Printf("Error fetching monthly storage stats: %v", err)
@@ -472,23 +495,26 @@ func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityDa
 func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChartData, error) {
 	var data []types.BarChartData
 
-	// Query to get the total GBs per month for notes and media
+	// Simplified query using ImmuDB compatible syntax
 	err := store.DB.Raw(`
-		SELECT 
-			strftime('%Y-%m', timestamp_hornets) as month,
-			ROUND(SUM(CASE WHEN kind_number IS NOT NULL THEN size ELSE 0 END) / 1024.0, 3) as notes_gb,  -- Convert to GB and round to 2 decimal places
-			ROUND(SUM(CASE WHEN kind_number IS NULL THEN size ELSE 0 END) / 1024.0, 3) as media_gb  -- Convert to GB and round to 2 decimal places
-		FROM (
-			SELECT timestamp_hornets, size, kind_number FROM kinds
-			UNION ALL
-			SELECT timestamp_hornets, size, NULL as kind_number FROM file_info
-		)
-		GROUP BY month
-	`).Scan(&data).Error
+        SELECT 
+            timestamp_hornets as month,
+            ROUND((SELECT SUM(size) FROM kinds WHERE kind_number IS NOT NULL) / 1024.0, 3) as notes_gb,
+            ROUND((SELECT SUM(size) FROM file_info) / 1024.0, 3) as media_gb
+        FROM kinds k
+        GROUP BY timestamp_hornets
+    `).Scan(&data).Error
 
 	if err != nil {
 		log.Printf("Error fetching bar chart data: %v", err)
 		return nil, err
+	}
+
+	// Post-process the timestamps into month format if needed
+	for i := range data {
+		if t, err := time.Parse(time.RFC3339, data[i].Month); err == nil {
+			data[i].Month = t.Format("2006-01")
+		}
 	}
 
 	return data, nil
@@ -950,7 +976,12 @@ func (store *GormStatisticsStore) GetLatestWalletBalance() (types.WalletBalance,
 // GetLatestBitcoinRate retrieves the latest Bitcoin rate from the database
 func (store *GormStatisticsStore) GetLatestBitcoinRate() (types.BitcoinRate, error) {
 	var bitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp_hornets desc").First(&bitcoinRate)
+
+	// Simpler query without complex ordering
+	result := store.DB.Select("*").
+		Table("bitcoin_rates").
+		Limit(1).
+		Find(&bitcoinRate)
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
@@ -987,6 +1018,7 @@ func (store *GormStatisticsStore) GetUserByID(userID uint) (types.AdminUser, err
 
 // StoreActiveToken saves the generated active JWT token in the database
 func (store *GormStatisticsStore) StoreActiveToken(activeToken *types.ActiveToken) error {
+
 	return store.DB.Create(activeToken).Error
 }
 

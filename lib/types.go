@@ -210,9 +210,10 @@ type UserProfile struct {
 }
 
 type ActiveToken struct {
-	UserID    uint   `gorm:"primaryKey"`
-	Token     string `gorm:"size:512;uniqueIndex"`
-	ExpiresAt time.Time
+	ID        uint      `gorm:"primaryKey;type:VARCHAR[36]"` // UUID length
+	UserID    uint      `gorm:"type:INTEGER"`                // Remove index, just INTEGER
+	Token     string    `gorm:"type:VARCHAR[256]"`           // Reduced size, no index
+	ExpiresAt time.Time `gorm:"type:TIMESTAMP"`
 }
 
 type ActivityData struct {

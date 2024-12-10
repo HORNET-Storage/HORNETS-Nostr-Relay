@@ -61,7 +61,8 @@ type StatisticsStore interface {
 	GetUserChallenge(challenge string) (types.UserChallenge, error)
 	MarkChallengeExpired(userChallenge *types.UserChallenge) error
 	StoreActiveToken(activeToken *types.ActiveToken) error
-	DeleteActiveToken(token string) error
+	DeleteActiveToken(token uint) error
+	FindUserByToken(token string) (*types.AdminUser, error)
 	IsActiveToken(token string) (bool, error)
 
 	// Statistics and storage stats
