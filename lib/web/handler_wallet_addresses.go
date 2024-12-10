@@ -111,12 +111,12 @@ func processAddress(addr types.Address, expectedWalletName string, statsStore st
 	}
 
 	// Check and save address to StatsStore
-	existsInStatsStore, err := statsStore.AddressExists(addr.Address)
+	existsInWallet, err := statsStore.WalletAddressExists(addr.Address)
 	if err != nil {
-		log.Printf("Error checking address existence in StatsStore: %v", err)
-		return err
+		return fmt.Errorf("error checking wallet address existence: %v", err)
 	}
-	if !existsInStatsStore {
+
+	if !existsInWallet {
 		newStatsAddress := types.WalletAddress{
 			IndexHornets: addr.IndexHornets,
 			Address:      addr.Address,
@@ -129,12 +129,11 @@ func processAddress(addr types.Address, expectedWalletName string, statsStore st
 	}
 
 	// Check and save address to SubscriberStore
-	existsInSubscriberStore, err := statsStore.AddressExists(addr.Address)
+	existsInSubscriber, err := statsStore.SubscriberAddressExists(addr.Address)
 	if err != nil {
-		log.Printf("Error checking address existence in SubscriberStore: %v", err)
-		return err
+		return fmt.Errorf("error checking subscriber address existence: %v", err)
 	}
-	if !existsInSubscriberStore {
+	if !existsInSubscriber {
 		subscriptionAddress := &types.SubscriberAddress{
 			IndexHornets: fmt.Sprint(addr.IndexHornets),
 			Address:      addr.Address,

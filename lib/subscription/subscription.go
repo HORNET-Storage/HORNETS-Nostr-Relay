@@ -64,6 +64,8 @@ func NewSubscriptionManager(
 // InitializeSubscriber creates a new subscriber or retrieves an existing one and creates their initial NIP-88 event.
 func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 
+	log.Printf("Initializing subscriber for npub: %s", npub)
+
 	// Run address pool check in background
 	go func() {
 		if err := m.checkAddressPoolStatus(); err != nil {
@@ -74,8 +76,10 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	// Step 1: Allocate a Bitcoin address (if necessary)
 	address, err := m.store.GetStatsStore().AllocateBitcoinAddress(npub)
 	if err != nil {
+		log.Printf("Error allocating bitcoin address: %v", err)
 		return fmt.Errorf("failed to allocate Bitcoin address: %v", err)
 	}
+	log.Printf("Successfully allocated address: %s", address.Address)
 
 	// Step 2: Create initial NIP-88 event with zero storage usage
 	storageInfo := StorageInfo{
@@ -85,10 +89,18 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	}
 
 	// Step 3: Create the NIP-88 event
-	return m.createNIP88EventIfNotExists(&lib.Subscriber{
+	err = m.createNIP88EventIfNotExists(&lib.Subscriber{
 		Npub:    npub,
 		Address: address.Address,
 	}, "", time.Time{}, &storageInfo)
+
+	if err != nil {
+		log.Printf("Error creating NIP-88 event: %v", err)
+		return err
+	}
+
+	log.Printf("Successfully initialized subscriber %s", npub)
+	return nil
 }
 
 // ProcessPayment handles a new subscription payment by updating the NIP-88 event and other relevant data
@@ -317,23 +329,28 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) error {
+	log.Printf("Checking for existing NIP-88 event for subscriber %s", subscriber.Npub)
 	// Check if an existing NIP-88 event for the subscriber already exists
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888}, // Assuming 888 is the NIP-88 event kind
+		Kinds: []int{888},
 		Tags: nostr.TagMap{
 			"p": []string{subscriber.Npub},
 		},
 		Limit: 1,
 	})
 	if err != nil {
+		log.Printf("Error querying events: %v", err)
 		return fmt.Errorf("error querying existing NIP-88 events: %v", err)
 	}
 
-	// If an existing event is found, we skip creation
+	log.Printf("Found %d existing events", len(existingEvents))
+
 	if len(existingEvents) > 0 {
 		log.Printf("NIP-88 event already exists for subscriber %s, skipping creation", subscriber.Npub)
 		return nil
 	}
+
+	log.Printf("Creating new NIP-88 event for subscriber %s", subscriber.Npub)
 
 	// Prepare tags for the new NIP-88 event
 	tags := []nostr.Tag{
@@ -346,29 +363,27 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	}
 
 	// Fetch and add subscription_tier tags based on the values from Viper
+	// In createNIP88EventIfNotExists
 	rawTiers := viper.Get("subscription_tiers")
 	if rawTiers != nil {
 		if tiers, ok := rawTiers.([]interface{}); ok {
-			for _, tier := range tiers {
+			log.Printf("Processing %d tiers", len(tiers))
+			for i, tier := range tiers {
 				if tierMap, ok := tier.(map[string]interface{}); ok {
 					dataLimit, okDataLimit := tierMap["data_limit"].(string)
 					price, okPrice := tierMap["price"].(string)
 					if okDataLimit && okPrice {
-						priceInt, err := strconv.Atoi(price) // Convert string price to integer
-						if err != nil {
-							log.Printf("error converting price %s to integer: %v", price, err)
-							continue
-						}
-						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, strconv.Itoa(priceInt)})
+						log.Printf("Adding tier %d: %s for %s", i, dataLimit, price)
+						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, price})
 					} else {
-						log.Printf("invalid data structure for tier: %v", tierMap)
+						log.Printf("Tier %d has invalid format - dataLimit: %v, price: %v", i, tierMap["data_limit"], tierMap["price"])
 					}
 				} else {
-					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
+					log.Printf("Tier %d is not a map: %T %v", i, tier, tier)
 				}
 			}
 		} else {
-			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
+			log.Printf("subscription_tiers is not an array: %T %v", rawTiers, rawTiers)
 		}
 	}
 
@@ -396,7 +411,29 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	}
 	event.Sig = hex.EncodeToString(sig.Serialize())
 
-	return m.store.StoreEvent(event)
+	// In createNIP88EventIfNotExists, after storing the event:
+	if err := m.store.StoreEvent(event); err != nil {
+		return fmt.Errorf("error storing event: %v", err)
+	}
+
+	// Add verification
+	storedEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{888},
+		Tags: nostr.TagMap{
+			"p": []string{subscriber.Npub},
+		},
+		Limit: 1,
+	})
+	if err != nil {
+		log.Printf("Error verifying stored event: %v", err)
+	} else {
+		log.Printf("Verified stored event. Found %d events", len(storedEvents))
+		if len(storedEvents) > 0 {
+			log.Printf("Event details: %+v", storedEvents[0])
+		}
+	}
+
+	return nil
 }
 
 // findMatchingTier finds the highest tier that matches the payment amount

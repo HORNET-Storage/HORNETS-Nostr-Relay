@@ -24,19 +24,29 @@ func updateWalletBalance(c *fiber.Ctx, store stores.Store) error {
 	// Print the received data
 	log.Println("Received data:", data)
 
-	// Get the expected wallet name from the configuration
-	expectedWalletName := viper.GetString("wallet_name")
-	if expectedWalletName == "" {
-		log.Println("No expected wallet name set in configuration.")
-		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
-	}
-
-	// Check if the wallet name in the request matches the expected wallet name
+	// Get the wallet name from request
 	walletName, ok := data["wallet_name"].(string)
-	if !ok || walletName != expectedWalletName {
-		log.Printf("Received balance update from unknown wallet: %v", walletName)
+	if !ok {
+		log.Printf("Wallet name missing in request data: %v", data)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid or missing wallet name",
+		})
+	}
+
+	// Get the configured wallet name, if it's empty use the one from the request
+	expectedWalletName := viper.GetString("wallet_name")
+	if expectedWalletName == "" {
+		log.Printf("No wallet name configured, using wallet name from request: %s", walletName)
+		// Update the config with the wallet name from the request
+		viper.Set("wallet_name", walletName)
+		if err := viper.WriteConfig(); err != nil {
+			log.Printf("Warning: Failed to write wallet name to config: %v", err)
+			// Continue processing even if writing to config fails
+		}
+	} else if walletName != expectedWalletName {
+		log.Printf("Received balance update from unknown wallet: %v, expected: %v", walletName, expectedWalletName)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid wallet name",
 		})
 	}
 

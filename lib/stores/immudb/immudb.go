@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -287,13 +288,12 @@ func (store *ImmudbStore) StoreDag(dag *types.DagData, temp bool) error {
 	return stores.StoreDag(store, dag, temp)
 }
 
-// Nostr events
+// InitializeNostrCollections sets up the required collections and indexes for nostr events
 func (store *ImmudbStore) InitializeNostrCollections() error {
-	// Create the collection if it doesn't exist
+	// Define the collection schema for nostr events
 	collection := &documents.Collection{
 		Name: "nostr_events",
-		// Fields needs to be defined as an array of field objects
-		Fields: []*documents.Field{ // Changed from map to array
+		Fields: []*documents.Field{
 			{
 				Name: "id",
 				Type: string(documents.FieldTypeString),
@@ -310,31 +310,57 @@ func (store *ImmudbStore) InitializeNostrCollections() error {
 				Name: "kind",
 				Type: string(documents.FieldTypeInteger),
 			},
-		},
-		Indexes: []*documents.Index{
 			{
-				Fields:   []string{"id"},
-				IsUnique: true,
+				Name: "content",
+				Type: string(documents.FieldTypeString),
 			},
 			{
-				Fields:   []string{"pubkey"},
-				IsUnique: false,
+				Name: "sig",
+				Type: string(documents.FieldTypeString),
 			},
 			{
-				Fields:   []string{"kind"},
-				IsUnique: false,
-			},
-			{
-				Fields:   []string{"created_at"},
-				IsUnique: false,
+				Name: "tags",
+				Type: string(documents.FieldTypeString),
 			},
 		},
 	}
 
+	// Create the collection
 	err := store.NostrEventDatabase.CreateCollection(context.Background(), collection)
 	if err != nil {
+		// If collection already exists, that's fine
 		if !strings.Contains(err.Error(), "already exists") {
-			return fmt.Errorf("failed to create nostr_events collection: %w", err)
+			return fmt.Errorf("failed to create collection: %w", err)
+		}
+	}
+
+	// Add tag_index field
+	err = store.NostrEventDatabase.AddField(context.Background(), "nostr_events", "tag_index", documents.FieldTypeString)
+	if err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("failed to add tag_index field: %w", err)
+		}
+	}
+
+	// Create necessary indexes
+	indexes := []struct {
+		fields   []string
+		isUnique bool
+	}{
+		{[]string{"id"}, true},
+		{[]string{"pubkey"}, false},
+		{[]string{"created_at"}, false},
+		{[]string{"kind"}, false},
+		{[]string{"tag_index"}, false},
+	}
+
+	for _, idx := range indexes {
+		_, err := store.NostrEventDatabase.CreateIndex(context.Background(), "nostr_events", idx.fields, idx.isUnique)
+		if err != nil {
+			// Skip if index already exists
+			if !strings.Contains(err.Error(), "already exists") {
+				return fmt.Errorf("failed to create index on %v: %w", idx.fields, err)
+			}
 		}
 	}
 
@@ -397,17 +423,24 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 		})
 	}
 
-	// Handle tag filters
-	// Handle tag filters
+	// Handle tag filters using LIKE with regex
 	for tagName, tagValues := range filter.Tags {
 		if len(tagValues) > 0 {
+			// Create a regex pattern that matches any of the tag values
+			// Format: tag_name=value1|tag_name=value2|...
+			var patterns []string
 			for _, tagValue := range tagValues {
-				fields = append(fields, documents.FieldComparison{
-					Field:    fmt.Sprintf("tags.%s", tagName),
-					Operator: "CONTAINS",
-					Value:    tagValue,
-				})
+				// Escape any special regex characters in the tag value
+				escapedValue := regexp.QuoteMeta(tagValue)
+				patterns = append(patterns, fmt.Sprintf("%s=%s", tagName, escapedValue))
 			}
+			pattern := strings.Join(patterns, "|")
+
+			fields = append(fields, documents.FieldComparison{
+				Field:    "tag_index", // This should be an indexed field containing concatenated tag strings
+				Operator: "LIKE",
+				Value:    pattern,
+			})
 		}
 	}
 
@@ -482,18 +515,30 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 }
 
 func (store *ImmudbStore) StoreEvent(event *nostr.Event) error {
+	// Keep the existing tags formatting
 	formattedTags := make(map[string][]string)
+	// Create tag_index entries simultaneously
+	var tagIndexPairs []string
+
 	for _, tag := range event.Tags {
 		if len(tag) >= 2 {
 			tagName := tag[0]
 			tagValue := tag[1]
+
+			// Add to formatted tags map
 			if existing, ok := formattedTags[tagName]; ok {
 				formattedTags[tagName] = append(existing, tagValue)
 			} else {
 				formattedTags[tagName] = []string{tagValue}
 			}
+
+			// Add to tag_index
+			tagIndexPairs = append(tagIndexPairs, fmt.Sprintf("%s=%s", tagName, tagValue))
 		}
 	}
+
+	// Create the tag_index string
+	tagIndex := strings.Join(tagIndexPairs, " ")
 
 	doc := documents.Document{
 		"id":         event.ID,        // Store ID for lookups
@@ -501,6 +546,7 @@ func (store *ImmudbStore) StoreEvent(event *nostr.Event) error {
 		"created_at": event.CreatedAt, // Store as unix timestamp for range queries
 		"kind":       event.Kind,      // Store kind for filtering
 		"tags":       formattedTags,   // Store converted tags
+		"tag_index":  tagIndex,        // Add searchable tag index
 		"content":    event.Content,   // Store the content
 		"sig":        event.Sig,       // Store the signature
 	}
@@ -591,14 +637,14 @@ func GetPrefix(leaf *merkle_dag.DagLeaf) string {
 	}
 }
 
-func contains(slice []string, item string) bool {
-	for _, v := range slice {
-		if v == item {
-			return true
-		}
-	}
-	return false
-}
+// func contains(slice []string, item string) bool {
+// 	for _, v := range slice {
+// 		if v == item {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
 
 func GetKindFromItemName(itemName string) string {
 	parts := strings.Split(itemName, ".")

@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -13,11 +14,16 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// BatchSize defines how many records to insert in a single transaction
+const BatchSize = 50
 
 // GormStatisticsStore is a GORM-based implementation of the StatisticsStore interface.
 type GormStatisticsStore struct {
-	DB *gorm.DB
+	DB    *gorm.DB
+	mutex sync.RWMutex
 }
 
 const (
@@ -786,22 +792,144 @@ func (store *GormStatisticsStore) UserExists() (bool, error) {
 }
 
 // AddressExists checks if a given Bitcoin address exists in the database
-func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
+func (store *GormStatisticsStore) SubscriberAddressExists(address string) (bool, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
 	var count int64
 	err := store.DB.Model(&types.SubscriberAddress{}).
 		Where("address = ?", address).
 		Count(&count).Error
-
 	if err != nil {
-		return false, fmt.Errorf("failed to check address existence: %v", err)
+		return false, fmt.Errorf("failed to check subscriber address existence: %v", err)
 	}
 
 	return count > 0, nil
 }
 
+func (store *GormStatisticsStore) WalletAddressExists(address string) (bool, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	var count int64
+	err := store.DB.Model(&types.WalletAddress{}).
+		Where("address = ?", address).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("failed to check wallet address existence: %v", err)
+	}
+
+	return count > 0, nil
+}
+
+func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
+	subscriberExists, err := store.SubscriberAddressExists(address)
+	if err != nil {
+		return false, err
+	}
+
+	walletExists, err := store.WalletAddressExists(address)
+	if err != nil {
+		return false, err
+	}
+
+	return subscriberExists || walletExists, nil
+}
+
+func (store *GormStatisticsStore) SaveAddressBatch(addresses []*types.WalletAddress) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	const maxRetries = 3
+
+	// Split addresses into batches
+	for i := 0; i < len(addresses); i += BatchSize {
+		end := i + BatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[i:end]
+
+		// Retry logic for each batch
+		for retry := 0; retry < maxRetries; retry++ {
+			err := store.DB.Transaction(func(tx *gorm.DB) error {
+				// Use clause.OnConflict to handle duplicate addresses
+				result := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "address"}},
+					DoNothing: true,
+				}).Create(&batch)
+
+				if result.Error != nil {
+					return result.Error
+				}
+				return nil
+			})
+
+			if err == nil {
+				break
+			}
+
+			if retry == maxRetries-1 {
+				log.Printf("Failed to save batch after %d retries: %v", maxRetries, err)
+				return err
+			}
+
+			// Exponential backoff
+			time.Sleep(time.Millisecond * time.Duration(100*(1<<retry)))
+		}
+	}
+	return nil
+}
+
+// SaveSubscriberAddressBatch handles batch saving of subscriber addresses
+func (store *GormStatisticsStore) SaveSubscriberAddressBatch(addresses []*types.SubscriberAddress) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	const maxRetries = 3
+
+	// Split addresses into batches
+	for i := 0; i < len(addresses); i += BatchSize {
+		end := i + BatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[i:end]
+
+		// Retry logic for each batch
+		for retry := 0; retry < maxRetries; retry++ {
+			err := store.DB.Transaction(func(tx *gorm.DB) error {
+				// Use clause.OnConflict to handle duplicate addresses
+				result := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "address"}},
+					DoNothing: true,
+				}).Create(&batch)
+
+				if result.Error != nil {
+					return result.Error
+				}
+				return nil
+			})
+
+			if err == nil {
+				break
+			}
+
+			if retry == maxRetries-1 {
+				log.Printf("Failed to save subscriber batch after %d retries: %v", maxRetries, err)
+				return err
+			}
+
+			// Exponential backoff
+			time.Sleep(time.Millisecond * time.Duration(100*(1<<retry)))
+		}
+	}
+	return nil
+}
+
 // SaveAddress saves a new wallet address to the database
 func (store *GormStatisticsStore) SaveAddress(address *types.WalletAddress) error {
-	return store.DB.Create(address).Error
+	return store.SaveAddressBatch([]*types.WalletAddress{address})
 }
 
 // GetLatestWalletBalance retrieves the latest wallet balance from the database
@@ -902,12 +1030,5 @@ func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types
 
 // SaveSubscriberAddress saves or updates a subscriber address in the database
 func (store *GormStatisticsStore) SaveSubscriberAddress(address *types.SubscriberAddress) error {
-	// Directly create a new address record
-	if err := store.DB.Create(address).Error; err != nil {
-		log.Printf("Error saving new address: %v", err)
-		return err
-	}
-
-	log.Printf("Address %s saved successfully.", address.Address)
-	return nil
+	return store.SaveSubscriberAddressBatch([]*types.SubscriberAddress{address})
 }

@@ -53,6 +53,8 @@ type StatisticsStore interface {
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
 	GetSubscriberByAddress(address string) (*types.SubscriberAddress, error)
 	SaveSubscriberAddress(address *types.SubscriberAddress) error
+	WalletAddressExists(address string) (bool, error)
+	SubscriberAddressExists(address string) (bool, error)
 
 	// User challenge and token management
 	SaveUserChallenge(userChallenge *types.UserChallenge) error
