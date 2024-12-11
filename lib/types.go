@@ -160,13 +160,14 @@ type BitcoinRate struct {
 }
 
 type RelaySettings struct {
-	Mode              string             `json:"mode"`
-	Protocol          []string           `json:"protocol"`
-	Chunked           []string           `json:"chunked"`
-	Chunksize         string             `json:"chunksize"`
-	MaxFileSize       int                `json:"maxFileSize"`
-	MaxFileSizeUnit   string             `json:"maxFileSizeUnit"`
-	SubscriptionTiers []SubscriptionTier `json:"subscription_tiers"`
+	Mode                string             `json:"mode" mapstructure:"mode"`
+	Protocol            []string           `json:"protocol" mapstructure:"protocol"`
+	Chunked             []string           `json:"chunked" mapstructure:"chunked"`
+	Chunksize           string             `json:"chunksize" mapstructure:"chunksize"`
+	MaxFileSize         int                `json:"maxfilesize" mapstructure:"maxfilesize"`
+	MaxFileSizeUnit     string             `json:"maxfilesizeunit" mapstructure:"maxfilesizeunit"`
+	IsFileStorageActive bool               `json:"isFileStorageActive" mapstructure:"isFileStorageActive"`
+	SubscriptionTiers   []SubscriptionTier `json:"subscription_tiers" mapstructure:"subscription_tiers"`
 
 	// Common type groups used for determining what types are considered audio, videos, images etc
 	MimeTypeGroups map[string][]string
@@ -343,8 +344,8 @@ type Libp2pStream struct {
 }
 
 type SubscriptionTier struct {
-	DataLimit string
-	Price     string
+	DataLimit string `json:"datalimit" mapstructure:"datalimit"`
+	Price     string `json:"price" mapstructure:"price"`
 }
 
 func (ls *Libp2pStream) Read(msg []byte) (int, error) {

@@ -17,8 +17,6 @@ func getBitcoinRatesLast30Days(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	log.Println("Bitcoin Rates: ", bitcoinRates)
-
 	// Respond with the Bitcoin rates
 	return c.JSON(bitcoinRates)
 }
