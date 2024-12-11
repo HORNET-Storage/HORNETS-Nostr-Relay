@@ -472,75 +472,111 @@ func (store *GormStatisticsStore) FindUserByToken(token string) (*types.AdminUse
 
 // FetchMonthlyStorageStats retrieves the monthly storage stats (total GBs per month)
 func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityData, error) {
-	var data []types.ActivityData
+	var data []struct {
+		Month time.Time `gorm:"column:month"`
+		Size  float64   `gorm:"column:size"`
+	}
 
-	// Simpler query without UNION and strftime
 	err := store.DB.Raw(`
-        SELECT 
-            timestamp_hornets as month,
-            ROUND(SUM(size) / 1024.0, 3) as total_gb
-        FROM kinds
-        GROUP BY timestamp_hornets
-    `).Scan(&data).Error
-
+		SELECT timestamp_hornets as month, size 
+		FROM kinds
+	`).Scan(&data).Error
 	if err != nil {
-		log.Printf("Error fetching monthly storage stats: %v", err)
 		return nil, err
 	}
 
-	return data, nil
+	// Group and calculate in Go
+	monthlyData := make(map[string]float64)
+	for _, d := range data {
+		key := d.Month.Format("2006-01")
+		monthlyData[key] += d.Size / 1024.0
+	}
+
+	result := make([]types.ActivityData, 0, len(monthlyData))
+	for month, size := range monthlyData {
+		result = append(result, types.ActivityData{
+			Month:   month,
+			TotalGB: math.Round(size*1000) / 1000,
+		})
+	}
+
+	return result, nil
 }
 
 // FetchNotesMediaStorageData retrieves the total GBs per month for notes and media
 func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChartData, error) {
-	var data []types.BarChartData
+	var data []struct {
+		Month time.Time `gorm:"column:month"`
+		Size  float64   `gorm:"column:size"`
+	}
 
-	// Simplified query using ImmuDB compatible syntax
 	err := store.DB.Raw(`
-        SELECT 
-            timestamp_hornets as month,
-            ROUND((SELECT SUM(size) FROM kinds WHERE kind_number IS NOT NULL) / 1024.0, 3) as notes_gb,
-            ROUND((SELECT SUM(size) FROM file_info) / 1024.0, 3) as media_gb
-        FROM kinds k
-        GROUP BY timestamp_hornets
+        SELECT timestamp_hornets as month, size 
+        FROM kinds
     `).Scan(&data).Error
-
 	if err != nil {
-		log.Printf("Error fetching bar chart data: %v", err)
 		return nil, err
 	}
 
-	// Post-process the timestamps into month format if needed
-	for i := range data {
-		if t, err := time.Parse(time.RFC3339, data[i].Month); err == nil {
-			data[i].Month = t.Format("2006-01")
-		}
+	// Group and calculate in Go
+	monthData := make(map[string]float64)
+	for _, d := range data {
+		key := d.Month.Format("2006-01")
+		monthData[key] += d.Size / 1024.0
 	}
 
-	return data, nil
+	// Convert to BarChartData
+	result := make([]types.BarChartData, 0, len(monthData))
+	for month, size := range monthData {
+		result = append(result, types.BarChartData{
+			Month:   month,
+			NotesGB: size,
+			MediaGB: 0,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Month < result[j].Month
+	})
+
+	return result, nil
 }
 
 // FetchProfilesTimeSeriesData retrieves the time series data for profiles over the last 6 months
 func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate string) ([]types.TimeSeriesData, error) {
-	var data []types.TimeSeriesData
+	var rawData []struct {
+		Time      time.Time `gorm:"column:timestamp_hornets"`
+		Profiles  int       `gorm:"column:total"`
+		Lightning int       `gorm:"column:lightning"`
+		DHTKey    int       `gorm:"column:dht"`
+		Both      int       `gorm:"column:both"`
+	}
 
-	// Query to get profile data from the last 6 months
 	err := store.DB.Raw(`
-        SELECT
-			strftime('%Y-%m', timestamp_hornets) as month,
-			COUNT(*) as profiles,
-			COUNT(CASE WHEN lightning_addr THEN 1 ELSE NULL END) as lightning_addr,
-			COUNT(CASE WHEN dht_key THEN 1 ELSE NULL END) as dht_key,
-			COUNT(CASE WHEN lightning_addr AND dht_key THEN 1 ELSE NULL END) as lightning_and_dht
-		FROM user_profiles
-		WHERE strftime('%Y-%m', timestamp_hornets) >= ? AND strftime('%Y-%m', timestamp_hornets) <= ?
-		GROUP BY month
-		ORDER BY month ASC;
-    `, startDate, endDate).Scan(&data).Error
+   SELECT 
+       timestamp_hornets,
+       COUNT(*) as total,
+       COUNT(lightning_addr) as lightning,
+       COUNT(dht_key) as dht,
+       COUNT(lightning_addr) as both
+   FROM user_profiles 
+   WHERE timestamp_hornets >= ? AND timestamp_hornets <= ?
+   GROUP BY timestamp_hornets
+`, startDate, endDate).Scan(&rawData).Error
 
 	if err != nil {
-		log.Printf("Error fetching time series data: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("error fetching time series data: %v", err)
+	}
+
+	data := make([]types.TimeSeriesData, len(rawData))
+	for i, raw := range rawData {
+		data[i] = types.TimeSeriesData{
+			Month:           raw.Time.Format("2006-01"),
+			Profiles:        raw.Profiles,
+			LightningAddr:   raw.Lightning,
+			DHTKey:          raw.DHTKey,
+			LightningAndDHT: raw.Both,
+		}
 	}
 
 	return data, nil
