@@ -43,7 +43,6 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	var currentRelaySettings types.RelaySettings
-
 	// Fetch settings from Viper
 	err = viper.UnmarshalKey("relay_settings", &currentRelaySettings)
 	if err != nil {
@@ -51,8 +50,17 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
 	}
 
+	needsKind411Update := tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers)
+
+	// Store new settings first
+	viper.Set("relay_settings", relaySettings)
+	if err := viper.WriteConfig(); err != nil {
+		log.Printf("Error writing config: %s", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to update settings")
+	}
+
 	// Compare existing tiers with the new tiers
-	if tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers) {
+	if needsKind411Update {
 		log.Println("Subscription tiers have changed, creating a new kind 411 event")
 
 		serializedPrivateKey := viper.GetString("private_key")
@@ -68,15 +76,6 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 			log.Println("Error creating kind 411 event:", err)
 			return c.Status(fiber.StatusInternalServerError).SendString("Failed to create kind 411 event")
 		}
-	}
-
-	// Store in Viper
-	viper.Set("relay_settings", relaySettings)
-
-	// Save the changes to the configuration file
-	if err := viper.WriteConfig(); err != nil {
-		log.Printf("Error writing config: %s", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to update settings")
 	}
 
 	log.Println("Stored relay settings:", relaySettings)
