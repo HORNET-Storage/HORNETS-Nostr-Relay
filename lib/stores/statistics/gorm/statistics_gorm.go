@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,19 +52,15 @@ func (store *GormStatisticsStore) Init() error {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
 	}
 
-	var result map[string]interface{}
-	store.DB.Raw("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'bitcoin_rates'").Scan(&result)
-	log.Printf("Bitcoin rates table schema: %+v", result)
-
 	// Create indexes after table creation
-	err = store.DB.Exec("CREATE INDEX ON active_tokens (user_id)").Error
-	if err != nil {
-		log.Printf("Warning: failed to create user_id index: %v", err)
+	result := store.DB.Exec(`CREATE INDEX ON active_tokens (user_id)`)
+	if result.Error != nil && !strings.Contains(result.Error.Error(), "already exists") {
+		log.Printf("Error creating user_id index: %v", result.Error)
 	}
 
-	err = store.DB.Exec("CREATE UNIQUE INDEX ON active_tokens (token)").Error
-	if err != nil {
-		log.Printf("Warning: failed to create token index: %v", err)
+	result = store.DB.Exec(`CREATE UNIQUE INDEX ON active_tokens (token)`)
+	if result.Error != nil && !strings.Contains(result.Error.Error(), "already exists") {
+		log.Printf("Error creating token index: %v", result.Error)
 	}
 
 	return nil
