@@ -211,9 +211,9 @@ type UserProfile struct {
 }
 
 type ActiveToken struct {
-	ID        uint      `gorm:"primaryKey;type:VARCHAR[36]"` // UUID length
-	UserID    uint      `gorm:"type:INTEGER"`                // Remove index, just INTEGER
-	Token     string    `gorm:"type:VARCHAR[256]"`           // Reduced size, no index
+	ID        uint      `gorm:"primaryKey;type:INTEGER AUTO_INCREMENT"`
+	UserID    uint      `gorm:"type:INTEGER"`
+	Token     string    `gorm:"type:VARCHAR[512]"` // Maximum allowed size for indexed columns
 	ExpiresAt time.Time `gorm:"type:TIMESTAMP"`
 }
 

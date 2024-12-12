@@ -34,6 +34,28 @@ const (
 
 // Generic Init for gorm
 func (store *GormStatisticsStore) Init() error {
+	testing := false
+	if testing {
+		tablesToDrop := []string{
+			// "wallet_addresses",
+			// "subscriber_addresses",
+			// "wallet_transactions",
+			// "wallet_balances",
+			"kinds",
+		}
+
+		for _, table := range tablesToDrop {
+			if err := store.DB.Exec(fmt.Sprintf("DROP TABLE %s", table)).Error; err != nil {
+				log.Printf("Error dropping table %s: %v", table, err)
+				// If table doesn't exist, that's fine - continue
+				if !strings.Contains(err.Error(), "does not exist") {
+					continue
+				}
+			}
+			log.Printf("Successfully dropped table: %s", table)
+		}
+	}
+
 	err := store.DB.AutoMigrate(
 		&types.Kind{},
 		&types.FileInfo{},
@@ -50,17 +72,6 @@ func (store *GormStatisticsStore) Init() error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
-	}
-
-	// Create indexes after table creation
-	result := store.DB.Exec(`CREATE INDEX ON active_tokens (user_id)`)
-	if result.Error != nil && !strings.Contains(result.Error.Error(), "already exists") {
-		log.Printf("Error creating user_id index: %v", result.Error)
-	}
-
-	result = store.DB.Exec(`CREATE UNIQUE INDEX ON active_tokens (token)`)
-	if result.Error != nil && !strings.Contains(result.Error.Error(), "already exists") {
-		log.Printf("Error creating token index: %v", result.Error)
 	}
 
 	return nil

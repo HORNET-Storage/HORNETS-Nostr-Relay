@@ -372,6 +372,8 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 	// For each type of filter that used IN, we'll create multiple EQ expressions
 	fields := []documents.FieldComparison{}
 
+	log.Println("Query Filter: ", filter.String())
+
 	// Handle IDs
 	if len(filter.IDs) > 0 {
 		for _, id := range filter.IDs {
@@ -515,41 +517,39 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 }
 
 func (store *ImmudbStore) StoreEvent(event *nostr.Event) error {
-	// Keep the existing tags formatting
+
 	formattedTags := make(map[string][]string)
-	// Create tag_index entries simultaneously
-	var tagIndexPairs []string
+	var tagIndexEntries []string // Add this
 
 	for _, tag := range event.Tags {
-		if len(tag) >= 2 {
+		if len(tag) > 0 {
 			tagName := tag[0]
-			tagValue := tag[1]
-
-			// Add to formatted tags map
+			tagValues := tag[1:]
 			if existing, ok := formattedTags[tagName]; ok {
-				formattedTags[tagName] = append(existing, tagValue)
+				formattedTags[tagName] = append(existing, tagValues...)
 			} else {
-				formattedTags[tagName] = []string{tagValue}
+				formattedTags[tagName] = tagValues
 			}
 
-			// Add to tag_index
-			tagIndexPairs = append(tagIndexPairs, fmt.Sprintf("%s=%s", tagName, tagValue))
+			// Create tag_index entries
+			for _, value := range tagValues {
+				tagIndexEntries = append(tagIndexEntries, fmt.Sprintf("%s=%s", tagName, value))
+			}
 		}
 	}
 
-	// Create the tag_index string
-	tagIndex := strings.Join(tagIndexPairs, " ")
-
 	doc := documents.Document{
-		"id":         event.ID,        // Store ID for lookups
-		"pubkey":     event.PubKey,    // Store pubkey for filtering
-		"created_at": event.CreatedAt, // Store as unix timestamp for range queries
-		"kind":       event.Kind,      // Store kind for filtering
-		"tags":       formattedTags,   // Store converted tags
-		"tag_index":  tagIndex,        // Add searchable tag index
-		"content":    event.Content,   // Store the content
-		"sig":        event.Sig,       // Store the signature
+		"id":         event.ID,                           // Store ID for lookups
+		"pubkey":     event.PubKey,                       // Store pubkey for filtering
+		"created_at": event.CreatedAt,                    // Store as unix timestamp for range queries
+		"kind":       event.Kind,                         // Store kind for filtering
+		"tags":       formattedTags,                      // Store converted tags
+		"tag_index":  strings.Join(tagIndexEntries, ","), // Store flattened tags for LIKE queries
+		"content":    event.Content,                      // Store the content
+		"sig":        event.Sig,                          // Store the signature
 	}
+
+	log.Println("Document to be svaed: ", doc)
 
 	_, err := store.NostrEventDatabase.InsertDocuments(store.Ctx, "nostr_events", []documents.Document{doc})
 	if err != nil {

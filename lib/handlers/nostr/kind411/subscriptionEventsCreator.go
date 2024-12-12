@@ -96,7 +96,7 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 	}
 
 	// Create the event
-	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), nil)
+	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), []nostr.Tag{})
 	if err != nil {
 		return fmt.Errorf("error creating kind 411 event: %v", err)
 	}
@@ -175,10 +175,19 @@ func serializeEventForID(event *nostr.Event) string {
 }
 
 func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store) (*nostr.Event, error) {
-	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10,000 sats"},
-		{DataLimit: "5 GB per month", Price: "40,000 sats"},
-		{DataLimit: "10 GB per month", Price: "70,000 sats"},
+	var settings types.RelaySettings
+
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return nil, err
+	}
+
+	// Transform to relay info format
+	subscriptionTiers := make([]types.SubscriptionTier, len(settings.SubscriptionTiers))
+	for i, tier := range settings.SubscriptionTiers {
+		subscriptionTiers[i] = types.SubscriptionTier{
+			DataLimit: tier.DataLimit,
+			Price:     tier.Price,
+		}
 	}
 
 	// Allocate a new address for this subscription

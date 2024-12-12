@@ -73,6 +73,8 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 		}
 	}()
 
+	log.Println("Address Pool checked Going to allocate address")
+
 	// Step 1: Allocate a Bitcoin address (if necessary)
 	address, err := m.store.GetStatsStore().AllocateBitcoinAddress(npub)
 	if err != nil {
@@ -258,6 +260,21 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 		}
 	}
 
+	var settings lib.RelaySettings
+
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return err
+	}
+
+	// Transform to relay info format
+	subscriptionTiers := make([]lib.SubscriptionTier, len(settings.SubscriptionTiers))
+	for i, tier := range settings.SubscriptionTiers {
+		subscriptionTiers[i] = lib.SubscriptionTier{
+			DataLimit: tier.DataLimit,
+			Price:     tier.Price,
+		}
+	}
+
 	// Prepare tags and create a new NIP-88 event
 	tags := []nostr.Tag{
 		{"subscription_duration", "1 month"},
@@ -268,31 +285,8 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
 	}
 
-	// Fetch and add subscription_tier tags based on values from Viper
-	rawTiers := viper.Get("subscription_tiers")
-	if rawTiers != nil {
-		if tiers, ok := rawTiers.([]interface{}); ok {
-			for _, tier := range tiers {
-				if tierMap, ok := tier.(map[string]interface{}); ok {
-					dataLimit, okDataLimit := tierMap["data_limit"].(string)
-					price, okPrice := tierMap["price"].(string)
-					if okDataLimit && okPrice {
-						priceInt, err := strconv.Atoi(price) // Convert string price to integer
-						if err != nil {
-							log.Printf("error converting price %s to integer: %v", price, err)
-							continue
-						}
-						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, strconv.Itoa(priceInt)})
-					} else {
-						log.Printf("invalid data structure for tier: %v", tierMap)
-					}
-				} else {
-					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
-				}
-			}
-		} else {
-			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
-		}
+	for _, tier := range subscriptionTiers {
+		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
 	}
 
 	if activeTier != "" {
@@ -351,6 +345,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	}
 
 	log.Printf("Creating new NIP-88 event for subscriber %s", subscriber.Npub)
+	log.Printf("Subscriber Address: %s", subscriber.Address)
 
 	// Prepare tags for the new NIP-88 event
 	tags := []nostr.Tag{
@@ -362,29 +357,25 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
 	}
 
+	var settings lib.RelaySettings
+
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return err
+	}
+
+	// Transform to relay info format
+	subscriptionTiers := make([]lib.SubscriptionTier, len(settings.SubscriptionTiers))
+	for i, tier := range settings.SubscriptionTiers {
+		subscriptionTiers[i] = lib.SubscriptionTier{
+			DataLimit: tier.DataLimit,
+			Price:     tier.Price,
+		}
+	}
+
 	// Fetch and add subscription_tier tags based on the values from Viper
 	// In createNIP88EventIfNotExists
-	rawTiers := viper.Get("subscription_tiers")
-	if rawTiers != nil {
-		if tiers, ok := rawTiers.([]interface{}); ok {
-			log.Printf("Processing %d tiers", len(tiers))
-			for i, tier := range tiers {
-				if tierMap, ok := tier.(map[string]interface{}); ok {
-					dataLimit, okDataLimit := tierMap["data_limit"].(string)
-					price, okPrice := tierMap["price"].(string)
-					if okDataLimit && okPrice {
-						log.Printf("Adding tier %d: %s for %s", i, dataLimit, price)
-						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, price})
-					} else {
-						log.Printf("Tier %d has invalid format - dataLimit: %v, price: %v", i, tierMap["data_limit"], tierMap["price"])
-					}
-				} else {
-					log.Printf("Tier %d is not a map: %T %v", i, tier, tier)
-				}
-			}
-		} else {
-			log.Printf("subscription_tiers is not an array: %T %v", rawTiers, rawTiers)
-		}
+	for _, tier := range subscriptionTiers {
+		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
 	}
 
 	if activeTier != "" {
@@ -410,6 +401,8 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		return fmt.Errorf("error signing event: %v", err)
 	}
 	event.Sig = hex.EncodeToString(sig.Serialize())
+
+	log.Println("Subscription Event before storing: ", event.String())
 
 	// In createNIP88EventIfNotExists, after storing the event:
 	if err := m.store.StoreEvent(event); err != nil {
