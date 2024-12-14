@@ -212,8 +212,8 @@ type UserProfile struct {
 
 type ActiveToken struct {
 	ID        uint      `gorm:"primaryKey;type:INTEGER AUTO_INCREMENT"`
-	UserID    uint      `gorm:"type:INTEGER"`
-	Token     string    `gorm:"type:VARCHAR[512]"` // Maximum allowed size for indexed columns
+	UserID    uint      `gorm:"uniqueIndex"`
+	Token     string    `gorm:"size:512;uniqueIndex"` // Maximum allowed size for indexed columns
 	ExpiresAt time.Time `gorm:"type:TIMESTAMP"`
 }
 
