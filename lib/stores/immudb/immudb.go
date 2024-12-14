@@ -367,7 +367,6 @@ func (store *ImmudbStore) InitializeNostrCollections() error {
 	return nil
 }
 
-// Query nostr events based on given filters
 func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
 	// For each type of filter that used IN, we'll create multiple EQ expressions
 	fields := []documents.FieldComparison{}
@@ -428,18 +427,15 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 	// Handle tag filters using LIKE with regex
 	for tagName, tagValues := range filter.Tags {
 		if len(tagValues) > 0 {
-			// Create a regex pattern that matches any of the tag values
-			// Format: tag_name=value1|tag_name=value2|...
 			var patterns []string
 			for _, tagValue := range tagValues {
-				// Escape any special regex characters in the tag value
 				escapedValue := regexp.QuoteMeta(tagValue)
 				patterns = append(patterns, fmt.Sprintf("%s=%s", tagName, escapedValue))
 			}
 			pattern := strings.Join(patterns, "|")
 
 			fields = append(fields, documents.FieldComparison{
-				Field:    "tag_index", // This should be an indexed field containing concatenated tag strings
+				Field:    "tag_index",
 				Operator: "LIKE",
 				Value:    pattern,
 			})
@@ -485,30 +481,27 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 	// Convert results back to nostr.Event objects
 	events := make([]*nostr.Event, 0, len(result.Revisions))
 	for _, rev := range result.Revisions {
-		// Reconstruct the nostr.Event
 		event := &nostr.Event{
 			ID:        rev.Document["id"].(string),
 			PubKey:    rev.Document["pubkey"].(string),
 			CreatedAt: nostr.Timestamp(int64(rev.Document["created_at"].(float64))),
 			Kind:      int(rev.Document["kind"].(float64)),
-			Tags:      make(nostr.Tags, 0),
 			Content:   rev.Document["content"].(string),
 			Sig:       rev.Document["sig"].(string),
 		}
 
-		// Handle tags conversion from our stored format
-		if tagMap, ok := rev.Document["tags"].(map[string]interface{}); ok {
-			for tagName, values := range tagMap {
-				if tagValues, ok := values.([]interface{}); ok {
-					for _, value := range tagValues {
-						if strValue, ok := value.(string); ok {
-							tag := []string{tagName, strValue}
-							event.Tags = append(event.Tags, tag)
-						}
-					}
-				}
-			}
+		// Parse the JSON array of arrays back into Tags
+		var tagsArray [][]string
+		if err := json.Unmarshal([]byte(rev.Document["tags"].(string)), &tagsArray); err != nil {
+			return nil, fmt.Errorf("failed to parse tags: %v", err)
 		}
+
+		// Convert [][]string to nostr.Tags
+		tags := make(nostr.Tags, len(tagsArray))
+		for i, tag := range tagsArray {
+			tags[i] = nostr.Tag(tag)
+		}
+		event.Tags = tags
 
 		events = append(events, event)
 	}
@@ -517,41 +510,40 @@ func (store *ImmudbStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, erro
 }
 
 func (store *ImmudbStore) StoreEvent(event *nostr.Event) error {
+	var tagIndexEntries []string
 
-	formattedTags := make(map[string][]string)
-	var tagIndexEntries []string // Add this
+	// Convert tags to array format for storage
+	tagsArray := make([][]string, len(event.Tags))
+	for i, tag := range event.Tags {
+		tagsArray[i] = make([]string, len(tag))
+		copy(tagsArray[i], tag)
 
-	for _, tag := range event.Tags {
 		if len(tag) > 0 {
 			tagName := tag[0]
-			tagValues := tag[1:]
-			if existing, ok := formattedTags[tagName]; ok {
-				formattedTags[tagName] = append(existing, tagValues...)
-			} else {
-				formattedTags[tagName] = tagValues
-			}
-
-			// Create tag_index entries
-			for _, value := range tagValues {
+			for _, value := range tag[1:] {
 				tagIndexEntries = append(tagIndexEntries, fmt.Sprintf("%s=%s", tagName, value))
 			}
 		}
 	}
 
-	doc := documents.Document{
-		"id":         event.ID,                           // Store ID for lookups
-		"pubkey":     event.PubKey,                       // Store pubkey for filtering
-		"created_at": event.CreatedAt,                    // Store as unix timestamp for range queries
-		"kind":       event.Kind,                         // Store kind for filtering
-		"tags":       formattedTags,                      // Store converted tags
-		"tag_index":  strings.Join(tagIndexEntries, ","), // Store flattened tags for LIKE queries
-		"content":    event.Content,                      // Store the content
-		"sig":        event.Sig,                          // Store the signature
+	// Convert to JSON array of arrays
+	tagsJSON, err := json.Marshal(tagsArray)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tags: %v", err)
 	}
 
-	log.Println("Document to be svaed: ", doc)
+	doc := documents.Document{
+		"id":         event.ID,
+		"pubkey":     event.PubKey,
+		"created_at": event.CreatedAt,
+		"kind":       event.Kind,
+		"tags":       string(tagsJSON),
+		"tag_index":  strings.Join(tagIndexEntries, ","),
+		"content":    event.Content,
+		"sig":        event.Sig,
+	}
 
-	_, err := store.NostrEventDatabase.InsertDocuments(store.Ctx, "nostr_events", []documents.Document{doc})
+	_, err = store.NostrEventDatabase.InsertDocuments(store.Ctx, "nostr_events", []documents.Document{doc})
 	if err != nil {
 		return fmt.Errorf("failed to store nostr event: %w", err)
 	}
