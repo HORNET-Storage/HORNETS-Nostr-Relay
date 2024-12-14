@@ -448,17 +448,40 @@ func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserCha
 
 // DeleteActiveToken deletes the given token from the ActiveTokens table
 func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
-	result := store.DB.Where("user_id = ?", userID).Delete(&types.ActiveToken{})
-	if result.Error != nil {
-		log.Printf("Failed to delete tokens for user %d: %v", userID, result.Error)
-		return result.Error
-	}
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		err := store.DB.Transaction(func(tx *gorm.DB) error {
+			result := tx.Exec("DELETE FROM active_tokens WHERE user_id = ?", userID)
+			if result.Error != nil {
+				return result.Error
+			}
 
-	if result.RowsAffected == 0 {
-		// No tokens found for this user, but we'll still consider this successful
-		log.Printf("No tokens found for user %d, but proceeding with cleanup", userID)
-	} else {
-		log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
+			if result.RowsAffected == 0 {
+				log.Printf("No tokens found for user %d", userID)
+			} else {
+				log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
+			}
+
+			return nil
+		})
+
+		if err == nil {
+			return nil
+		}
+
+		// If it's not a read conflict, return the error
+		if !strings.Contains(err.Error(), "tx read conflict") {
+			return err
+		}
+
+		// If this was the last retry, return the error
+		if i == maxRetries-1 {
+			log.Printf("Failed to delete tokens after %d retries: %v", maxRetries, err)
+			return err
+		}
+
+		// Wait before retrying
+		time.Sleep(time.Millisecond * time.Duration(100*(i+1)))
 	}
 
 	return nil
@@ -466,8 +489,23 @@ func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
 
 func (store *GormStatisticsStore) FindUserByToken(token string) (*types.AdminUser, error) {
 	var activeToken types.ActiveToken
-	if err := store.DB.Where("token = ? AND expires_at > NOW()", token).First(&activeToken).Error; err != nil {
+
+	// Get current time in RFC3339 format
+	nowStr := time.Now().Format(time.RFC3339)
+
+	// Query using string comparison
+	if err := store.DB.Where("token = ? AND expires_at > ?", token, nowStr).First(&activeToken).Error; err != nil {
 		return nil, err
+	}
+
+	// Parse the stored expiry time and verify it's still valid
+	expiryTime, err := time.Parse(time.RFC3339, activeToken.ExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse expiry time: %v", err)
+	}
+
+	if time.Now().After(expiryTime) {
+		return nil, gorm.ErrRecordNotFound
 	}
 
 	var user types.AdminUser
@@ -1062,8 +1100,21 @@ func (store *GormStatisticsStore) GetUserByID(userID uint) (types.AdminUser, err
 
 // StoreActiveToken saves the generated active JWT token in the database
 func (store *GormStatisticsStore) StoreActiveToken(activeToken *types.ActiveToken) error {
+	// First try to delete any existing tokens for this user
+	if err := store.DeleteActiveToken(activeToken.UserID); err != nil {
+		log.Printf("Warning: failed to delete existing tokens: %v", err)
+		// Continue anyway as we still want to try creating the new token
+	}
 
-	return store.DB.Create(activeToken).Error
+	// Create a copy with string timestamp
+	tokenToStore := &types.ActiveToken{
+		UserID:    activeToken.UserID,
+		Token:     activeToken.Token,
+		ExpiresAt: time.Now().Add(24 * time.Hour).Format(time.RFC3339), // Format new expiry time
+	}
+
+	// Try to create the new token
+	return store.DB.Create(tokenToStore).Error
 }
 
 // GetLatestWalletTransactions retrieves all wallet transactions ordered by date descending
@@ -1079,14 +1130,25 @@ func (store *GormStatisticsStore) GetLatestWalletTransactions() ([]types.WalletT
 // IsActiveToken checks if a token is active and not expired
 func (store *GormStatisticsStore) IsActiveToken(token string) (bool, error) {
 	var activeToken types.ActiveToken
-	// Query the active tokens table for a matching token that has not expired
-	if err := store.DB.Where("token = ? AND expires_at > ?", token, time.Now()).First(&activeToken).Error; err != nil {
+
+	// Convert current time to the same string format
+	nowStr := time.Now().Format(time.RFC3339)
+
+	// Query using string comparison
+	if err := store.DB.Where("token = ? AND expires_at > ?", token, nowStr).First(&activeToken).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return false, nil
 		}
 		return false, err
 	}
-	return true, nil
+
+	// Parse the stored expiry time and compare
+	expiryTime, err := time.Parse(time.RFC3339, activeToken.ExpiresAt)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse expiry time: %v", err)
+	}
+
+	return time.Now().Before(expiryTime), nil
 }
 
 // GetSubscriberByAddress retrieves subscriber information by Bitcoin address

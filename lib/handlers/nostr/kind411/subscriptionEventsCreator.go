@@ -175,20 +175,6 @@ func serializeEventForID(event *nostr.Event) string {
 }
 
 func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store) (*nostr.Event, error) {
-	var settings types.RelaySettings
-
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-		return nil, err
-	}
-
-	// Transform to relay info format
-	subscriptionTiers := make([]types.SubscriptionTier, len(settings.SubscriptionTiers))
-	for i, tier := range settings.SubscriptionTiers {
-		subscriptionTiers[i] = types.SubscriptionTier{
-			DataLimit: tier.DataLimit,
-			Price:     tier.Price,
-		}
-	}
 
 	// Allocate a new address for this subscription
 	addr, err := store.AllocateAddress()
@@ -202,10 +188,6 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 		{"relay-bitcoin-address", addr.Address},
 		// Add Lightning invoice if applicable
 		{"relay-dht-key", viper.GetString("RelayDHTkey")},
-	}
-
-	for _, tier := range subscriptionTiers {
-		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
 	}
 
 	event := &nostr.Event{
