@@ -139,19 +139,18 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		return nil, fmt.Errorf("failed to deserialize private key: %v", err)
 	}
 
-	// Define subscription tiers
-	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "8000"},
-		{DataLimit: "5 GB per month", Price: "10000"},
-		{DataLimit: "10 GB per month", Price: "15000"},
+	// Get subscription tiers from config
+	var settings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return nil, fmt.Errorf("failed to load relay settings: %v", err)
 	}
 
-	// Create subscription manager
+	log.Printf("Loaded subscription tiers from settings: %+v", settings.SubscriptionTiers)
+
 	return subscription.NewSubscriptionManager(
 		store,
 		privateKey,
-		// viper.GetString("relay_bitcoin_address"),
 		viper.GetString("RelayDHTkey"),
-		subscriptionTiers,
+		settings.SubscriptionTiers,
 	), nil
 }

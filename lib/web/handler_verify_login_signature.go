@@ -77,6 +77,11 @@ func verifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
+	// if err := store.GetStatsStore().DeleteActiveToken(user.ID); err != nil {
+	// 	log.Printf("Warning: Failed to delete existing tokens: %v", err)
+	// 	// Continue anyway as this is not critical
+	// }
+
 	// Generate JWT token
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &types.JWTClaims{
@@ -96,12 +101,16 @@ func verifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
+	log.Println("Token String: ", tokenString)
+
 	// Store the active token in the database
 	activeToken := types.ActiveToken{
 		UserID:    user.ID,
 		Token:     tokenString,
 		ExpiresAt: expirationTime,
 	}
+
+	log.Println("Active token to be stored: ", activeToken)
 	if err := store.GetStatsStore().StoreActiveToken(&activeToken); err != nil {
 		log.Printf("Verify login signature: Failed to store active token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

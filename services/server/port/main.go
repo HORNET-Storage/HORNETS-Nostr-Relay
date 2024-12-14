@@ -88,6 +88,7 @@ func init() {
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")
 	viper.SetDefault("RelayDHTkey", "")
+	viper.SetDefault("wallet_name", "")
 
 	// Set default relay settings (including Mode)
 	viper.SetDefault("relay_settings", map[string]interface{}{
@@ -117,15 +118,15 @@ func init() {
 	viper.SetDefault("subscription_tiers", []map[string]interface{}{
 		{
 			"data_limit": "1 GB per month",
-			"price":      10000, // in sats
+			"price":      "10000", // in sats
 		},
 		{
 			"data_limit": "5 GB per month",
-			"price":      40000, // in sats
+			"price":      "40000", // in sats
 		},
 		{
 			"data_limit": "10 GB per month",
-			"price":      70000, // in sats
+			"price":      "70000", // in sats
 		},
 	})
 

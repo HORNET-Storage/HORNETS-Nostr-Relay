@@ -26,10 +26,23 @@ const (
 func saveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Addresses request received")
 
-	var addresses []types.Address
-	if err := json.Unmarshal(c.Body(), &addresses); err != nil {
+	// First try to unmarshal as array of maps (as sent by the wallet)
+	var rawAddresses []map[string]interface{}
+	if err := json.Unmarshal(c.Body(), &rawAddresses); err != nil {
 		log.Printf("Error unmarshaling JSON: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+
+	// Convert the raw addresses to our Address struct
+	var addresses []types.Address
+	for _, raw := range rawAddresses {
+		addr := types.Address{
+			IndexHornets: raw["index"].(string), // Keep as string as per original struct
+			Address:      raw["address"].(string),
+			WalletName:   raw["wallet_name"].(string),
+			Status:       AddressStatusAvailable, // Set default status
+		}
+		addresses = append(addresses, addr)
 	}
 
 	expectedWalletName := viper.GetString("wallet_name")
@@ -98,12 +111,12 @@ func processAddress(addr types.Address, expectedWalletName string, statsStore st
 	}
 
 	// Check and save address to StatsStore
-	existsInStatsStore, err := statsStore.AddressExists(addr.Address)
+	existsInWallet, err := statsStore.WalletAddressExists(addr.Address)
 	if err != nil {
-		log.Printf("Error checking address existence in StatsStore: %v", err)
-		return err
+		return fmt.Errorf("error checking wallet address existence: %v", err)
 	}
-	if !existsInStatsStore {
+
+	if !existsInWallet {
 		newStatsAddress := types.WalletAddress{
 			IndexHornets: addr.IndexHornets,
 			Address:      addr.Address,
@@ -116,12 +129,11 @@ func processAddress(addr types.Address, expectedWalletName string, statsStore st
 	}
 
 	// Check and save address to SubscriberStore
-	existsInSubscriberStore, err := statsStore.AddressExists(addr.Address)
+	existsInSubscriber, err := statsStore.SubscriberAddressExists(addr.Address)
 	if err != nil {
-		log.Printf("Error checking address existence in SubscriberStore: %v", err)
-		return err
+		return fmt.Errorf("error checking subscriber address existence: %v", err)
 	}
-	if !existsInSubscriberStore {
+	if !existsInSubscriber {
 		subscriptionAddress := &types.SubscriberAddress{
 			IndexHornets: fmt.Sprint(addr.IndexHornets),
 			Address:      addr.Address,

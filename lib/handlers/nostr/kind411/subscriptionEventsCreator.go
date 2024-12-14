@@ -28,17 +28,35 @@ const (
 )
 
 type RelayInfo struct {
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Pubkey        string `json:"pubkey"`
-	Contact       string `json:"contact"`
-	SupportedNIPs []int  `json:"supported_nips"`
-	Software      string `json:"software"`
-	Version       string `json:"version"`
-	DHTkey        string `json:"dhtkey,omitempty"`
+	Name              string                   `json:"name"`
+	Description       string                   `json:"description,omitempty"`
+	Pubkey            string                   `json:"pubkey"`
+	Contact           string                   `json:"contact"`
+	SupportedNIPs     []int                    `json:"supported_nips"`
+	Software          string                   `json:"software"`
+	Version           string                   `json:"version"`
+	DHTkey            string                   `json:"dhtkey,omitempty"`
+	SubscriptionTiers []types.SubscriptionTier `json:"subscription_tiers,omitempty"`
 }
 
 func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
+
+	var settings types.RelaySettings
+
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return err
+	}
+
+	// Transform to relay info format
+	tiers := make([]types.SubscriptionTier, len(settings.SubscriptionTiers))
+	for i, tier := range settings.SubscriptionTiers {
+		tiers[i] = types.SubscriptionTier{
+			DataLimit: tier.DataLimit,
+			Price:     tier.Price,
+		}
+	}
+
+	log.Println("Tiers: ", tiers)
 	// Retrieve existing kind 411 events
 	filter := nostr.Filter{
 		Kinds: []int{411},
@@ -60,14 +78,15 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 
 	// Get relay info
 	relayInfo := RelayInfo{
-		Name:          viper.GetString("RelayName"),
-		Description:   viper.GetString("RelayDescription"),
-		Pubkey:        viper.GetString("RelayPubkey"),
-		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116},
-		Software:      viper.GetString("RelaySoftware"),
-		Version:       viper.GetString("RelayVersion"),
-		DHTkey:        viper.GetString("RelayDHTkey"),
+		Name:              viper.GetString("RelayName"),
+		Description:       viper.GetString("RelayDescription"),
+		Pubkey:            viper.GetString("RelayPubkey"),
+		Contact:           viper.GetString("RelayContact"),
+		SupportedNIPs:     []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116},
+		Software:          viper.GetString("RelaySoftware"),
+		Version:           viper.GetString("RelayVersion"),
+		DHTkey:            viper.GetString("RelayDHTkey"),
+		SubscriptionTiers: tiers,
 	}
 
 	// Convert relay info to JSON
@@ -77,7 +96,7 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 	}
 
 	// Create the event
-	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), nil)
+	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), []nostr.Tag{})
 	if err != nil {
 		return fmt.Errorf("error creating kind 411 event: %v", err)
 	}
@@ -156,10 +175,19 @@ func serializeEventForID(event *nostr.Event) string {
 }
 
 func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store) (*nostr.Event, error) {
-	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10,000 sats"},
-		{DataLimit: "5 GB per month", Price: "40,000 sats"},
-		{DataLimit: "10 GB per month", Price: "70,000 sats"},
+	var settings types.RelaySettings
+
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return nil, err
+	}
+
+	// Transform to relay info format
+	subscriptionTiers := make([]types.SubscriptionTier, len(settings.SubscriptionTiers))
+	for i, tier := range settings.SubscriptionTiers {
+		subscriptionTiers[i] = types.SubscriptionTier{
+			DataLimit: tier.DataLimit,
+			Price:     tier.Price,
+		}
 	}
 
 	// Allocate a new address for this subscription

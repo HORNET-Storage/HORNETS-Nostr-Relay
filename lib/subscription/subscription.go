@@ -53,16 +53,45 @@ func NewSubscriptionManager(
 	relayDHTKey string,
 	tiers []lib.SubscriptionTier,
 ) *SubscriptionManager {
+	log.Printf("Initializing SubscriptionManager with tiers: %+v", tiers)
+
+	// Validate tiers data
+	validTiers := make([]lib.SubscriptionTier, 0)
+	for i, tier := range tiers {
+		if tier.DataLimit == "" || tier.Price == "" {
+			log.Printf("Warning: skipping tier %d with empty fields: DataLimit='%s', Price='%s'",
+				i, tier.DataLimit, tier.Price)
+			continue
+		}
+		validTiers = append(validTiers, tier)
+		log.Printf("Validated tier %d: DataLimit='%s', Price='%s'",
+			i, tier.DataLimit, tier.Price)
+	}
+
+	if len(validTiers) == 0 {
+		log.Printf("Warning: no valid tiers found, checking relay settings directly")
+		// Fallback to loading from settings directly
+		var settings lib.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+			log.Printf("Error loading relay settings: %v", err)
+		} else if len(settings.SubscriptionTiers) > 0 {
+			validTiers = settings.SubscriptionTiers
+			log.Printf("Loaded tiers from settings: %+v", validTiers)
+		}
+	}
+
 	return &SubscriptionManager{
 		store:             store,
 		relayPrivateKey:   relayPrivKey,
 		relayDHTKey:       relayDHTKey,
-		subscriptionTiers: tiers,
+		subscriptionTiers: validTiers,
 	}
 }
 
 // InitializeSubscriber creates a new subscriber or retrieves an existing one and creates their initial NIP-88 event.
 func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
+
+	log.Printf("Initializing subscriber for npub: %s", npub)
 
 	// Run address pool check in background
 	go func() {
@@ -71,11 +100,15 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 		}
 	}()
 
+	log.Println("Address Pool checked Going to allocate address")
+
 	// Step 1: Allocate a Bitcoin address (if necessary)
 	address, err := m.store.GetStatsStore().AllocateBitcoinAddress(npub)
 	if err != nil {
+		log.Printf("Error allocating bitcoin address: %v", err)
 		return fmt.Errorf("failed to allocate Bitcoin address: %v", err)
 	}
+	log.Printf("Successfully allocated address: %s", address.Address)
 
 	// Step 2: Create initial NIP-88 event with zero storage usage
 	storageInfo := StorageInfo{
@@ -85,10 +118,18 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	}
 
 	// Step 3: Create the NIP-88 event
-	return m.createNIP88EventIfNotExists(&lib.Subscriber{
+	err = m.createNIP88EventIfNotExists(&lib.Subscriber{
 		Npub:    npub,
 		Address: address.Address,
 	}, "", time.Time{}, &storageInfo)
+
+	if err != nil {
+		log.Printf("Error creating NIP-88 event: %v", err)
+		return err
+	}
+
+	log.Printf("Successfully initialized subscriber %s", npub)
+	return nil
 }
 
 // ProcessPayment handles a new subscription payment by updating the NIP-88 event and other relevant data
@@ -97,48 +138,65 @@ func (m *SubscriptionManager) ProcessPayment(
 	transactionID string,
 	amountSats int64,
 ) error {
-	// Step 1: Find matching tier for payment amount
+	log.Printf("Processing payment of %d sats for %s", amountSats, npub)
+
+	// Find matching tier for payment amount
 	tier, err := m.findMatchingTier(amountSats)
 	if err != nil {
 		return fmt.Errorf("error matching tier: %v", err)
 	}
+	log.Printf("Found matching tier: %+v", tier)
 
-	// Step 2: Fetch NIP-88 event data to retrieve subscriber information
+	// Fetch current NIP-88 event to get existing state
 	events, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
-		Tags: nostr.TagMap{
-			"p": []string{npub},
-		},
+		Tags:  nostr.TagMap{"p": []string{npub}},
 		Limit: 1,
 	})
 	if err != nil || len(events) == 0 {
 		return fmt.Errorf("no NIP-88 event found for user")
 	}
 	currentEvent := events[0]
+
+	// Use existing method to extract storage info
 	storageInfo, err := m.extractStorageInfo(currentEvent)
 	if err != nil {
 		return fmt.Errorf("failed to extract storage info: %v", err)
 	}
 
-	// Step 3: Calculate subscription period dates and storage limit
+	// Calculate dates using existing method
 	createdAt := time.Unix(int64(currentEvent.CreatedAt), 0)
 	endDate := m.calculateEndDate(createdAt)
-	storageLimit := m.calculateStorageLimit(tier.DataLimit)
 
-	// Step 4: Update storage information for new subscription
-	storageInfo.TotalBytes = storageLimit
+	// Calculate storage using existing method
+	storageInfo.TotalBytes = m.calculateStorageLimit(tier.DataLimit)
 	storageInfo.UpdatedAt = time.Now()
 
-	// Step 5: Update NIP-88 event with new subscription details
 	address := getTagValue(currentEvent.Tags, "relay_bitcoin_address")
-	if err := m.createOrUpdateNIP88Event(&lib.Subscriber{
+
+	// Update the event using existing infrastructure
+	err = m.createOrUpdateNIP88Event(&lib.Subscriber{
 		Npub:    npub,
 		Address: address,
-	}, tier.DataLimit, endDate, &storageInfo); err != nil {
-		return fmt.Errorf("error updating NIP-88 event: %v", err)
+	}, tier.DataLimit, endDate, &storageInfo)
+
+	if err != nil {
+		return fmt.Errorf("failed to update NIP-88 event: %v", err)
 	}
 
-	log.Printf("Processed payment for subscriber %s with tier %s", npub, tier.DataLimit)
+	// Verify the update
+	updatedEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{888},
+		Tags:  nostr.TagMap{"p": []string{npub}},
+		Limit: 1,
+	})
+	if err != nil || len(updatedEvents) == 0 {
+		log.Printf("Warning: couldn't verify NIP-88 event update")
+	} else {
+		log.Printf("Updated NIP-88 event status: %s",
+			getTagValue(updatedEvents[0].Tags, "subscription_status"))
+	}
+
 	return nil
 }
 
@@ -232,6 +290,9 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) error {
+	log.Printf("Creating/updating NIP-88 event for %s with tier %s",
+		subscriber.Npub, activeTier)
+
 	// Delete existing NIP-88 event if it exists
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
@@ -246,46 +307,24 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 		}
 	}
 
-	// Prepare tags and create a new NIP-88 event
+	// Prepare minimal set of essential tags
 	tags := []nostr.Tag{
 		{"subscription_duration", "1 month"},
 		{"p", subscriber.Npub},
 		{"subscription_status", m.getSubscriptionStatus(activeTier)},
 		{"relay_bitcoin_address", subscriber.Address},
 		{"relay_dht_key", m.relayDHTKey},
-		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes),
+			fmt.Sprintf("%d", storageInfo.TotalBytes),
+			fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
 	}
 
-	// Fetch and add subscription_tier tags based on values from Viper
-	rawTiers := viper.Get("subscription_tiers")
-	if rawTiers != nil {
-		if tiers, ok := rawTiers.([]interface{}); ok {
-			for _, tier := range tiers {
-				if tierMap, ok := tier.(map[string]interface{}); ok {
-					dataLimit, okDataLimit := tierMap["data_limit"].(string)
-					price, okPrice := tierMap["price"].(string)
-					if okDataLimit && okPrice {
-						priceInt, err := strconv.Atoi(price) // Convert string price to integer
-						if err != nil {
-							log.Printf("error converting price %s to integer: %v", price, err)
-							continue
-						}
-						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, strconv.Itoa(priceInt)})
-					} else {
-						log.Printf("invalid data structure for tier: %v", tierMap)
-					}
-				} else {
-					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
-				}
-			}
-		} else {
-			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
-		}
-	}
-
+	// Add active tier information if present
 	if activeTier != "" {
 		tags = append(tags, nostr.Tag{
-			"active_subscription", activeTier, fmt.Sprintf("%d", expirationDate.Unix()),
+			"active_subscription",
+			activeTier,
+			fmt.Sprintf("%d", expirationDate.Unix()),
 		})
 	}
 
@@ -317,64 +356,48 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) error {
+	log.Printf("Checking for existing NIP-88 event for subscriber %s", subscriber.Npub)
 	// Check if an existing NIP-88 event for the subscriber already exists
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888}, // Assuming 888 is the NIP-88 event kind
+		Kinds: []int{888},
 		Tags: nostr.TagMap{
 			"p": []string{subscriber.Npub},
 		},
 		Limit: 1,
 	})
 	if err != nil {
+		log.Printf("Error querying events: %v", err)
 		return fmt.Errorf("error querying existing NIP-88 events: %v", err)
 	}
 
-	// If an existing event is found, we skip creation
+	log.Printf("Found %d existing events", len(existingEvents))
+
 	if len(existingEvents) > 0 {
 		log.Printf("NIP-88 event already exists for subscriber %s, skipping creation", subscriber.Npub)
 		return nil
 	}
 
-	// Prepare tags for the new NIP-88 event
+	log.Printf("Creating new NIP-88 event for subscriber %s", subscriber.Npub)
+	log.Printf("Subscriber Address: %s", subscriber.Address)
+
+	// Prepare minimal set of essential tags
 	tags := []nostr.Tag{
 		{"subscription_duration", "1 month"},
 		{"p", subscriber.Npub},
 		{"subscription_status", m.getSubscriptionStatus(activeTier)},
 		{"relay_bitcoin_address", subscriber.Address},
 		{"relay_dht_key", m.relayDHTKey},
-		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), fmt.Sprintf("%d", storageInfo.TotalBytes), fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes),
+			fmt.Sprintf("%d", storageInfo.TotalBytes),
+			fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
 	}
 
-	// Fetch and add subscription_tier tags based on the values from Viper
-	rawTiers := viper.Get("subscription_tiers")
-	if rawTiers != nil {
-		if tiers, ok := rawTiers.([]interface{}); ok {
-			for _, tier := range tiers {
-				if tierMap, ok := tier.(map[string]interface{}); ok {
-					dataLimit, okDataLimit := tierMap["data_limit"].(string)
-					price, okPrice := tierMap["price"].(string)
-					if okDataLimit && okPrice {
-						priceInt, err := strconv.Atoi(price) // Convert string price to integer
-						if err != nil {
-							log.Printf("error converting price %s to integer: %v", price, err)
-							continue
-						}
-						tags = append(tags, nostr.Tag{"subscription_tier", dataLimit, strconv.Itoa(priceInt)})
-					} else {
-						log.Printf("invalid data structure for tier: %v", tierMap)
-					}
-				} else {
-					log.Printf("error asserting tier to map[string]interface{}: %v", tier)
-				}
-			}
-		} else {
-			log.Printf("error asserting subscription_tiers to []interface{}: %v", rawTiers)
-		}
-	}
-
+	// Add active tier information if present
 	if activeTier != "" {
 		tags = append(tags, nostr.Tag{
-			"active_subscription", activeTier, fmt.Sprintf("%d", expirationDate.Unix()),
+			"active_subscription",
+			activeTier,
+			fmt.Sprintf("%d", expirationDate.Unix()),
 		})
 	}
 
@@ -396,20 +419,69 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	}
 	event.Sig = hex.EncodeToString(sig.Serialize())
 
-	return m.store.StoreEvent(event)
+	log.Println("Subscription Event before storing: ", event.String())
+
+	// Store the event
+	if err := m.store.StoreEvent(event); err != nil {
+		return fmt.Errorf("error storing event: %v", err)
+	}
+
+	// Add verification
+	storedEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{888},
+		Tags: nostr.TagMap{
+			"p": []string{subscriber.Npub},
+		},
+		Limit: 1,
+	})
+	if err != nil {
+		log.Printf("Error verifying stored event: %v", err)
+	} else {
+		log.Printf("Verified stored event. Found %d events", len(storedEvents))
+		if len(storedEvents) > 0 {
+			log.Printf("Event details: %+v", storedEvents[0])
+		}
+	}
+
+	return nil
 }
 
 // findMatchingTier finds the highest tier that matches the payment amount
 func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*lib.SubscriptionTier, error) {
+	if len(m.subscriptionTiers) == 0 {
+		// Reload tiers if empty
+		var settings lib.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+			return nil, fmt.Errorf("no tiers available and failed to load settings: %v", err)
+		}
+		m.subscriptionTiers = settings.SubscriptionTiers
+	}
+
+	log.Printf("Finding tier for %d sats among %d tiers: %+v",
+		amountSats, len(m.subscriptionTiers), m.subscriptionTiers)
+
 	var bestMatch *lib.SubscriptionTier
 	var bestPrice int64
 
 	for _, tier := range m.subscriptionTiers {
+		if tier.DataLimit == "" || tier.Price == "" {
+			log.Printf("Warning: skipping invalid tier: DataLimit='%s', Price='%s'",
+				tier.DataLimit, tier.Price)
+			continue
+		}
+
 		price := m.parseSats(tier.Price)
+		log.Printf("Checking tier: DataLimit='%s', Price='%s' (%d sats)",
+			tier.DataLimit, tier.Price, price)
+
 		if amountSats >= price && price > bestPrice {
-			tierCopy := tier
-			bestMatch = &tierCopy
+			bestMatch = &lib.SubscriptionTier{
+				DataLimit: tier.DataLimit,
+				Price:     tier.Price,
+			}
 			bestPrice = price
+			log.Printf("New best match: DataLimit='%s', Price='%s'",
+				bestMatch.DataLimit, bestMatch.Price)
 		}
 	}
 
@@ -417,13 +489,18 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*lib.Subscript
 		return nil, fmt.Errorf("no matching tier for payment of %d sats", amountSats)
 	}
 
+	log.Printf("Selected tier: DataLimit='%s', Price='%s'",
+		bestMatch.DataLimit, bestMatch.Price)
 	return bestMatch, nil
 }
 
 // parseSats converts price string to satoshis
 func (m *SubscriptionManager) parseSats(price string) int64 {
 	var sats int64
-	fmt.Sscanf(price, "%d", &sats)
+	if _, err := fmt.Sscanf(price, "%d", &sats); err != nil {
+		log.Printf("Warning: could not parse price '%s': %v", price, err)
+		return 0
+	}
 	return sats
 }
 
@@ -560,17 +637,19 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 }
 
 // calculateStorageLimit converts tier string to bytes
+// calculateStorageLimit converts tier string to bytes
 func (m *SubscriptionManager) calculateStorageLimit(tier string) int64 {
-	switch tier {
-	case "1 GB per month":
-		return 1 * 1024 * 1024 * 1024
-	case "5 GB per month":
-		return 5 * 1024 * 1024 * 1024
-	case "10 GB per month":
-		return 10 * 1024 * 1024 * 1024
-	default:
+	// Extract the number from strings like "1 GB per month"
+	var gb int64
+	if _, err := fmt.Sscanf(tier, "%d GB per month", &gb); err != nil {
+		log.Printf("Warning: could not parse storage limit from tier '%s': %v", tier, err)
 		return 0
 	}
+
+	log.Printf("Parsed %d GB from tier '%s'", gb, tier)
+
+	// Convert GB to bytes
+	return gb * 1024 * 1024 * 1024 // GB to bytes conversion
 }
 
 // calculateEndDate determines the subscription end date

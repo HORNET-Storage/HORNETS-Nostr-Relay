@@ -220,33 +220,132 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		return fmt.Errorf("read error: %w", err)
 	}
 
+	log.Printf("Received raw message: %s", string(message))
+
+	// Special handling for AUTH messages
+	var rawArray []interface{}
+	if err := json.Unmarshal(message, &rawArray); err == nil {
+		if len(rawArray) >= 2 {
+			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
+				log.Printf("Detected AUTH message")
+
+				// If second element is a string, it's the initial challenge
+				if challenge, ok := rawArray[1].(string); ok {
+					log.Printf("Initial AUTH challenge received: %s", challenge)
+					return nil
+				}
+
+				// If second element is a map, it's the auth event
+				if eventMap, ok := rawArray[1].(map[string]interface{}); ok {
+					log.Printf("Received AUTH event")
+					eventBytes, err := json.Marshal(eventMap)
+					if err != nil {
+						log.Printf("Failed to marshal event map: %v", err)
+						return nil
+					}
+
+					var event nostr.Event
+					if err := json.Unmarshal(eventBytes, &event); err != nil {
+						log.Printf("Failed to unmarshal event: %v", err)
+						return nil
+					}
+
+					authEnv := &nostr.AuthEnvelope{Event: event}
+					log.Printf("Handling AUTH event")
+					handleAuthMessage(c, authEnv, challenge, state, store)
+					return nil
+				}
+			}
+		}
+	}
+
+	// Rest of the code remains the same...
 	rawMessage := nostr.ParseMessage(message)
 
 	switch env := rawMessage.(type) {
 	case *nostr.EventEnvelope:
 		handleEventMessage(c, env)
-
 	case *nostr.ReqEnvelope:
 		handleReqMessage(c, env)
-
 	case *nostr.AuthEnvelope:
+		log.Printf("Handling AUTH message")
 		handleAuthMessage(c, env, challenge, state, store)
-
 	case *nostr.CloseEnvelope:
 		handleCloseMessage(c, env)
-
 	case *nostr.CountEnvelope:
 		handleCountMessage(c, env, challenge)
-
 	default:
 		firstComma := bytes.Index(message, []byte{','})
 		if firstComma == -1 {
 			return nil
 		}
 		label := message[0:firstComma]
-
-		log.Println("Unknown message type: " + string(label))
+		log.Printf("Unknown message type: %s", string(label))
 	}
 
 	return nil
 }
+
+// func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store stores.Store) error {
+// 	_, message, err := c.ReadMessage()
+// 	if err != nil {
+// 		return fmt.Errorf("read error: %w", err)
+// 	}
+
+// 	log.Printf("Received raw message: %s", string(message))
+
+// 	// Special handling for AUTH messages since ParseMessage might not handle them correctly
+// 	var rawArray []interface{}
+// 	if err := json.Unmarshal(message, &rawArray); err == nil {
+// 		if len(rawArray) >= 2 {
+// 			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
+// 				log.Printf("Detected AUTH message")
+// 				if len(rawArray) == 2 {
+// 					log.Printf("Initial AUTH challenge received")
+// 					return nil
+// 				} else if len(rawArray) == 3 {
+// 					if eventJSON, ok := rawArray[1].(map[string]interface{}); ok {
+// 						eventBytes, _ := json.Marshal(eventJSON)
+// 						var event nostr.Event // Create as value, not pointer
+// 						if err := json.Unmarshal(eventBytes, &event); err == nil {
+// 							authEnv := &nostr.AuthEnvelope{Event: event} // Use the value directly
+// 							handleAuthMessage(c, authEnv, challenge, state, store)
+// 							return nil
+// 						}
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	rawMessage := nostr.ParseMessage(message)
+
+// 	switch env := rawMessage.(type) {
+// 	case *nostr.EventEnvelope:
+// 		handleEventMessage(c, env)
+
+// 	case *nostr.ReqEnvelope:
+// 		handleReqMessage(c, env)
+
+// 	case *nostr.AuthEnvelope:
+// 		log.Printf("Handling AUTH message")
+// 		handleAuthMessage(c, env, challenge, state, store)
+
+// 	case *nostr.CloseEnvelope:
+// 		handleCloseMessage(c, env)
+
+// 	case *nostr.CountEnvelope:
+// 		handleCountMessage(c, env, challenge)
+
+// 	default:
+// 		firstComma := bytes.Index(message, []byte{','})
+// 		if firstComma == -1 {
+// 			return nil
+// 		}
+// 		label := message[0:firstComma]
+
+// 		log.Println("Unknown message type: " + string(label))
+// 	}
+
+// 	return nil
+// }

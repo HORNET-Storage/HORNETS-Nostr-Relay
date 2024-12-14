@@ -155,18 +155,19 @@ type WalletAddress struct {
 
 type BitcoinRate struct {
 	ID               uint      `gorm:"primaryKey"`
-	Rate             float64   `gorm:"not null"`
+	Rate             string    `gorm:"not null"`
 	TimestampHornets time.Time `gorm:"autoUpdateTime"` // This will be updated each time the rate changes
 }
 
 type RelaySettings struct {
-	Mode              string             `json:"mode"`
-	Protocol          []string           `json:"protocol"`
-	Chunked           []string           `json:"chunked"`
-	Chunksize         string             `json:"chunksize"`
-	MaxFileSize       int                `json:"maxFileSize"`
-	MaxFileSizeUnit   string             `json:"maxFileSizeUnit"`
-	SubscriptionTiers []SubscriptionTier `json:"subscription_tiers"`
+	Mode                string             `json:"mode" mapstructure:"mode"`
+	Protocol            []string           `json:"protocol" mapstructure:"protocol"`
+	Chunked             []string           `json:"chunked" mapstructure:"chunked"`
+	Chunksize           string             `json:"chunksize" mapstructure:"chunksize"`
+	MaxFileSize         int                `json:"maxfilesize" mapstructure:"maxfilesize"`
+	MaxFileSizeUnit     string             `json:"maxfilesizeunit" mapstructure:"maxfilesizeunit"`
+	IsFileStorageActive bool               `json:"isFileStorageActive" mapstructure:"isFileStorageActive"`
+	SubscriptionTiers   []SubscriptionTier `json:"subscription_tiers" mapstructure:"subscription_tiers"`
 
 	// Common type groups used for determining what types are considered audio, videos, images etc
 	MimeTypeGroups map[string][]string
@@ -210,9 +211,10 @@ type UserProfile struct {
 }
 
 type ActiveToken struct {
-	UserID    uint   `gorm:"primaryKey"`
-	Token     string `gorm:"size:512;uniqueIndex"`
-	ExpiresAt time.Time
+	ID        uint      `gorm:"primaryKey;type:INTEGER AUTO_INCREMENT"`
+	UserID    uint      `gorm:"type:INTEGER"`
+	Token     string    `gorm:"type:VARCHAR[512]"` // Maximum allowed size for indexed columns
+	ExpiresAt time.Time `gorm:"type:TIMESTAMP"`
 }
 
 type ActivityData struct {
@@ -342,8 +344,8 @@ type Libp2pStream struct {
 }
 
 type SubscriptionTier struct {
-	DataLimit string
-	Price     string
+	DataLimit string `json:"datalimit" mapstructure:"datalimit"`
+	Price     string `json:"price" mapstructure:"price"`
 }
 
 func (ls *Libp2pStream) Read(msg []byte) (int, error) {

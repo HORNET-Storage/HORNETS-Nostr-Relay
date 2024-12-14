@@ -5,6 +5,8 @@ import (
 	"log"
 	"math"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -13,11 +15,16 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+// BatchSize defines how many records to insert in a single transaction
+const BatchSize = 50
 
 // GormStatisticsStore is a GORM-based implementation of the StatisticsStore interface.
 type GormStatisticsStore struct {
-	DB *gorm.DB
+	DB    *gorm.DB
+	mutex sync.RWMutex
 }
 
 const (
@@ -27,6 +34,28 @@ const (
 
 // Generic Init for gorm
 func (store *GormStatisticsStore) Init() error {
+	testing := false
+	if testing {
+		tablesToDrop := []string{
+			// "wallet_addresses",
+			// "subscriber_addresses",
+			// "wallet_transactions",
+			// "wallet_balances",
+			"kinds",
+		}
+
+		for _, table := range tablesToDrop {
+			if err := store.DB.Exec(fmt.Sprintf("DROP TABLE %s", table)).Error; err != nil {
+				log.Printf("Error dropping table %s: %v", table, err)
+				// If table doesn't exist, that's fine - continue
+				if !strings.Contains(err.Error(), "does not exist") {
+					continue
+				}
+			}
+			log.Printf("Successfully dropped table: %s", table)
+		}
+	}
+
 	err := store.DB.AutoMigrate(
 		&types.Kind{},
 		&types.FileInfo{},
@@ -43,6 +72,16 @@ func (store *GormStatisticsStore) Init() error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
+	}
+
+	result := store.DB.Exec(`CREATE INDEX ON active_tokens (user_id)`)
+	if result.Error != nil && !strings.Contains(result.Error.Error(), "already exists") {
+		log.Printf("Error creating user_id index: %v", result.Error)
+	}
+
+	result = store.DB.Exec(`CREATE UNIQUE INDEX ON active_tokens (token)`)
+	if result.Error != nil && !strings.Contains(result.Error.Error(), "already exists") {
+		log.Printf("Error creating token index: %v", result.Error)
 	}
 
 	return nil
@@ -140,15 +179,18 @@ func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 		return result.Error
 	}
 
+	// Convert current rate to string for comparison
+	rateStr := fmt.Sprintf("%.8f", rate)
+
 	// If the rate is the same as the latest entry, no update needed
-	if result.Error == nil && latestBitcoinRate.Rate == rate {
+	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
 		log.Println("Rate is the same as the latest entry, no update needed")
 		return nil
 	}
 
 	// Add the new rate
 	newRate := types.BitcoinRate{
-		Rate:             rate,
+		Rate:             rateStr,
 		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
@@ -415,93 +457,144 @@ func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserCha
 }
 
 // DeleteActiveToken deletes the given token from the ActiveTokens table
-func (store *GormStatisticsStore) DeleteActiveToken(token string) error {
-	result := store.DB.Where("token = ?", token).Delete(&types.ActiveToken{})
+func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
+	result := store.DB.Where("user_id = ?", userID).Delete(&types.ActiveToken{})
 	if result.Error != nil {
-		log.Printf("Failed to delete token: %v", result.Error)
+		log.Printf("Failed to delete tokens for user %d: %v", userID, result.Error)
 		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		// Token wasn't found, but we'll still consider this a successful logout
-		log.Printf("Token not found in ActiveTokens, but proceeding with logout")
+		// No tokens found for this user, but we'll still consider this successful
+		log.Printf("No tokens found for user %d, but proceeding with cleanup", userID)
+	} else {
+		log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
 	}
 
 	return nil
 }
 
-// FetchMonthlyStorageStats retrieves the monthly storage stats (total GBs per month)
-func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityData, error) {
-	var data []types.ActivityData
-
-	// Query to get the total GBs per month across different tables
-	err := store.DB.Raw(`
-		SELECT 
-			strftime('%Y-%m', timestamp_hornets) as month,
-			ROUND(SUM(size) / 1024.0, 3) as total_gb
-		FROM (
-			SELECT timestamp_hornets, size FROM kinds
-			UNION ALL
-			SELECT timestamp_hornets, size FROM file_info
-		)
-		GROUP BY month
-	`).Scan(&data).Error
-
-	if err != nil {
-		log.Printf("Error fetching monthly storage stats: %v", err)
+func (store *GormStatisticsStore) FindUserByToken(token string) (*types.AdminUser, error) {
+	var activeToken types.ActiveToken
+	if err := store.DB.Where("token = ? AND expires_at > NOW()", token).First(&activeToken).Error; err != nil {
 		return nil, err
 	}
 
-	return data, nil
+	var user types.AdminUser
+	if err := store.DB.First(&user, activeToken.UserID).Error; err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+// FetchMonthlyStorageStats retrieves the monthly storage stats (total GBs per month)
+func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityData, error) {
+	var data []struct {
+		Month time.Time `gorm:"column:month"`
+		Size  float64   `gorm:"column:size"`
+	}
+
+	err := store.DB.Raw(`
+		SELECT timestamp_hornets as month, size 
+		FROM kinds
+	`).Scan(&data).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group and calculate in Go
+	monthlyData := make(map[string]float64)
+	for _, d := range data {
+		key := d.Month.Format("2006-01")
+		monthlyData[key] += d.Size / 1024.0
+	}
+
+	result := make([]types.ActivityData, 0, len(monthlyData))
+	for month, size := range monthlyData {
+		result = append(result, types.ActivityData{
+			Month:   month,
+			TotalGB: math.Round(size*1000) / 1000,
+		})
+	}
+
+	return result, nil
 }
 
 // FetchNotesMediaStorageData retrieves the total GBs per month for notes and media
 func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChartData, error) {
-	var data []types.BarChartData
+	var data []struct {
+		Month time.Time `gorm:"column:month"`
+		Size  float64   `gorm:"column:size"`
+	}
 
-	// Query to get the total GBs per month for notes and media
 	err := store.DB.Raw(`
-		SELECT 
-			strftime('%Y-%m', timestamp_hornets) as month,
-			ROUND(SUM(CASE WHEN kind_number IS NOT NULL THEN size ELSE 0 END) / 1024.0, 3) as notes_gb,  -- Convert to GB and round to 2 decimal places
-			ROUND(SUM(CASE WHEN kind_number IS NULL THEN size ELSE 0 END) / 1024.0, 3) as media_gb  -- Convert to GB and round to 2 decimal places
-		FROM (
-			SELECT timestamp_hornets, size, kind_number FROM kinds
-			UNION ALL
-			SELECT timestamp_hornets, size, NULL as kind_number FROM file_info
-		)
-		GROUP BY month
-	`).Scan(&data).Error
-
+        SELECT timestamp_hornets as month, size 
+        FROM kinds
+    `).Scan(&data).Error
 	if err != nil {
-		log.Printf("Error fetching bar chart data: %v", err)
 		return nil, err
 	}
 
-	return data, nil
+	// Group and calculate in Go
+	monthData := make(map[string]float64)
+	for _, d := range data {
+		key := d.Month.Format("2006-01")
+		monthData[key] += d.Size / 1024.0
+	}
+
+	// Convert to BarChartData
+	result := make([]types.BarChartData, 0, len(monthData))
+	for month, size := range monthData {
+		result = append(result, types.BarChartData{
+			Month:   month,
+			NotesGB: size,
+			MediaGB: 0,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Month < result[j].Month
+	})
+
+	return result, nil
 }
 
 // FetchProfilesTimeSeriesData retrieves the time series data for profiles over the last 6 months
 func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate string) ([]types.TimeSeriesData, error) {
-	var data []types.TimeSeriesData
+	var rawData []struct {
+		Time      time.Time `gorm:"column:timestamp_hornets"`
+		Profiles  int       `gorm:"column:total"`
+		Lightning int       `gorm:"column:lightning"`
+		DHTKey    int       `gorm:"column:dht"`
+		Both      int       `gorm:"column:both"`
+	}
 
-	// Query to get profile data from the last 6 months
 	err := store.DB.Raw(`
-        SELECT
-			strftime('%Y-%m', timestamp_hornets) as month,
-			COUNT(*) as profiles,
-			COUNT(CASE WHEN lightning_addr THEN 1 ELSE NULL END) as lightning_addr,
-			COUNT(CASE WHEN dht_key THEN 1 ELSE NULL END) as dht_key,
-			COUNT(CASE WHEN lightning_addr AND dht_key THEN 1 ELSE NULL END) as lightning_and_dht
-		FROM user_profiles
-		WHERE strftime('%Y-%m', timestamp_hornets) >= ? AND strftime('%Y-%m', timestamp_hornets) <= ?
-		GROUP BY month
-		ORDER BY month ASC;
-    `, startDate, endDate).Scan(&data).Error
+   SELECT 
+       timestamp_hornets,
+       COUNT(*) as total,
+       COUNT(lightning_addr) as lightning,
+       COUNT(dht_key) as dht,
+       COUNT(lightning_addr) as both
+   FROM user_profiles 
+   WHERE timestamp_hornets >= ? AND timestamp_hornets <= ?
+   GROUP BY timestamp_hornets
+`, startDate, endDate).Scan(&rawData).Error
 
 	if err != nil {
-		log.Printf("Error fetching time series data: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("error fetching time series data: %v", err)
+	}
+
+	data := make([]types.TimeSeriesData, len(rawData))
+	for i, raw := range rawData {
+		data[i] = types.TimeSeriesData{
+			Month:           raw.Time.Format("2006-01"),
+			Profiles:        raw.Profiles,
+			LightningAddr:   raw.Lightning,
+			DHTKey:          raw.DHTKey,
+			LightningAndDHT: raw.Both,
+		}
 	}
 
 	return data, nil
@@ -674,7 +767,10 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 		return result.Error
 	}
 
-	if result.Error == nil && latestBitcoinRate.Rate == rate {
+	// Convert current rate to string for comparison
+	rateStr := fmt.Sprintf("%.8f", rate)
+
+	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
 		// If the rate is the same as the latest entry, no update needed
 		log.Println("Rate is the same as the latest entry, no update needed")
 		return nil
@@ -682,7 +778,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 
 	// Add the new rate
 	newRate := types.BitcoinRate{
-		Rate:             rate,
+		Rate:             rateStr,
 		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
@@ -776,22 +872,144 @@ func (store *GormStatisticsStore) UserExists() (bool, error) {
 }
 
 // AddressExists checks if a given Bitcoin address exists in the database
-func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
+func (store *GormStatisticsStore) SubscriberAddressExists(address string) (bool, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
 	var count int64
 	err := store.DB.Model(&types.SubscriberAddress{}).
 		Where("address = ?", address).
 		Count(&count).Error
-
 	if err != nil {
-		return false, fmt.Errorf("failed to check address existence: %v", err)
+		return false, fmt.Errorf("failed to check subscriber address existence: %v", err)
 	}
 
 	return count > 0, nil
 }
 
+func (store *GormStatisticsStore) WalletAddressExists(address string) (bool, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	var count int64
+	err := store.DB.Model(&types.WalletAddress{}).
+		Where("address = ?", address).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("failed to check wallet address existence: %v", err)
+	}
+
+	return count > 0, nil
+}
+
+func (store *GormStatisticsStore) AddressExists(address string) (bool, error) {
+	subscriberExists, err := store.SubscriberAddressExists(address)
+	if err != nil {
+		return false, err
+	}
+
+	walletExists, err := store.WalletAddressExists(address)
+	if err != nil {
+		return false, err
+	}
+
+	return subscriberExists || walletExists, nil
+}
+
+func (store *GormStatisticsStore) SaveAddressBatch(addresses []*types.WalletAddress) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	const maxRetries = 3
+
+	// Split addresses into batches
+	for i := 0; i < len(addresses); i += BatchSize {
+		end := i + BatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[i:end]
+
+		// Retry logic for each batch
+		for retry := 0; retry < maxRetries; retry++ {
+			err := store.DB.Transaction(func(tx *gorm.DB) error {
+				// Use clause.OnConflict to handle duplicate addresses
+				result := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "address"}},
+					DoNothing: true,
+				}).Create(&batch)
+
+				if result.Error != nil {
+					return result.Error
+				}
+				return nil
+			})
+
+			if err == nil {
+				break
+			}
+
+			if retry == maxRetries-1 {
+				log.Printf("Failed to save batch after %d retries: %v", maxRetries, err)
+				return err
+			}
+
+			// Exponential backoff
+			time.Sleep(time.Millisecond * time.Duration(100*(1<<retry)))
+		}
+	}
+	return nil
+}
+
+// SaveSubscriberAddressBatch handles batch saving of subscriber addresses
+func (store *GormStatisticsStore) SaveSubscriberAddressBatch(addresses []*types.SubscriberAddress) error {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	const maxRetries = 3
+
+	// Split addresses into batches
+	for i := 0; i < len(addresses); i += BatchSize {
+		end := i + BatchSize
+		if end > len(addresses) {
+			end = len(addresses)
+		}
+		batch := addresses[i:end]
+
+		// Retry logic for each batch
+		for retry := 0; retry < maxRetries; retry++ {
+			err := store.DB.Transaction(func(tx *gorm.DB) error {
+				// Use clause.OnConflict to handle duplicate addresses
+				result := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "address"}},
+					DoNothing: true,
+				}).Create(&batch)
+
+				if result.Error != nil {
+					return result.Error
+				}
+				return nil
+			})
+
+			if err == nil {
+				break
+			}
+
+			if retry == maxRetries-1 {
+				log.Printf("Failed to save subscriber batch after %d retries: %v", maxRetries, err)
+				return err
+			}
+
+			// Exponential backoff
+			time.Sleep(time.Millisecond * time.Duration(100*(1<<retry)))
+		}
+	}
+	return nil
+}
+
 // SaveAddress saves a new wallet address to the database
 func (store *GormStatisticsStore) SaveAddress(address *types.WalletAddress) error {
-	return store.DB.Create(address).Error
+	return store.SaveAddressBatch([]*types.WalletAddress{address})
 }
 
 // GetLatestWalletBalance retrieves the latest wallet balance from the database
@@ -812,11 +1030,16 @@ func (store *GormStatisticsStore) GetLatestWalletBalance() (types.WalletBalance,
 // GetLatestBitcoinRate retrieves the latest Bitcoin rate from the database
 func (store *GormStatisticsStore) GetLatestBitcoinRate() (types.BitcoinRate, error) {
 	var bitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp_hornets desc").First(&bitcoinRate)
+
+	// Simpler query without complex ordering
+	result := store.DB.Select("*").
+		Table("bitcoin_rates").
+		Limit(1).
+		Find(&bitcoinRate)
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			bitcoinRate.Rate = 0.0 // Default rate if not found
+			bitcoinRate.Rate = "0.00000000" // Default rate if not found
 			return bitcoinRate, nil
 		}
 		return types.BitcoinRate{}, result.Error
@@ -849,6 +1072,7 @@ func (store *GormStatisticsStore) GetUserByID(userID uint) (types.AdminUser, err
 
 // StoreActiveToken saves the generated active JWT token in the database
 func (store *GormStatisticsStore) StoreActiveToken(activeToken *types.ActiveToken) error {
+
 	return store.DB.Create(activeToken).Error
 }
 
@@ -892,12 +1116,5 @@ func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types
 
 // SaveSubscriberAddress saves or updates a subscriber address in the database
 func (store *GormStatisticsStore) SaveSubscriberAddress(address *types.SubscriberAddress) error {
-	// Directly create a new address record
-	if err := store.DB.Create(address).Error; err != nil {
-		log.Printf("Error saving new address: %v", err)
-		return err
-	}
-
-	log.Printf("Address %s saved successfully.", address.Address)
-	return nil
+	return store.SaveSubscriberAddressBatch([]*types.SubscriberAddress{address})
 }

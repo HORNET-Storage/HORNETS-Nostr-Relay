@@ -53,13 +53,16 @@ type StatisticsStore interface {
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
 	GetSubscriberByAddress(address string) (*types.SubscriberAddress, error)
 	SaveSubscriberAddress(address *types.SubscriberAddress) error
+	WalletAddressExists(address string) (bool, error)
+	SubscriberAddressExists(address string) (bool, error)
 
 	// User challenge and token management
 	SaveUserChallenge(userChallenge *types.UserChallenge) error
 	GetUserChallenge(challenge string) (types.UserChallenge, error)
 	MarkChallengeExpired(userChallenge *types.UserChallenge) error
 	StoreActiveToken(activeToken *types.ActiveToken) error
-	DeleteActiveToken(token string) error
+	DeleteActiveToken(token uint) error
+	FindUserByToken(token string) (*types.AdminUser, error)
 	IsActiveToken(token string) (bool, error)
 
 	// Statistics and storage stats
