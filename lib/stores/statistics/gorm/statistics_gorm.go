@@ -466,8 +466,23 @@ func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
 
 func (store *GormStatisticsStore) FindUserByToken(token string) (*types.AdminUser, error) {
 	var activeToken types.ActiveToken
-	if err := store.DB.Where("token = ? AND expires_at > NOW()", token).First(&activeToken).Error; err != nil {
+
+	// Get current time in RFC3339 format
+	nowStr := time.Now().Format(time.RFC3339)
+
+	// Query using string comparison
+	if err := store.DB.Where("token = ? AND expires_at > ?", token, nowStr).First(&activeToken).Error; err != nil {
 		return nil, err
+	}
+
+	// Parse the stored expiry time and verify it's still valid
+	expiryTime, err := time.Parse(time.RFC3339, activeToken.ExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse expiry time: %v", err)
+	}
+
+	if time.Now().After(expiryTime) {
+		return nil, gorm.ErrRecordNotFound
 	}
 
 	var user types.AdminUser
