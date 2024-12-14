@@ -211,10 +211,10 @@ type UserProfile struct {
 }
 
 type ActiveToken struct {
-	ID        uint      `gorm:"primaryKey;type:INTEGER AUTO_INCREMENT"`
-	UserID    uint      `gorm:"uniqueIndex"`
-	Token     string    `gorm:"size:512;uniqueIndex"` // Maximum allowed size for indexed columns
-	ExpiresAt time.Time `gorm:"type:TIMESTAMP"`
+	ID        uint   `gorm:"primaryKey;type:INTEGER AUTO_INCREMENT"`
+	UserID    uint   `gorm:"uniqueIndex"`
+	Token     string `gorm:"size:512;uniqueIndex"` // Maximum allowed size for indexed columns
+	ExpiresAt string `gorm:"type:VARCHAR[64]"`     // Changed to string to store formatted time
 }
 
 type ActivityData struct {

@@ -1062,8 +1062,21 @@ func (store *GormStatisticsStore) GetUserByID(userID uint) (types.AdminUser, err
 
 // StoreActiveToken saves the generated active JWT token in the database
 func (store *GormStatisticsStore) StoreActiveToken(activeToken *types.ActiveToken) error {
+	// First try to delete any existing tokens for this user
+	if err := store.DeleteActiveToken(activeToken.UserID); err != nil {
+		log.Printf("Warning: failed to delete existing tokens: %v", err)
+		// Continue anyway as we still want to try creating the new token
+	}
 
-	return store.DB.Create(activeToken).Error
+	// Create a copy with string timestamp
+	tokenToStore := &types.ActiveToken{
+		UserID:    activeToken.UserID,
+		Token:     activeToken.Token,
+		ExpiresAt: time.Now().Add(24 * time.Hour).Format(time.RFC3339), // Format new expiry time
+	}
+
+	// Try to create the new token
+	return store.DB.Create(tokenToStore).Error
 }
 
 // GetLatestWalletTransactions retrieves all wallet transactions ordered by date descending
@@ -1079,14 +1092,25 @@ func (store *GormStatisticsStore) GetLatestWalletTransactions() ([]types.WalletT
 // IsActiveToken checks if a token is active and not expired
 func (store *GormStatisticsStore) IsActiveToken(token string) (bool, error) {
 	var activeToken types.ActiveToken
-	// Query the active tokens table for a matching token that has not expired
-	if err := store.DB.Where("token = ? AND expires_at > ?", token, time.Now()).First(&activeToken).Error; err != nil {
+
+	// Convert current time to the same string format
+	nowStr := time.Now().Format(time.RFC3339)
+
+	// Query using string comparison
+	if err := store.DB.Where("token = ? AND expires_at > ?", token, nowStr).First(&activeToken).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return false, nil
 		}
 		return false, err
 	}
-	return true, nil
+
+	// Parse the stored expiry time and compare
+	expiryTime, err := time.Parse(time.RFC3339, activeToken.ExpiresAt)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse expiry time: %v", err)
+	}
+
+	return time.Now().Before(expiryTime), nil
 }
 
 // GetSubscriberByAddress retrieves subscriber information by Bitcoin address

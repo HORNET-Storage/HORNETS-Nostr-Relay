@@ -107,7 +107,7 @@ func verifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 	activeToken := types.ActiveToken{
 		UserID:    user.ID,
 		Token:     tokenString,
-		ExpiresAt: expirationTime,
+		ExpiresAt: expirationTime.Format(time.RFC3339),
 	}
 
 	log.Println("Active token to be stored: ", activeToken)
