@@ -448,17 +448,40 @@ func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserCha
 
 // DeleteActiveToken deletes the given token from the ActiveTokens table
 func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
-	result := store.DB.Where("user_id = ?", userID).Delete(&types.ActiveToken{})
-	if result.Error != nil {
-		log.Printf("Failed to delete tokens for user %d: %v", userID, result.Error)
-		return result.Error
-	}
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		err := store.DB.Transaction(func(tx *gorm.DB) error {
+			result := tx.Exec("DELETE FROM active_tokens WHERE user_id = ?", userID)
+			if result.Error != nil {
+				return result.Error
+			}
 
-	if result.RowsAffected == 0 {
-		// No tokens found for this user, but we'll still consider this successful
-		log.Printf("No tokens found for user %d, but proceeding with cleanup", userID)
-	} else {
-		log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
+			if result.RowsAffected == 0 {
+				log.Printf("No tokens found for user %d", userID)
+			} else {
+				log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
+			}
+
+			return nil
+		})
+
+		if err == nil {
+			return nil
+		}
+
+		// If it's not a read conflict, return the error
+		if !strings.Contains(err.Error(), "tx read conflict") {
+			return err
+		}
+
+		// If this was the last retry, return the error
+		if i == maxRetries-1 {
+			log.Printf("Failed to delete tokens after %d retries: %v", maxRetries, err)
+			return err
+		}
+
+		// Wait before retrying
+		time.Sleep(time.Millisecond * time.Duration(100*(i+1)))
 	}
 
 	return nil
