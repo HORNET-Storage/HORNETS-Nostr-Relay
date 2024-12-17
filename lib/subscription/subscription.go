@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -44,8 +45,11 @@ type SubscriptionManager struct {
 	relayPrivateKey   *btcec.PrivateKey      // Relay's private key for signing events
 	relayDHTKey       string                 // Relay's DHT key
 	subscriptionTiers []lib.SubscriptionTier // Available subscription tiers
+	freeTierEnabled   bool
+	freeTierLimit     string
 }
 
+// NewSubscriptionManager creates and initializes a new subscription manager
 // NewSubscriptionManager creates and initializes a new subscription manager
 func NewSubscriptionManager(
 	store stores.Store,
@@ -55,12 +59,35 @@ func NewSubscriptionManager(
 ) *SubscriptionManager {
 	log.Printf("Initializing SubscriptionManager with tiers: %+v", tiers)
 
+	// Load relay settings first to get free tier configuration
+	var settings lib.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		log.Printf("Error loading relay settings: %v", err)
+	}
+
 	// Validate tiers data
 	validTiers := make([]lib.SubscriptionTier, 0)
+
+	// If free tier is enabled, add it as the first tier
+	if settings.FreeTierEnabled && settings.FreeTierLimit != "" {
+		freeTier := lib.SubscriptionTier{
+			DataLimit: settings.FreeTierLimit,
+			Price:     "0",
+		}
+		validTiers = append(validTiers, freeTier)
+		log.Printf("Added free tier: DataLimit='%s'", settings.FreeTierLimit)
+	}
+
+	// Validate and add paid tiers
 	for i, tier := range tiers {
 		if tier.DataLimit == "" || tier.Price == "" {
 			log.Printf("Warning: skipping tier %d with empty fields: DataLimit='%s', Price='%s'",
 				i, tier.DataLimit, tier.Price)
+			continue
+		}
+		// Skip if it's a free tier (price = "0") and we already have a free tier
+		if tier.Price == "0" && settings.FreeTierEnabled {
+			log.Printf("Skipping duplicate free tier at index %d", i)
 			continue
 		}
 		validTiers = append(validTiers, tier)
@@ -71,11 +98,23 @@ func NewSubscriptionManager(
 	if len(validTiers) == 0 {
 		log.Printf("Warning: no valid tiers found, checking relay settings directly")
 		// Fallback to loading from settings directly
-		var settings lib.RelaySettings
-		if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-			log.Printf("Error loading relay settings: %v", err)
-		} else if len(settings.SubscriptionTiers) > 0 {
-			validTiers = settings.SubscriptionTiers
+		if len(settings.SubscriptionTiers) > 0 {
+			// If free tier is enabled, filter out any existing free tiers from settings
+			if settings.FreeTierEnabled {
+				for _, tier := range settings.SubscriptionTiers {
+					if tier.Price != "0" {
+						validTiers = append(validTiers, tier)
+					}
+				}
+				// Add free tier at the beginning
+				freeTier := lib.SubscriptionTier{
+					DataLimit: settings.FreeTierLimit,
+					Price:     "0",
+				}
+				validTiers = append([]lib.SubscriptionTier{freeTier}, validTiers...)
+			} else {
+				validTiers = settings.SubscriptionTiers
+			}
 			log.Printf("Loaded tiers from settings: %+v", validTiers)
 		}
 	}
@@ -85,12 +124,13 @@ func NewSubscriptionManager(
 		relayPrivateKey:   relayPrivKey,
 		relayDHTKey:       relayDHTKey,
 		subscriptionTiers: validTiers,
+		freeTierEnabled:   settings.FreeTierEnabled,
+		freeTierLimit:     settings.FreeTierLimit,
 	}
 }
 
 // InitializeSubscriber creates a new subscriber or retrieves an existing one and creates their initial NIP-88 event.
 func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
-
 	log.Printf("Initializing subscriber for npub: %s", npub)
 
 	// Run address pool check in background
@@ -110,25 +150,43 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	}
 	log.Printf("Successfully allocated address: %s", address.Address)
 
-	// Step 2: Create initial NIP-88 event with zero storage usage
+	// Step 2: Create initial NIP-88 event with storage usage based on free tier
 	storageInfo := StorageInfo{
-		UsedBytes:  0,
-		TotalBytes: 0,
-		UpdatedAt:  time.Now(),
+		UsedBytes: 0,
+		UpdatedAt: time.Now(),
 	}
 
-	// Step 3: Create the NIP-88 event
+	// Set initial storage limit based on free tier status
+	if m.freeTierEnabled {
+		storageInfo.TotalBytes = m.calculateStorageLimit(m.freeTierLimit)
+		log.Printf("Free tier enabled. Setting initial storage limit to %d bytes", storageInfo.TotalBytes)
+	} else {
+		storageInfo.TotalBytes = 0
+		log.Printf("Free tier disabled. Setting initial storage limit to 0 bytes")
+	}
+
+	// Step 3: Create the NIP-88 event with appropriate tier information
+	var tierLimit string
+	var expirationDate time.Time
+
+	if m.freeTierEnabled {
+		tierLimit = m.freeTierLimit
+		expirationDate = time.Now().AddDate(0, 1, 0) // 1 month from now
+		log.Printf("Setting free tier limit: %s with expiration: %v", tierLimit, expirationDate)
+	}
+
+	// Step 4: Create the NIP-88 event
 	err = m.createNIP88EventIfNotExists(&lib.Subscriber{
 		Npub:    npub,
 		Address: address.Address,
-	}, "", time.Time{}, &storageInfo)
+	}, tierLimit, expirationDate, &storageInfo)
 
 	if err != nil {
 		log.Printf("Error creating NIP-88 event: %v", err)
 		return err
 	}
 
-	log.Printf("Successfully initialized subscriber %s", npub)
+	log.Printf("Successfully initialized subscriber %s with free tier status: %v", npub, m.freeTierEnabled)
 	return nil
 }
 
@@ -158,23 +216,40 @@ func (m *SubscriptionManager) ProcessPayment(
 	}
 	currentEvent := events[0]
 
-	// Use existing method to extract storage info
+	// Extract current storage info
 	storageInfo, err := m.extractStorageInfo(currentEvent)
 	if err != nil {
 		return fmt.Errorf("failed to extract storage info: %v", err)
 	}
 
-	// Calculate dates using existing method
+	// If free tier is enabled, ensure paid tier provides more storage
+	if m.freeTierEnabled {
+		freeTierBytes := m.calculateStorageLimit(m.freeTierLimit)
+		paidTierBytes := m.calculateStorageLimit(tier.DataLimit)
+
+		if paidTierBytes <= freeTierBytes {
+			return fmt.Errorf("paid tier (%s) must provide more storage than free tier (%s)",
+				tier.DataLimit, m.freeTierLimit)
+		}
+		log.Printf("Paid tier provides more storage than free tier (%d > %d bytes)",
+			paidTierBytes, freeTierBytes)
+	}
+
+	// Calculate new expiration date
 	createdAt := time.Unix(int64(currentEvent.CreatedAt), 0)
 	endDate := m.calculateEndDate(createdAt)
 
-	// Calculate storage using existing method
+	// Update storage info
+	prevBytes := storageInfo.TotalBytes
 	storageInfo.TotalBytes = m.calculateStorageLimit(tier.DataLimit)
 	storageInfo.UpdatedAt = time.Now()
 
+	log.Printf("Updating storage limit from %d to %d bytes", prevBytes, storageInfo.TotalBytes)
+
+	// Get address from current event
 	address := getTagValue(currentEvent.Tags, "relay_bitcoin_address")
 
-	// Update the event using existing infrastructure
+	// Update the NIP-88 event
 	err = m.createOrUpdateNIP88Event(&lib.Subscriber{
 		Npub:    npub,
 		Address: address,
@@ -196,6 +271,10 @@ func (m *SubscriptionManager) ProcessPayment(
 		log.Printf("Updated NIP-88 event status: %s",
 			getTagValue(updatedEvents[0].Tags, "subscription_status"))
 	}
+
+	// Add transaction processing log
+	log.Printf("Successfully processed payment for %s: %d sats for tier %s",
+		npub, amountSats, tier.DataLimit)
 
 	return nil
 }
@@ -283,6 +362,68 @@ func (m *SubscriptionManager) CheckStorageAvailability(npub string, requestedByt
 	return nil
 }
 
+// createEvent is a helper function to create a NIP-88 event with common logic
+func (m *SubscriptionManager) createEvent(
+	subscriber *lib.Subscriber,
+	activeTier string,
+	expirationDate time.Time,
+	storageInfo *StorageInfo,
+) (*nostr.Event, error) {
+	// Determine subscription status
+	var status string
+	if m.freeTierEnabled {
+		status = "active" // Always active if free tier is enabled
+	} else {
+		status = m.getSubscriptionStatus(activeTier)
+	}
+
+	// Prepare tags with free tier consideration
+	tags := []nostr.Tag{
+		{"subscription_duration", "1 month"},
+		{"p", subscriber.Npub},
+		{"subscription_status", status},
+		{"relay_bitcoin_address", subscriber.Address},
+		{"relay_dht_key", m.relayDHTKey},
+		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes),
+			fmt.Sprintf("%d", storageInfo.TotalBytes),
+			fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+	}
+
+	// Add tier information
+	if activeTier != "" || m.freeTierEnabled {
+		tierToUse := activeTier
+		if m.freeTierEnabled && activeTier == "" {
+			tierToUse = m.freeTierLimit
+		}
+		tags = append(tags, nostr.Tag{
+			"active_subscription",
+			tierToUse,
+			fmt.Sprintf("%d", expirationDate.Unix()),
+		})
+	}
+
+	// Create the event
+	event := &nostr.Event{
+		PubKey:    hex.EncodeToString(m.relayPrivateKey.PubKey().SerializeCompressed()),
+		CreatedAt: nostr.Timestamp(time.Now().Unix()),
+		Kind:      888,
+		Tags:      tags,
+		Content:   "",
+	}
+
+	// Sign the event
+	serializedEvent := event.Serialize()
+	hash := sha256.Sum256(serializedEvent)
+	event.ID = hex.EncodeToString(hash[:])
+	sig, err := schnorr.Sign(m.relayPrivateKey, hash[:])
+	if err != nil {
+		return nil, fmt.Errorf("error signing event: %v", err)
+	}
+	event.Sig = hex.EncodeToString(sig.Serialize())
+
+	return event, nil
+}
+
 // createOrUpdateNIP88Event creates or updates a subscriber's NIP-88 event
 func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	subscriber *lib.Subscriber,
@@ -307,44 +448,11 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 		}
 	}
 
-	// Prepare minimal set of essential tags
-	tags := []nostr.Tag{
-		{"subscription_duration", "1 month"},
-		{"p", subscriber.Npub},
-		{"subscription_status", m.getSubscriptionStatus(activeTier)},
-		{"relay_bitcoin_address", subscriber.Address},
-		{"relay_dht_key", m.relayDHTKey},
-		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes),
-			fmt.Sprintf("%d", storageInfo.TotalBytes),
-			fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
-	}
-
-	// Add active tier information if present
-	if activeTier != "" {
-		tags = append(tags, nostr.Tag{
-			"active_subscription",
-			activeTier,
-			fmt.Sprintf("%d", expirationDate.Unix()),
-		})
-	}
-
-	event := &nostr.Event{
-		PubKey:    hex.EncodeToString(m.relayPrivateKey.PubKey().SerializeCompressed()),
-		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      888,
-		Tags:      tags,
-		Content:   "",
-	}
-
-	// Sign and store the event
-	serializedEvent := event.Serialize()
-	hash := sha256.Sum256(serializedEvent)
-	event.ID = hex.EncodeToString(hash[:])
-	sig, err := schnorr.Sign(m.relayPrivateKey, hash[:])
+	// Create new event
+	event, err := m.createEvent(subscriber, activeTier, expirationDate, storageInfo)
 	if err != nil {
-		return fmt.Errorf("error signing event: %v", err)
+		return err
 	}
-	event.Sig = hex.EncodeToString(sig.Serialize())
 
 	return m.store.StoreEvent(event)
 }
@@ -357,7 +465,8 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	storageInfo *StorageInfo,
 ) error {
 	log.Printf("Checking for existing NIP-88 event for subscriber %s", subscriber.Npub)
-	// Check if an existing NIP-88 event for the subscriber already exists
+
+	// Check for existing event
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
 		Tags: nostr.TagMap{
@@ -370,8 +479,6 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		return fmt.Errorf("error querying existing NIP-88 events: %v", err)
 	}
 
-	log.Printf("Found %d existing events", len(existingEvents))
-
 	if len(existingEvents) > 0 {
 		log.Printf("NIP-88 event already exists for subscriber %s, skipping creation", subscriber.Npub)
 		return nil
@@ -380,53 +487,20 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	log.Printf("Creating new NIP-88 event for subscriber %s", subscriber.Npub)
 	log.Printf("Subscriber Address: %s", subscriber.Address)
 
-	// Prepare minimal set of essential tags
-	tags := []nostr.Tag{
-		{"subscription_duration", "1 month"},
-		{"p", subscriber.Npub},
-		{"subscription_status", m.getSubscriptionStatus(activeTier)},
-		{"relay_bitcoin_address", subscriber.Address},
-		{"relay_dht_key", m.relayDHTKey},
-		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes),
-			fmt.Sprintf("%d", storageInfo.TotalBytes),
-			fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
-	}
-
-	// Add active tier information if present
-	if activeTier != "" {
-		tags = append(tags, nostr.Tag{
-			"active_subscription",
-			activeTier,
-			fmt.Sprintf("%d", expirationDate.Unix()),
-		})
-	}
-
-	event := &nostr.Event{
-		PubKey:    hex.EncodeToString(m.relayPrivateKey.PubKey().SerializeCompressed()),
-		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      888,
-		Tags:      tags,
-		Content:   "",
-	}
-
-	// Sign and store the new event
-	serializedEvent := event.Serialize()
-	hash := sha256.Sum256(serializedEvent)
-	event.ID = hex.EncodeToString(hash[:])
-	sig, err := schnorr.Sign(m.relayPrivateKey, hash[:])
+	// Create new event
+	event, err := m.createEvent(subscriber, activeTier, expirationDate, storageInfo)
 	if err != nil {
-		return fmt.Errorf("error signing event: %v", err)
+		return err
 	}
-	event.Sig = hex.EncodeToString(sig.Serialize())
 
 	log.Println("Subscription Event before storing: ", event.String())
 
-	// Store the event
+	// Store and verify
 	if err := m.store.StoreEvent(event); err != nil {
 		return fmt.Errorf("error storing event: %v", err)
 	}
 
-	// Add verification
+	// Verification
 	storedEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
 		Tags: nostr.TagMap{
@@ -637,19 +711,34 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 }
 
 // calculateStorageLimit converts tier string to bytes
-// calculateStorageLimit converts tier string to bytes
 func (m *SubscriptionManager) calculateStorageLimit(tier string) int64 {
-	// Extract the number from strings like "1 GB per month"
-	var gb int64
-	if _, err := fmt.Sscanf(tier, "%d GB per month", &gb); err != nil {
+	log.Printf("Calculating storage limit for tier: %s", tier)
+
+	var amount int64
+	var unit string
+
+	// Parse the string to get amount and unit (MB or GB)
+	_, err := fmt.Sscanf(tier, "%d %2s per month", &amount, &unit)
+	if err != nil {
 		log.Printf("Warning: could not parse storage limit from tier '%s': %v", tier, err)
 		return 0
 	}
 
-	log.Printf("Parsed %d GB from tier '%s'", gb, tier)
+	// Convert to bytes based on unit
+	var bytes int64
+	switch strings.ToUpper(unit) {
+	case "MB":
+		bytes = amount * 1024 * 1024 // MB to bytes
+		log.Printf("Converted %d MB to %d bytes", amount, bytes)
+	case "GB":
+		bytes = amount * 1024 * 1024 * 1024 // GB to bytes
+		log.Printf("Converted %d GB to %d bytes", amount, bytes)
+	default:
+		log.Printf("Warning: unknown unit '%s' in tier '%s'", unit, tier)
+		return 0
+	}
 
-	// Convert GB to bytes
-	return gb * 1024 * 1024 * 1024 // GB to bytes conversion
+	return bytes
 }
 
 // calculateEndDate determines the subscription end date
