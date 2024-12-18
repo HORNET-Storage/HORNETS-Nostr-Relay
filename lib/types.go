@@ -212,7 +212,7 @@ type BarChartData struct {
 type AdminUser struct {
 	ID        uint      `gorm:"primaryKey"`
 	Pass      string    // Store hashed passwords
-	Npub      string    `gorm:"size:128;uniqueIndex"`
+	Npub      string    `gorm:"size:128"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
@@ -280,7 +280,7 @@ type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
 	UserID    uint   `gorm:"index"`
 	Npub      string `gorm:"size:128;index"`
-	Challenge string `gorm:"size:512;uniqueIndex"`
+	Challenge string `gorm:"size:512"`
 	Hash      string
 	Expired   bool      `gorm:"default:false"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
