@@ -112,6 +112,9 @@ func StartServer(store stores.Store) error {
 	secured.Get("/pending-transactions", func(c *fiber.Ctx) error {
 		return getPendingTransactions(c, store)
 	})
+	secured.Get("/paid-subscriber-profiles", func(c *fiber.Ctx) error {
+		return HandleGetPaidSubscriberProfiles(c, store)
+	})
 	secured.Post("/refresh-token", refreshToken)
 
 	secured.Get("/files", func(c *fiber.Ctx) error {

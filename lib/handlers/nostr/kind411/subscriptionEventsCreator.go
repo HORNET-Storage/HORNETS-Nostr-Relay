@@ -40,24 +40,28 @@ type RelayInfo struct {
 }
 
 func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
-
 	var settings types.RelaySettings
 
 	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
 		return err
 	}
 
-	// Transform to relay info format
-	tiers := make([]types.SubscriptionTier, len(settings.SubscriptionTiers))
-	for i, tier := range settings.SubscriptionTiers {
-		tiers[i] = types.SubscriptionTier{
+	// Transform to relay info format, excluding free tier
+	var tiers []types.SubscriptionTier
+	for _, tier := range settings.SubscriptionTiers {
+		// Skip free tier (price = "0")
+		if tier.Price == "0" {
+			continue
+		}
+		tiers = append(tiers, types.SubscriptionTier{
 			DataLimit: tier.DataLimit,
 			Price:     tier.Price,
-		}
+		})
 	}
 
-	log.Println("Tiers: ", tiers)
-	// Retrieve existing kind 411 events
+	log.Println("Paid Tiers for kind 411:", tiers)
+
+	// Delete existing kind 411 events
 	filter := nostr.Filter{
 		Kinds: []int{411},
 	}
@@ -66,14 +70,11 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 		return fmt.Errorf("error querying existing kind 411 events: %v", err)
 	}
 
-	// Delete existing kind 411 events if any
-	if len(existingEvents) > 0 {
-		for _, oldEvent := range existingEvents {
-			if err := store.DeleteEvent(oldEvent.ID); err != nil {
-				return fmt.Errorf("error deleting old kind 411 event %s: %v", oldEvent.ID, err)
-			}
-			log.Printf("Deleted existing kind 411 event with ID: %s", oldEvent.ID)
+	for _, oldEvent := range existingEvents {
+		if err := store.DeleteEvent(oldEvent.ID); err != nil {
+			return fmt.Errorf("error deleting old kind 411 event %s: %v", oldEvent.ID, err)
 		}
+		log.Printf("Deleted existing kind 411 event with ID: %s", oldEvent.ID)
 	}
 
 	// Get relay info
@@ -86,7 +87,7 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 		Software:          viper.GetString("RelaySoftware"),
 		Version:           viper.GetString("RelayVersion"),
 		DHTkey:            viper.GetString("RelayDHTkey"),
-		SubscriptionTiers: tiers,
+		SubscriptionTiers: tiers, // Only includes paid tiers
 	}
 
 	// Convert relay info to JSON

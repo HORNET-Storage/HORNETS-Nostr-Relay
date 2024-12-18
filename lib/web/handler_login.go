@@ -39,42 +39,53 @@ func loginUser(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// Generate the challenge and hash
-	challenge, hash, err := generateChallenge()
-	if err != nil {
-		log.Printf("Error generating challenge: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Internal server error",
-		})
-	}
+	// Try to create and save challenge with retries
+	maxRetries := 3
+	var challenge, hash string
+	var event *nostr.Event
+	var saveErr error
 
-	// Create the Nostr event
-	event := &nostr.Event{
-		PubKey:    user.Npub,
-		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      1,
-		Tags:      nostr.Tags{},
-		Content:   challenge,
-	}
+	for i := 0; i < maxRetries; i++ {
+		challenge, hash, err = generateChallenge()
+		if err != nil {
+			log.Printf("Error generating challenge: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Internal server error",
+			})
+		}
 
-	// Save the user challenge
-	userChallenge := types.UserChallenge{
-		UserID:    user.ID,
-		Npub:      user.Npub,
-		Challenge: challenge,
-		Hash:      hash,
-	}
+		event = &nostr.Event{
+			PubKey:    user.Npub,
+			CreatedAt: nostr.Timestamp(time.Now().Unix()),
+			Kind:      1,
+			Tags:      nostr.Tags{},
+			Content:   challenge,
+		}
 
-	if err := store.GetStatsStore().SaveUserChallenge(&userChallenge); err != nil {
-		log.Printf("Failed to save challenge: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Internal server error",
-		})
+		userChallenge := types.UserChallenge{
+			UserID:    user.ID,
+			Npub:      user.Npub,
+			Challenge: challenge,
+			Hash:      hash,
+		}
+
+		saveErr = store.GetStatsStore().SaveUserChallenge(&userChallenge)
+		if saveErr == nil {
+			break
+		}
+
+		if i == maxRetries-1 {
+			log.Printf("Failed to save challenge after %d attempts: %v", maxRetries, saveErr)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Internal server error",
+			})
+		}
+
+		log.Printf("Challenge collision occurred, retrying (%d/%d)", i+1, maxRetries)
 	}
 
 	log.Printf("Login challenge created for user %s", user.Npub)
 
-	// Return the event as JSON
 	return c.JSON(fiber.Map{
 		"event": event,
 	})

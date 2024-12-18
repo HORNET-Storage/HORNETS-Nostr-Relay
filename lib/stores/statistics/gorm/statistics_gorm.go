@@ -439,10 +439,25 @@ func (store *GormStatisticsStore) ComparePasswords(hashedPassword, password stri
 
 // SaveUserChallenge saves the user challenge in the database
 func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserChallenge) error {
+	// Check if challenge already exists
+	var count int64
+	if err := store.DB.Model(&types.UserChallenge{}).
+		Where("challenge = ? AND expired = false", userChallenge.Challenge).
+		Count(&count).Error; err != nil {
+		log.Printf("Failed to check existing challenge: %v", err)
+		return err
+	}
+
+	if count > 0 {
+		return fmt.Errorf("active challenge already exists")
+	}
+
+	// Save the new challenge
 	if err := store.DB.Create(userChallenge).Error; err != nil {
 		log.Printf("Failed to save user challenge: %v", err)
 		return err
 	}
+
 	return nil
 }
 
@@ -748,6 +763,16 @@ func (store *GormStatisticsStore) SaveUnconfirmedTransaction(pendingTransaction 
 
 // SignUpUser registers a new user in the database
 func (store *GormStatisticsStore) SignUpUser(npub string, password string) error {
+	// Check if npub already exists
+	var count int64
+	if err := store.DB.Model(&types.AdminUser{}).Where("npub = ?", npub).Count(&count).Error; err != nil {
+		log.Printf("Failed to check existing user: %v", err)
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("user with npub %s already exists", npub)
+	}
+
 	// Hash the password before saving it
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

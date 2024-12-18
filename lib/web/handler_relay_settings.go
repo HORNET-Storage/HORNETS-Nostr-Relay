@@ -50,7 +50,15 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
 	}
 
-	needsKind411Update := tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers)
+	// Check if tiers or free tier settings have changed
+	needsKind411Update := tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers) ||
+		currentRelaySettings.FreeTierEnabled != relaySettings.FreeTierEnabled ||
+		currentRelaySettings.FreeTierLimit != relaySettings.FreeTierLimit
+
+	// Validate free tier settings
+	if relaySettings.FreeTierEnabled && relaySettings.FreeTierLimit == "" {
+		relaySettings.FreeTierLimit = "100 MB per month" // Set default if not provided
+	}
 
 	// Store new settings first
 	viper.Set("relay_settings", relaySettings)
@@ -78,7 +86,7 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	log.Println("Stored relay settings:", relaySettings)
+	log.Printf("Stored relay settings (including free tier settings): %+v", relaySettings)
 
 	return c.SendStatus(fiber.StatusOK)
 }
@@ -127,6 +135,10 @@ func getRelaySettings(c *fiber.Ctx) error {
 			{DataLimit: "5 GB per month", Price: "10000"},
 			{DataLimit: "10 GB per month", Price: "15000"},
 		}
+	}
+
+	if relaySettings.FreeTierLimit == "" {
+		relaySettings.FreeTierLimit = "100 MB per month"
 	}
 
 	log.Printf("Fetched relay settings: %+v", relaySettings) // Using %+v for more detailed output

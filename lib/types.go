@@ -168,30 +168,11 @@ type RelaySettings struct {
 	MaxFileSizeUnit     string             `json:"maxfilesizeunit" mapstructure:"maxfilesizeunit"`
 	IsFileStorageActive bool               `json:"isFileStorageActive" mapstructure:"isFileStorageActive"`
 	SubscriptionTiers   []SubscriptionTier `json:"subscription_tiers" mapstructure:"subscription_tiers"`
-
-	// Common type groups used for determining what types are considered audio, videos, images etc
-	MimeTypeGroups map[string][]string
-
-	// Whitelist will be disabled if this is empty allowing any file types to be stored
-	MimeTypeWhitelist []string
-
-	// Whitelist will be disabled if this is empty allowing any kind handlers available to work (will accept any kind if in unlimited mode)
-	KindWhitelist []string
-
-	// To be replaced by clearer definitions above
-	/*
-		IsKindsActive    bool     `json:"isKindsActive"`
-		IsPhotosActive   bool     `json:"isPhotosActive"`
-		IsVideosActive   bool     `json:"isVideosActive"`
-		IsGitNestrActive bool     `json:"isGitNestrActive"`
-		IsAudioActive    bool     `json:"isAudioActive"`
-		Photos           []string `json:"photos"`
-		Videos           []string `json:"videos"`
-		GitNestr         []string `json:"gitNestr"`
-		Audio            []string `json:"audio"`
-		Kinds            []string `json:"kinds"`
-		DynamicKinds     []string `json:"dynamicKinds"`
-	*/
+	FreeTierEnabled     bool               `json:"freeTierEnabled" mapstructure:"freeTierEnabled"`
+	FreeTierLimit       string             `json:"freeTierLimit" mapstructure:"freeTierLimit"`
+	MimeTypeGroups      map[string][]string
+	MimeTypeWhitelist   []string
+	KindWhitelist       []string
 }
 
 type TimeSeriesData struct {
@@ -231,7 +212,7 @@ type BarChartData struct {
 type AdminUser struct {
 	ID        uint      `gorm:"primaryKey"`
 	Pass      string    // Store hashed passwords
-	Npub      string    `gorm:"size:128;uniqueIndex"`
+	Npub      string    `gorm:"size:128"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }
@@ -299,7 +280,7 @@ type UserChallenge struct {
 	ID        uint   `gorm:"primaryKey"`
 	UserID    uint   `gorm:"index"`
 	Npub      string `gorm:"size:128;index"`
-	Challenge string `gorm:"size:512;uniqueIndex"`
+	Challenge string `gorm:"size:512"`
 	Hash      string
 	Expired   bool      `gorm:"default:false"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
