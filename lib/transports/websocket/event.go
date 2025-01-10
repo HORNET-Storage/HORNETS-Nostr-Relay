@@ -28,6 +28,8 @@ func handleUnlimitedModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler("universal")
 
+	log.Println("handled by unlimted.")
+
 	read := func() ([]byte, error) {
 		return json.Marshal(env)
 	}
@@ -51,6 +53,7 @@ func handleUnlimitedModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 func handleSmartModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
+	log.Println("handled by smart.")
 
 	read := func() ([]byte, error) {
 		return json.Marshal(env)

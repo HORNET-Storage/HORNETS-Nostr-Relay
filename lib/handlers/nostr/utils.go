@@ -3,7 +3,6 @@ package nostr
 import (
 	"fmt"
 	"log"
-	"strconv"
 
 	"time"
 
@@ -178,7 +177,8 @@ func IsKindAllowed(kind int) bool {
 		return false
 	}
 
-	kindStr := strconv.Itoa(kind)
+	// Format the kind number to match the whitelist format
+	kindStr := fmt.Sprintf("kind%d", kind)
 
 	if len(settings.KindWhitelist) > 0 {
 		if !contains(settings.KindWhitelist, kindStr) {
