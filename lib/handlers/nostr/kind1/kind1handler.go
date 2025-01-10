@@ -1,10 +1,11 @@
 package kind1
 
 import (
+	"log"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	jsoniter "github.com/json-iterator/go"
-	"log"
 
 	"github.com/nbd-wtf/go-nostr"
 
