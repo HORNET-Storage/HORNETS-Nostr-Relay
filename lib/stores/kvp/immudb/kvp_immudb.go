@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/kvp"
 	"github.com/codenotary/immudb/pkg/api/schema"
@@ -12,7 +13,7 @@ import (
 )
 
 const PrefixSeperator = '_'
-const BucketListPrefix = "mbl"
+const BucketListPrefix = "mbl_"
 
 var (
 	ErrEmptyKey    = errors.New("key cannot be empty")
@@ -25,7 +26,7 @@ var (
 type Buckets struct {
 	buckets []string
 
-	ctx    context.Context
+	ctx    *context.Context
 	client immudb.ImmuClient
 }
 
@@ -47,7 +48,7 @@ type Iterator struct {
 	err     error
 }
 
-func InitBuckets(ctx context.Context, client immudb.ImmuClient) (*Buckets, error) {
+func InitBuckets(ctx *context.Context, client immudb.ImmuClient) (*Buckets, error) {
 	buckets := &Buckets{
 		ctx:    ctx,
 		client: client,
@@ -57,10 +58,14 @@ func InitBuckets(ctx context.Context, client immudb.ImmuClient) (*Buckets, error
 }
 
 func (b *Buckets) Cleanup() error {
-	return b.client.CloseSession(b.ctx)
+	return b.client.CloseSession(*b.ctx)
 }
 
 func (b *Buckets) GetBucket(prefix string) kvp.KeyValueStoreBucket {
+	if !strings.HasSuffix(prefix, string(PrefixSeperator)) {
+		prefix = prefix + string(PrefixSeperator)
+	}
+
 	if prefix != BucketListPrefix {
 		b.UpdateBucketList(prefix)
 	}
@@ -94,7 +99,10 @@ func (b *Buckets) UpdateBucketList(prefix string) {
 		return
 	}
 
-	bucket.Put("list", bytes)
+	err = bucket.Put("list", bytes)
+	if err != nil {
+		return
+	}
 }
 
 func (b *Buckets) GetBucketList() []string {
@@ -161,7 +169,18 @@ func (b *Bucket) Put(key string, value []byte) error {
 
 	prefixedKey := b.ValidateKey(key)
 
-	_, err := b.buckets.client.Set(b.buckets.ctx, prefixedKey, value)
+	// This is a temporary fix until we can figure out why it's changing in the first place
+	_, err := b.buckets.client.UseDatabase(*b.buckets.ctx, &schema.Database{
+		DatabaseName: "defaultdb",
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = b.buckets.client.Set(*b.buckets.ctx, prefixedKey, value)
+	if err != nil {
+		return err
+	}
 
 	return err
 }
@@ -173,7 +192,15 @@ func (b *Bucket) Get(key string) ([]byte, error) {
 
 	prefixedKey := b.ValidateKey(key)
 
-	entry, err := b.buckets.client.Get(b.buckets.ctx, prefixedKey)
+	// This is a temporary fix until we can figure out why it's changing in the first place
+	_, err := b.buckets.client.UseDatabase(*b.buckets.ctx, &schema.Database{
+		DatabaseName: "defaultdb",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	entry, err := b.buckets.client.Get(*b.buckets.ctx, prefixedKey)
 	if err != nil {
 		return nil, err
 	}
@@ -184,14 +211,14 @@ func (b *Bucket) Get(key string) ([]byte, error) {
 func (b *Bucket) Delete(keys []string) error {
 	byteKeys := b.ValidateKeys(keys)
 
-	_, err := b.buckets.client.Delete(b.buckets.ctx, &schema.DeleteKeysRequest{
+	_, err := b.buckets.client.Delete(*b.buckets.ctx, &schema.DeleteKeysRequest{
 		Keys: byteKeys,
 	})
 	return err
 }
 
 func (b *Bucket) Scan() (kvp.Iterator, error) {
-	entries, err := b.buckets.client.Scan(b.buckets.ctx, &schema.ScanRequest{
+	entries, err := b.buckets.client.Scan(*b.buckets.ctx, &schema.ScanRequest{
 		Prefix: b.prefix,
 		Desc:   false,
 	})
@@ -207,7 +234,7 @@ func (b *Bucket) Scan() (kvp.Iterator, error) {
 }
 
 func (b *Bucket) ScanWithOptions(limit uint64, desc bool) (*schema.Entries, error) {
-	return b.buckets.client.Scan(b.buckets.ctx, &schema.ScanRequest{
+	return b.buckets.client.Scan(*b.buckets.ctx, &schema.ScanRequest{
 		Prefix: b.prefix,
 		Limit:  limit,
 		Desc:   desc,
@@ -225,7 +252,7 @@ func (b *Bucket) VerifiedPut(key string, value []byte) error {
 
 	prefixedKey := b.ValidateKey(key)
 
-	_, err := b.buckets.client.VerifiedSet(b.buckets.ctx, prefixedKey, value)
+	_, err := b.buckets.client.VerifiedSet(*b.buckets.ctx, prefixedKey, value)
 
 	return err
 }
@@ -237,7 +264,7 @@ func (b *Bucket) VerifiedGet(key string) ([]byte, error) {
 
 	prefixedKey := b.ValidateKey(key)
 
-	entry, err := b.buckets.client.VerifiedGet(b.buckets.ctx, prefixedKey)
+	entry, err := b.buckets.client.VerifiedGet(*b.buckets.ctx, prefixedKey)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +279,7 @@ func (b *Bucket) GetAt(key string, txID uint64) ([]byte, error) {
 
 	prefixedKey := b.ValidateKey(key)
 
-	entry, err := b.buckets.client.GetAt(b.buckets.ctx, prefixedKey, txID)
+	entry, err := b.buckets.client.GetAt(*b.buckets.ctx, prefixedKey, txID)
 	if err != nil {
 		return nil, err
 	}

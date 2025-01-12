@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"fmt"
 	"log"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -105,11 +106,15 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 
 func StoreDag(store Store, dag *types.DagData, temp bool) error {
 	err := dag.Dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) error {
-		store.StoreLeaf(dag.Dag.Root, &types.DagLeafData{
+		err := store.StoreLeaf(dag.Dag.Root, &types.DagLeafData{
 			PublicKey: dag.PublicKey,
 			Signature: dag.Signature,
-			Leaf:      *dag.Dag.Leafs[dag.Dag.Root],
+			Leaf:      *leaf,
 		}, temp)
+		if err != nil {
+			fmt.Println("Failed to store leaf: " + err.Error())
+			return err
+		}
 
 		return nil
 	})

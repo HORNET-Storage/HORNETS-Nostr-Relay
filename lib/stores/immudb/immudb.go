@@ -29,6 +29,7 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 
+	"github.com/codenotary/immudb/pkg/api/schema"
 	immudb "github.com/codenotary/immudb/pkg/client"
 )
 
@@ -65,16 +66,11 @@ func InitStore(basepath string, args ...interface{}) (*ImmudbStore, error) {
 
 	err := store.Client.OpenSession(store.Ctx, []byte("immudb"), []byte("immudb"), "defaultdb")
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	store.DatabasePath = basepath
 	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("%s-%s", "temp", uuid.New()))
-
-	store.Database, err = kvp_immudb.InitBuckets(store.Ctx, store.Client)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	store.TempDatabase, err = kvp_bbolt.InitBuckets(store.TempDatabasePath)
 	if err != nil {
@@ -86,9 +82,23 @@ func InitStore(basepath string, args ...interface{}) (*ImmudbStore, error) {
 		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}
 
+	// Set the database back to the default after creating any required databases above
+	// This must go after the gorm InitStores as they also call this
+	_, err = store.Client.UseDatabase(store.Ctx, &schema.Database{
+		DatabaseName: "defaultdb",
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	store.NostrEventDatabase = *documents.NewClient(store.Client.GetSessionID())
 
 	err = store.InitializeNostrCollections()
+	if err != nil {
+		return nil, err
+	}
+
+	store.Database, err = kvp_immudb.InitBuckets(&store.Ctx, store.Client)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +162,7 @@ func (store *ImmudbStore) StoreLeaf(root string, leafData *types.DagLeafData, te
 
 	// Retrieve the root leaf if the leaf being stored is not the root leaf
 	if leafData.Leaf.Hash == root {
-		// If it is the root leafthen just assign it and skip a retrieval
+		// If it is the root leaf then just assign it and skip a retrieval
 		rootLeaf = &leafData.Leaf
 	} else {
 		_rootLeaf, err := store.RetrieveLeaf(root, root, false, temp)
@@ -255,9 +265,6 @@ func (store *ImmudbStore) GetBucketPrefix(root string, temp bool) (string, error
 	var err error
 
 	bucket := store.GetBucket("scionicindex", temp)
-	if err != nil {
-		return "", err
-	}
 
 	bytes, err := bucket.Get(root)
 	if err != nil {
