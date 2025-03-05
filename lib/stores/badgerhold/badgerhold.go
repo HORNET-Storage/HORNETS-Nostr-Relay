@@ -102,8 +102,8 @@ func (store *BadgerholdStore) GetDatabase(temp bool) *badgerhold.Store {
 	}
 }
 
-func (store *BadgerholdStore) StoreContent(hash string, content []byte) error {
-	return store.Database.Upsert(hash, &types.DagContent{
+func (store *BadgerholdStore) StoreContent(hash string, content []byte, temp bool) error {
+	return store.GetDatabase(temp).Upsert(hash, &types.DagContent{
 		Hash:    hash,
 		Content: content,
 	})
@@ -168,7 +168,7 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 	var err error
 
 	if leafData.Leaf.Content != nil {
-		err = store.StoreContent(string(leafData.Leaf.ContentHash), leafData.Leaf.Content)
+		err = store.StoreContent(string(leafData.Leaf.ContentHash), leafData.Leaf.Content, temp)
 		if err != nil {
 			return err
 		}
