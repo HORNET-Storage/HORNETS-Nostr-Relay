@@ -19,8 +19,7 @@ type Store interface {
 	// Hornet Storage
 	StoreLeaf(root string, leafData *types.DagLeafData, temp bool) error
 	RetrieveLeaf(root string, hash string, includeContent bool, temp bool) (*types.DagLeafData, error)
-	QueryDag(filter map[string]string, temp bool) ([]string, error)
-	QueryDagAdvanced(filter types.QueryFilter, temp bool) ([]string, error)
+	QueryDag(filter types.QueryFilter, temp bool) ([]string, error)
 	StoreDag(dag *types.DagData, temp bool) error
 	BuildDagFromStore(root string, includeContent bool, temp bool) (*types.DagData, error)
 	RetrieveLeafContent(contentHash []byte, temp bool) ([]byte, error)

@@ -16,6 +16,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
 // BatchSize defines how many records to insert in a single transaction
@@ -69,6 +71,7 @@ func (store *GormStatisticsStore) Init() error {
 		&types.PendingTransaction{},
 		&types.ActiveToken{},
 		&types.SubscriberAddress{},
+		&types.FileTag{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -331,6 +334,58 @@ func (store *GormStatisticsStore) SaveFile(root string, hash string, fileName st
 		Size:      size,
 	}
 	return store.DB.Create(&file).Error
+}
+
+func (store *GormStatisticsStore) QueryFiles(criteria map[string]interface{}) ([]types.FileInfo, error) {
+	var files []types.FileInfo
+	query := store.DB.Model(&types.FileInfo{})
+
+	// Apply each criteria to the query
+	for key, value := range criteria {
+		query = query.Where(key+" = ?", value)
+	}
+
+	err := query.Find(&files).Error
+	if err != nil {
+		log.Printf("Error querying files: %v", err)
+		return nil, err
+	}
+
+	return files, nil
+}
+
+func (store *GormStatisticsStore) SaveTags(root string, leaf *merkle_dag.DagLeaf) error {
+	for key, value := range leaf.AdditionalData {
+		tag := types.FileTag{
+			Root:  root,
+			Key:   key,
+			Value: value,
+		}
+
+		tx := store.DB.FirstOrCreate(tag)
+		if tx.Error != nil {
+			return tx.Error
+		}
+	}
+
+	return nil
+}
+
+func (store *GormStatisticsStore) QueryTags(tags map[string]string) ([]string, error) {
+	query := store.DB.Model(&types.FileTag{})
+
+	for key, value := range tags {
+		query = query.Where("key = ? AND value = ?", key, value)
+	}
+
+	var roots []string
+	err := query.Distinct("root").Pluck("root", &roots).Error
+	if err != nil {
+		log.Printf("Error querying file tags: %v", err)
+		return nil, err
+	}
+
+	return roots, nil
 }
 
 func (store *GormStatisticsStore) DeleteEventByID(eventID string) error {

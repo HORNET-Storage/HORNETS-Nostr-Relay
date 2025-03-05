@@ -9,9 +9,51 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/nbd-wtf/go-nostr"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
+
+type WrappedLeaf struct {
+	PublicKey         string
+	Signature         string
+	Hash              string
+	ItemName          string
+	Type              merkle_dag.LeafType
+	ContentHash       []byte
+	ClassicMerkleRoot []byte
+	CurrentLinkCount  int
+	LatestLabel       string
+	LeafCount         int
+	Links             map[string]string
+	ParentHash        string
+	AdditionalData    map[string]string
+}
+
+type AdditionalDataEntry struct {
+	Hash  string
+	Key   string `badgerhold:"index"`
+	Value string
+}
+
+type TagEntry struct {
+	EventID  string
+	TagName  string
+	TagValue string
+}
+
+type NostrEvent struct {
+	ID        string `badgerhold:"index"`
+	PubKey    string `badgerhold:"index"`
+	CreatedAt nostr.Timestamp
+	Kind      int `badgerhold:"index"`
+	Tags      nostr.Tags
+	Content   string
+	Sig       string
+
+	// anything here will be mashed together with the main event object when serializing
+	extra map[string]any
+}
 
 type DagLeafData struct {
 	PublicKey string
@@ -62,7 +104,6 @@ type DownloadFilter struct {
 }
 
 type QueryFilter struct {
-	Buckets []string
 	Names   []string
 	PubKeys []string
 	Tags    map[string]string
@@ -120,8 +161,11 @@ type FileInfo struct {
 	TimestampHornets time.Time `gorm:"autoCreateTime"`
 }
 
-func (FileInfo) TableName() string {
-	return "file_info"
+type FileTag struct {
+	ID    uint   `gorm:"primaryKey;type:INTEGER AUTO_INCREMENT"`
+	Root  string `gorm:"size:64;index"`
+	Key   string `gorm:"size:128;index"`
+	Value string `gorm:"size:512;index"`
 }
 
 type PaginationMetadata struct {
@@ -240,7 +284,7 @@ type Address struct {
 	IndexHornets string     `json:"index,string"` // Use string tag to handle string-encoded integers
 	Address      string     `json:"address"`
 	WalletName   string     `json:"wallet_name"`
-	Status       string     `json:"status"`
+	Status       string     `json:"status" badgerhold:"index"`
 	AllocatedAt  *time.Time `json:"allocated_at,omitempty"`
 	Npub         string     `json:"npub,omitempty"`
 }
@@ -257,12 +301,12 @@ type Address struct {
 // }
 
 type Subscriber struct {
-	Npub              string    `json:"npub"`                // The unique public key of the subscriber
-	Tier              string    `json:"tier"`                // The subscription tier the user has selected
-	StartDate         time.Time `json:"start_date"`          // When the subscription started
-	EndDate           time.Time `json:"end_date"`            // When the subscription ends
-	Address           string    `json:"address"`             // The address associated with the subscription
-	LastTransactionID string    `json:"last_transaction_id"` // The ID of the last processed transaction
+	Npub              string    `json:"npub" badgerhold:"index"`    // The unique public key of the subscriber
+	Tier              string    `json:"tier"`                       // The subscription tier the user has selected
+	StartDate         time.Time `json:"start_date"`                 // When the subscription started
+	EndDate           time.Time `json:"end_date"`                   // When the subscription ends
+	Address           string    `json:"address" badgerhold:"index"` // The address associated with the subscription
+	LastTransactionID string    `json:"last_transaction_id"`        // The ID of the last processed transaction
 }
 
 // SubscriberAddress represents the GORM-compatible model for storing addresses
@@ -408,4 +452,15 @@ func (ws *WebSocketStream) Context() context.Context {
 type AddressResponse struct {
 	IndexHornets string `json:"index"`
 	Address      string `json:"address"`
+}
+
+type DagContent struct {
+	Hash    string
+	Content []byte
+}
+
+type BlobContent struct {
+	Hash    string
+	PubKey  string
+	Content []byte
 }

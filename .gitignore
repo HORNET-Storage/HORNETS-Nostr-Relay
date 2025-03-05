@@ -17,6 +17,7 @@
 # vendor/
 
 data
+temp
 
 /gravitondb
 /immudb

@@ -68,7 +68,7 @@ import (
 
 	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/immudb"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	//negentropy "github.com/illuzen/go-negentropy"
 )
 
@@ -251,7 +251,7 @@ func main() {
 	host := libp2p.GetHostOnPort(serializedPrivateKey, viper.GetString("port"))
 
 	// Create and initialize database
-	store, err := immudb.InitStore("data")
+	store, err := badgerhold.InitStore("data")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -304,7 +304,6 @@ func main() {
 	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
 
 	query.AddQueryHandler(host, store)
-	query.AddAdvancedQueryHandler(host, store)
 
 	settings, err := nostr.LoadRelaySettings()
 	if err != nil {
@@ -315,7 +314,7 @@ func main() {
 	log.Printf("Host started with id: %s\n", host.ID())
 	log.Printf("Host started with address: %s\n", host.Addrs())
 
-	syncDB, err := negentropy.InitSyncDB(store.Client)
+	syncDB, err := negentropy.InitSyncDB()
 	if err != nil {
 		log.Fatal("failed to connect database: %w", err)
 	}

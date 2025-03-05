@@ -192,10 +192,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 					return
 				}
 
-				err = store.GetStatsStore().SaveFile(dagData.Dag.Root, leaf.Hash, leaf.ItemName, mimeType.String(), len(leaf.Links), int64(len(data)))
-				if err != nil {
-
-				}
+				store.GetStatsStore().SaveFile(dagData.Dag.Root, leaf.Hash, leaf.ItemName, mimeType.String(), len(leaf.Links), int64(len(data)))
 			}
 		}
 

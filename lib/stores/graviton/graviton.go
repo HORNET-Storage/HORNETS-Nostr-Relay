@@ -100,6 +100,7 @@ func (store *GravitonStore) GetStatsStore() statistics.StatisticsStore {
 // You can only query trees that have been cached through supported caching methods as itterating all of the trees
 // Would create a significant performance impact if the data set gets too big
 // DEPRECATED: Use QueryDagAdvanced
+/*
 func (store *GravitonStore) QueryDag(filter map[string]string, temp bool) ([]string, error) {
 	var snapshot *graviton.Snapshot
 	var err error
@@ -132,105 +133,109 @@ func (store *GravitonStore) QueryDag(filter map[string]string, temp bool) ([]str
 
 	return keys, nil
 }
+*/
 
 // Query dag using a filter object similar to how nostr works to keep things familiar.
 // This should be used over QueryDag if you don't understand how the caching works.
 // TODO: Implement cache checks where available to speed up iteration
-func (store *GravitonStore) QueryDagAdvanced(filter types.QueryFilter, temp bool) ([]string, error) {
+func (store *GravitonStore) QueryDag(filter types.QueryFilter, temp bool) ([]string, error) {
 	results := []string{}
 
-	var snapshot *graviton.Snapshot
+	//var snapshot *graviton.Snapshot
 	var err error
 
 	if temp {
-		snapshot, err = store.TempDatabase.LoadSnapshot(0)
+		//snapshot, err = store.TempDatabase.LoadSnapshot(0)
 	} else {
-		snapshot, err = store.Database.LoadSnapshot(0)
+		//snapshot, err = store.Database.LoadSnapshot(0)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	buckets, err := store.GetMasterBucketList("files", temp)
-	if err != nil {
-		return results, err
-	}
-
-	for _, bucket := range buckets {
-		// Skip buckets that don't exist in the filter if the filter contains any buckets
-		if len(filter.Buckets) > 0 && !contains(filter.Buckets, bucket) {
-			continue
-		}
-
-		// Retrieve the bucket from the snapshot and continue if it fails
-		tree, err := snapshot.GetTree(bucket)
+	/*
+		buckets, err := store.GetMasterBucketList("files", temp)
 		if err != nil {
-			continue
+			return results, err
 		}
 
-		cursor := tree.Cursor()
 
-		// Seek to the first key
-		key, leafBytes, err := cursor.First()
-		if err == nil {
-			// Iterate through all key-value pairs
-			for {
-				root := string(key)
+		for _, bucket := range buckets {
+			// Skip buckets that don't exist in the filter if the filter contains any buckets
+			if len(filter.Buckets) > 0 && !contains(filter.Buckets, bucket) {
+				continue
+			}
 
-				// Skip leaves that are not the root leaf
-				if b, err := store.retrieveBucket(root, temp); b != "" {
-					if err != nil {
-						fmt.Println("Failed to check for root in scionic_index")
-					}
-					continue
-				}
+			// Retrieve the bucket from the snapshot and continue if it fails
+			tree, err := snapshot.GetTree(bucket)
+			if err != nil {
+				continue
+			}
 
-				var leafData *types.DagLeafData = &types.DagLeafData{}
+			cursor := tree.Cursor()
 
-				err = cbor.Unmarshal(leafBytes, leafData)
-				if err != nil {
-					return nil, err
-				}
+			// Seek to the first key
+			key, leafBytes, err := cursor.First()
+			if err == nil {
+				// Iterate through all key-value pairs
+				for {
+					root := string(key)
 
-				/*
-					leafData, err := store.RetrieveLeaf(root, root, false)
-					if err != nil {
-						fmt.Println(err)
-						fmt.Println("Failed to retrieve leaf")
+					// Skip leaves that are not the root leaf
+					if b, err := store.retrieveBucket(root, temp); b != "" {
+						if err != nil {
+							fmt.Println("Failed to check for root in scionic_index")
+						}
 						continue
 					}
-				*/
 
-				// Match PubKey
-				if len(filter.PubKeys) > 0 && contains(filter.PubKeys, leafData.PublicKey) {
-					results = append(results, root)
-				}
+					var leafData *types.DagLeafData = &types.DagLeafData{}
 
-				// Match Names
-				if len(filter.Names) > 0 && !contains(filter.Names, leafData.Leaf.ItemName) {
-					results = append(results, root)
-				}
+					err = cbor.Unmarshal(leafBytes, leafData)
+					if err != nil {
+						return nil, err
+					}
 
-				// Match AdditionalData (Tags)
-				if len(filter.Tags) > 0 {
-					for k, v := range filter.Tags {
-						if value, ok := leafData.Leaf.AdditionalData[k]; ok && value == v {
-							results = append(results, root)
+					/*
+						leafData, err := store.RetrieveLeaf(root, root, false)
+						if err != nil {
+							fmt.Println(err)
+							fmt.Println("Failed to retrieve leaf")
+							continue
+						}
+					*
 
-							break
+					// Match PubKey
+					if len(filter.PubKeys) > 0 && contains(filter.PubKeys, leafData.PublicKey) {
+						results = append(results, root)
+					}
+
+					// Match Names
+					if len(filter.Names) > 0 && !contains(filter.Names, leafData.Leaf.ItemName) {
+						results = append(results, root)
+					}
+
+					// Match AdditionalData (Tags)
+					if len(filter.Tags) > 0 {
+						for k, v := range filter.Tags {
+							if value, ok := leafData.Leaf.AdditionalData[k]; ok && value == v {
+								results = append(results, root)
+
+								break
+							}
 						}
 					}
-				}
 
-				key, leafBytes, err = cursor.Next()
-				if err != nil {
-					fmt.Println("Finished cursor.Next()")
-					break
+					key, leafBytes, err = cursor.Next()
+					if err != nil {
+						fmt.Println("Finished cursor.Next()")
+						break
+					}
 				}
 			}
-		}
 
-	}
+		}
+	*/
 
 	return results, nil
 }

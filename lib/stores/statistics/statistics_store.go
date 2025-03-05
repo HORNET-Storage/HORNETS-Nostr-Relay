@@ -5,6 +5,8 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/nbd-wtf/go-nostr"
+
+	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
 // StatisticsStore defines the interface for storing and retrieving statistical data.
@@ -34,6 +36,9 @@ type StatisticsStore interface {
 
 	// File-related statistics (photos, videos, etc.)
 	SaveFile(root string, hash string, fileName string, mimeType string, leafCount int, size int64) error
+	QueryFiles(criteria map[string]interface{}) ([]types.FileInfo, error)
+	SaveTags(root string, leaf *merkle_dag.DagLeaf) error
+	QueryTags(tags map[string]string) ([]string, error)
 	FetchKindData() ([]types.AggregatedKindData, error)
 	FetchKindTrendData(kindNumber int) ([]types.MonthlyKindData, error)
 

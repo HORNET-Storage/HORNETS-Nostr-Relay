@@ -122,14 +122,47 @@ func (store *ImmudbStore) GetStatsStore() statistics.StatisticsStore {
 	return store.StatsDatabase
 }
 
-func (store *ImmudbStore) QueryDag(filter map[string]string, temp bool) ([]string, error) {
-	keys := []string{}
-
-	return keys, nil
-}
-
-func (store *ImmudbStore) QueryDagAdvanced(filter types.QueryFilter, temp bool) ([]string, error) {
+func (store *ImmudbStore) QueryDag(filter types.QueryFilter, temp bool) ([]string, error) {
 	results := []string{}
+
+	if filter.Tags != nil {
+		hashes, err := store.GetStatsStore().QueryTags(filter.Tags)
+		if err != nil {
+			return nil, err
+		}
+
+		results = append(results, hashes...)
+	}
+
+	if len(filter.Names) > 0 {
+		for _, name := range filter.Names {
+			files, err := store.GetStatsStore().QueryFiles(map[string]interface{}{
+				"name": name,
+			})
+			if err != nil {
+				return results, err
+			}
+
+			for _, file := range files {
+				results = append(results, file.Root)
+			}
+		}
+	}
+
+	if len(filter.PubKeys) > 0 {
+		for _, pubKey := range filter.PubKeys {
+			files, err := store.GetStatsStore().QueryFiles(map[string]interface{}{
+				"public_key": pubKey,
+			})
+			if err != nil {
+				return results, err
+			}
+
+			for _, file := range files {
+				results = append(results, file.Root)
+			}
+		}
+	}
 
 	return results, nil
 }
