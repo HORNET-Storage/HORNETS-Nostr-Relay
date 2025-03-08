@@ -3,22 +3,25 @@ package badgerhold
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/google/uuid"
 	"github.com/nbd-wtf/go-nostr"
 
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 
@@ -43,6 +46,14 @@ type BadgerholdStore struct {
 	StatsDatabase statistics.StatisticsStore
 }
 
+func cborEncode(value interface{}) ([]byte, error) {
+	return cbor.Marshal(value)
+}
+
+func cborDecode(data []byte, value interface{}) error {
+	return cbor.Unmarshal(data, value)
+}
+
 func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store := &BadgerholdStore{}
 
@@ -54,6 +65,8 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("%s-%s", "temp", uuid.New()))
 
 	options := badgerhold.DefaultOptions
+	options.Encoder = cborEncode
+	options.Decoder = cborDecode
 	options.Dir = "data"
 	options.ValueDir = "data"
 
@@ -112,7 +125,7 @@ func (store *BadgerholdStore) StoreContent(hash string, content []byte, temp boo
 func (store *BadgerholdStore) RetrieveLeafContent(contentHash []byte, temp bool) ([]byte, error) {
 	var content types.DagContent
 
-	err := store.GetDatabase(temp).Get(string(contentHash), &content)
+	err := store.GetDatabase(temp).Get(hex.EncodeToString(contentHash), &content)
 
 	return content.Content, err
 }
@@ -168,7 +181,7 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 	var err error
 
 	if leafData.Leaf.Content != nil {
-		err = store.StoreContent(string(leafData.Leaf.ContentHash), leafData.Leaf.Content, temp)
+		err = store.StoreContent(hex.EncodeToString(leafData.Leaf.ContentHash), leafData.Leaf.Content, temp)
 		if err != nil {
 			return err
 		}
@@ -219,60 +232,6 @@ func (store *BadgerholdStore) RetrieveLeaf(root string, hash string, includeCont
 	return data, nil
 }
 
-func (store *BadgerholdStore) QueryEventsByTag(tagName, tagValue string) ([]string, error) {
-	var entries []types.TagEntry
-
-	// Query for tag entries matching the tag name and value
-	err := store.Database.Find(&entries, badgerhold.Where("TagName").Eq(tagName).And("TagValue").Eq(tagValue).Index("TagName"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query tag entries: %w", err)
-	}
-
-	// Extract the event IDs
-	eventIDs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		eventIDs = append(eventIDs, entry.EventID)
-	}
-
-	return eventIDs, nil
-}
-
-// QueryEventsByMultipleTags finds events matching multiple tag conditions
-func (store *BadgerholdStore) QueryEventsByMultipleTags(tagConditions map[string][]string) ([]string, error) {
-	// Map to collect unique event IDs
-	eventIDMap := make(map[string]struct{})
-
-	// For each tag name and its possible values
-	for tagName, tagValues := range tagConditions {
-		// Skip empty tag values
-		if len(tagValues) == 0 {
-			continue
-		}
-
-		for _, tagValue := range tagValues {
-			// Query for this specific tag name and value
-			var entries []types.TagEntry
-			err := store.Database.Find(&entries, badgerhold.Where("TagName").Eq(tagName).And("TagValue").Eq(tagValue).Index("TagName"))
-			if err != nil && err != badgerhold.ErrNotFound {
-				return nil, fmt.Errorf("failed to query tag entries for %s=%s: %w", tagName, tagValue, err)
-			}
-
-			// Add event IDs to our map
-			for _, entry := range entries {
-				eventIDMap[entry.EventID] = struct{}{}
-			}
-		}
-	}
-
-	// Convert map to slice of event IDs
-	eventIDs := make([]string, 0, len(eventIDMap))
-	for id := range eventIDMap {
-		eventIDs = append(eventIDs, id)
-	}
-
-	return eventIDs, nil
-}
-
 // Retrieve and build an entire scionic merkletree from the root hash
 func (store *BadgerholdStore) BuildDagFromStore(root string, includeContent bool, temp bool) (*types.DagData, error) {
 	return stores.BuildDagFromStore(store, root, includeContent, temp)
@@ -284,69 +243,141 @@ func (store *BadgerholdStore) StoreDag(dag *types.DagData, temp bool) error {
 }
 
 func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
-	var allEvents []*nostr.Event
-	eventMap := make(map[string]*types.NostrEvent) // For deduplication
+	var results []types.NostrEvent
 
-	// Query by IDs
-	for _, id := range filter.IDs {
-		var results []types.NostrEvent
-		err := store.Database.Find(&results, badgerhold.Where("ID").Eq(id).Index("ID"))
-		if err != nil && err != badgerhold.ErrNotFound {
-			fmt.Printf("Query error for ID %s: %v\n", id, err)
-			continue
+	fmt.Println("\n\nSearching for events with filter")
+	jd, _ := json.Marshal(filter)
+	fmt.Println(string(jd))
+
+	query := badgerhold.Where("ID").Ne("")
+	first := true
+
+	if len(filter.Kinds) > 0 {
+		kindsAsInterface := make([]interface{}, len(filter.Kinds))
+		for i, kind := range filter.Kinds {
+			kindsAsInterface[i] = strconv.Itoa(kind)
+			fmt.Println("Searching for kinds: " + strconv.Itoa(kind))
 		}
-		for _, event := range results {
-			eventMap[event.ID] = &event
+
+		if first {
+			query = badgerhold.Where("Kind").In(kindsAsInterface...)
+			first = false
+		} else {
+			query = query.And("Kind").In(kindsAsInterface...)
 		}
 	}
 
-	// Query by authors
-	for _, author := range filter.Authors {
-		var results []types.NostrEvent
-		err := store.Database.Find(&results, badgerhold.Where("PubKey").Eq(author).Index("PubKey"))
-		if err != nil && err != badgerhold.ErrNotFound {
-			fmt.Printf("Query error for author %s: %v\n", author, err)
-			continue
+	if len(filter.Authors) > 0 {
+		authorsAsInterface := make([]interface{}, len(filter.Authors))
+		for i, author := range filter.Authors {
+			authorsAsInterface[i] = author
+			fmt.Println("Searching for authors: " + author)
 		}
-		for _, event := range results {
-			eventMap[event.ID] = &event
+
+		if first {
+			query = badgerhold.Where("PubKey").In(authorsAsInterface...)
+			first = false
+		} else {
+			query = query.And("PubKey").In(authorsAsInterface...)
 		}
 	}
 
-	// Query by kinds
-	for _, kind := range filter.Kinds {
-		var results []types.NostrEvent
-		err := store.Database.Find(&results, badgerhold.Where("Kind").Eq(kind).Index("Kind"))
-		if err != nil && err != badgerhold.ErrNotFound {
-			fmt.Printf("Query error for kind %d: %v\n", kind, err)
-			continue
+	if filter.Since != nil {
+		query = query.And("CreatedAt").Ge(filter.Since.Time())
+	}
+	if filter.Until != nil {
+		query = query.And("CreatedAt").Le(filter.Until.Time())
+	}
+
+	if len(filter.Tags) > 0 {
+		eventIDSet := make(map[string]struct{})
+
+		isFirst := true
+
+		for tagName, tagValues := range filter.Tags {
+			var tagEntries []types.TagEntry
+
+			//tagValues = append(tagValues, "c25aedfd38f9fed72b383f6eefaea9f21dd58ec2c9989e0cc275cb5296adec17:nestr")
+
+			fmt.Printf("Searching for tag with values: " + tagName + "\n")
+			for _, v := range tagValues {
+				fmt.Println(v)
+			}
+			fmt.Println("")
+
+			err := store.Database.Find(&tagEntries, badgerhold.Where("TagName").Eq(strings.ReplaceAll(tagName, "#", "")).And("TagValue").In(toInterfaceSlice(tagValues)...))
+			if err != nil && err != badgerhold.ErrNotFound {
+				return nil, fmt.Errorf("failed to query tag entries for %s: %w", tagName, err)
+			}
+
+			fmt.Printf("Found %d tag entries from tags\n", len(tagEntries))
+
+			tempEventIDs := make(map[string]struct{})
+			for _, entry := range tagEntries {
+				tempEventIDs[entry.EventID] = struct{}{}
+			}
+
+			if isFirst {
+				eventIDSet = tempEventIDs
+				isFirst = false
+			} else {
+				for id := range eventIDSet {
+					if _, exists := tempEventIDs[id]; !exists {
+						delete(eventIDSet, id)
+					}
+				}
+			}
 		}
-		for _, event := range results {
-			eventMap[event.ID] = &event
+
+		eventIDs := make([]string, 0, len(eventIDSet))
+		for id := range eventIDSet {
+			eventIDs = append(eventIDs, id)
+		}
+
+		if len(eventIDs) == 0 {
+			fmt.Println("No matching events from tags")
+			return []*nostr.Event{}, nil
+		}
+
+		fmt.Printf("Found %d events from tags\n", len(eventIDs))
+
+		if first {
+			query = badgerhold.Where("ID").In(toInterfaceSlice(eventIDs)...)
+			first = false
+		} else {
+			query = query.And("ID").In(toInterfaceSlice(eventIDs)...)
 		}
 	}
 
-	// Convert the map to a slice
-	for _, event := range eventMap {
-		allEvents = append(allEvents, UnwrapEvent(event))
+	err := store.Database.Find(&results, query)
+	if err != nil && err != badgerhold.ErrNotFound {
+		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
 
-	// Post-filtering for time range, search, and complex criteria
-	var filteredEvents []*nostr.Event
-	for _, event := range allEvents {
-		// Check if event passes all filter conditions
-		if !eventMatchesFilter(event, filter) {
-			continue
-		}
-		filteredEvents = append(filteredEvents, event)
+	var events []*nostr.Event
+	for _, event := range results {
+		events = append(events, UnwrapEvent(&event))
 	}
 
-	// Sort by created_at (newest first)
+	fmt.Println("First check")
+	for _, ev := range events {
+		fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	}
+
+	// Step 8: Apply additional filters (search term, etc.)
+	filteredEvents := postFilterEvents(events, filter)
+
+	// Step 9: Sort events (newest first)
 	sortEventsByCreatedAt(filteredEvents)
 
-	// Apply limit
+	// Step 10: Apply limit if necessary
 	if filter.Limit > 0 && len(filteredEvents) > filter.Limit {
 		filteredEvents = filteredEvents[:filter.Limit]
+	}
+
+	fmt.Println("Last check")
+	for _, ev := range events {
+		fmt.Printf("Found event of kind: %d\n", ev.Kind)
 	}
 
 	return filteredEvents, nil
@@ -358,78 +389,67 @@ func sortEventsByCreatedAt(events []*nostr.Event) {
 	})
 }
 
-// eventMatchesFilter checks if an event matches all criteria in the filter
-func eventMatchesFilter(event *nostr.Event, filter nostr.Filter) bool {
-	/*
-		// Check IDs if specified
-		if len(filter.IDs) > 0 {
-			matched := false
-			for _, id := range filter.IDs {
-				if event.ID == id {
-					matched = true
+func toInterfaceSlice[T any](items []T) []interface{} {
+	interfaceSlice := make([]interface{}, len(items))
+	for i, item := range items {
+		interfaceSlice[i] = item
+	}
+	return interfaceSlice
+}
+
+func postFilterEvents(events []*nostr.Event, filter nostr.Filter) []*nostr.Event {
+	var filtered []*nostr.Event
+
+	for _, event := range events {
+		// Match event ID (if specified)
+		if len(filter.IDs) > 0 && !contains(filter.IDs, event.ID) {
+			continue
+		}
+
+		// Match event tags (handling OR conditions)
+		if len(filter.Tags) > 0 {
+			matchesTag := false
+			for tagName, tagValues := range filter.Tags {
+				if eventHasTag(event, tagName, tagValues) {
+					matchesTag = true
 					break
 				}
 			}
-			if !matched {
-				return false
+			if !matchesTag {
+				continue
 			}
 		}
 
-		// Check authors if specified
-		if len(filter.Authors) > 0 {
-			matched := false
-			for _, author := range filter.Authors {
-				if event.PubKey == author {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return false
-			}
+		// Match search term (if specified)
+		if filter.Search != "" && !strings.Contains(strings.ToLower(event.Content), strings.ToLower(filter.Search)) {
+			continue
 		}
 
-		// Check kinds if specified
-		if len(filter.Kinds) > 0 {
-			matched := false
-			for _, kind := range filter.Kinds {
-				if event.Kind == kind {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return false
+		// If the event passes all checks, add it to the results
+		filtered = append(filtered, event)
+	}
+
+	return filtered
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+func eventHasTag(event *nostr.Event, tagName string, tagValues []string) bool {
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == tagName {
+			if contains(tagValues, tag[1]) {
+				return true
 			}
 		}
-
-		// Check time range
-		if filter.Since != nil {
-			sinceTime := time.Unix(int64(*filter.Since), 0)
-			if event.CreatedAt.Time().Before(sinceTime) {
-				return false
-			}
-		}
-
-		if filter.Until != nil {
-			untilTime := time.Unix(int64(*filter.Until), 0)
-			if event.CreatedAt.Time().After(untilTime) {
-				return false
-			}
-		}
-
-		// Check search term
-		if filter.Search != "" {
-			if !strings.Contains(
-				strings.ToLower(event.Content),
-				strings.ToLower(filter.Search),
-			) {
-				return false
-			}
-		}
-	*/
-
-	return true
+	}
+	return false
 }
 
 func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
@@ -728,6 +748,10 @@ func (store *BadgerholdStore) SaveAddress(addr *types.Address) error {
 }
 
 func WrapLeaf(leaf *types.DagLeafData) *types.WrappedLeaf {
+	if len(leaf.Leaf.ClassicMerkleRoot) <= 0 {
+		leaf.Leaf.ClassicMerkleRoot = nil
+	}
+
 	return &types.WrappedLeaf{
 		PublicKey:         leaf.PublicKey,
 		Signature:         leaf.Signature,
@@ -746,6 +770,10 @@ func WrapLeaf(leaf *types.DagLeafData) *types.WrappedLeaf {
 }
 
 func UnwrapLeaf(leaf *types.WrappedLeaf) *types.DagLeafData {
+	if len(leaf.ClassicMerkleRoot) <= 0 {
+		leaf.ClassicMerkleRoot = nil
+	}
+
 	return &types.DagLeafData{
 		PublicKey: leaf.PublicKey,
 		Signature: leaf.Signature,
@@ -766,11 +794,13 @@ func UnwrapLeaf(leaf *types.WrappedLeaf) *types.DagLeafData {
 }
 
 func WrapEvent(event *nostr.Event) *types.NostrEvent {
+	kind := strconv.Itoa(event.Kind)
+
 	return &types.NostrEvent{
 		ID:        event.ID,
 		PubKey:    event.PubKey,
 		CreatedAt: event.CreatedAt,
-		Kind:      event.Kind,
+		Kind:      kind,
 		Tags:      event.Tags,
 		Content:   event.Content,
 		Sig:       event.Sig,
@@ -778,11 +808,16 @@ func WrapEvent(event *nostr.Event) *types.NostrEvent {
 }
 
 func UnwrapEvent(event *types.NostrEvent) *nostr.Event {
+	kind, err := strconv.Atoi(event.Kind)
+	if err != nil {
+		fmt.Println("This just means it's failing but this never actually gets printed")
+	}
+
 	return &nostr.Event{
 		ID:        event.ID,
 		PubKey:    event.PubKey,
 		CreatedAt: event.CreatedAt,
-		Kind:      event.Kind,
+		Kind:      int(kind),
 		Tags:      event.Tags,
 		Content:   event.Content,
 		Sig:       event.Sig,

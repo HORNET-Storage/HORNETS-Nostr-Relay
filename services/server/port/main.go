@@ -17,8 +17,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/fsnotify/fsnotify"
@@ -27,8 +27,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
-
-	fiber_websocket "github.com/gofiber/contrib/websocket"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
@@ -44,6 +42,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1984"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30000"
@@ -77,6 +76,7 @@ func init() {
 	viper.SetDefault("web", true)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
+	viper.SetDefault("full_Text_kinds", []int{1})
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
 	viper.SetDefault("query_cache", map[string]string{})
 	viper.SetDefault("service_tag", "hornet-storage-service")
@@ -369,6 +369,7 @@ func main() {
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
 		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
+		nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
 	} else {
 		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
 	}
@@ -438,7 +439,7 @@ func main() {
 		go func() {
 			app := ws.BuildServer(store)
 
-			app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
+			//app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
 
 			err := ws.StartServer(app)
 

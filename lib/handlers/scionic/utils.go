@@ -3,14 +3,10 @@ package scionic
 import (
 	"fmt"
 	"io"
-	"slices"
-	"strconv"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/spf13/viper"
-
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 )
@@ -25,40 +21,6 @@ type DownloadDagHandler func(read DownloadDagReader, write DagWriter)
 
 type QueryDagReader func() (*types.QueryMessage, error)
 type QueryDagHandler func(read QueryDagReader, write DagWriter)
-
-func CheckFilter(leaf *merkle_dag.DagLeaf, filter *types.DownloadFilter) (bool, error) {
-	label := merkle_dag.GetLabel(leaf.Hash)
-
-	if len(filter.Leaves) <= 0 && len(filter.LeafRanges) <= 0 {
-		return true, nil
-	}
-
-	if slices.Contains(filter.Leaves, label) {
-		return true, nil
-	}
-
-	labelInt, err := strconv.Atoi(label)
-	if err != nil {
-		return false, err
-	}
-
-	for _, rangeItem := range filter.LeafRanges {
-		fromInt, err := strconv.Atoi(rangeItem.From)
-		if err != nil {
-			continue // Skip invalid ranges
-		}
-		toInt, err := strconv.Atoi(rangeItem.To)
-		if err != nil {
-			continue // Skip invalid ranges
-		}
-
-		if labelInt >= fromInt && labelInt <= toInt {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
 
 func BuildErrorMessage(message string, err error) types.ErrorMessage {
 	return types.ErrorMessage{

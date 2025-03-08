@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 )
 
 // BatchSize defines how many records to insert in a single transaction

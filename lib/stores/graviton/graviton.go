@@ -21,11 +21,11 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	"github.com/HORNET-Storage/hornet-storage/lib/database/immudb/documents"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_immudb "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/immudb"
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
 	jsoniter "github.com/json-iterator/go"
 

@@ -11,7 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/nbd-wtf/go-nostr"
 
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 )
 
 type WrappedLeaf struct {
@@ -46,7 +46,7 @@ type NostrEvent struct {
 	ID        string `badgerhold:"index"`
 	PubKey    string `badgerhold:"index"`
 	CreatedAt nostr.Timestamp
-	Kind      int `badgerhold:"index"`
+	Kind      string `badgerhold:"index"`
 	Tags      nostr.Tags
 	Content   string
 	Sig       string
@@ -76,10 +76,7 @@ type Stream interface {
 
 type UploadMessage struct {
 	Root      string
-	Count     int
-	Leaf      merkle_dag.DagLeaf
-	Parent    string
-	Branch    *merkle_dag.ClassicTreeBranch
+	Packet    merkle_dag.SerializableTransmissionPacket
 	PublicKey string
 	Signature string
 }
@@ -92,14 +89,12 @@ type DownloadMessage struct {
 }
 
 type LeafLabelRange struct {
-	From           string
-	To             string
-	IncludeContent bool
+	From int
+	To   int
 }
 
 type DownloadFilter struct {
-	Leaves         []string
-	LeafRanges     []LeafLabelRange
+	LeafRanges     *LeafLabelRange
 	IncludeContent bool // IncludeContent from LeafLabelRange always overrides this
 }
 

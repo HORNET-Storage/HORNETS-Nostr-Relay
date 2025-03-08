@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -53,17 +53,26 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 
 	addLeavesRecursively = func(builder *merkle_dag.DagBuilder, hash string) error {
 		data, err := store.RetrieveLeaf(root, hash, includeContent, temp)
+		if err != nil {
+			log.Println("Unable to find leaf in the database:", err)
+			return err
+		}
 
 		leaf := data.Leaf
 
 		if leaf.Hash == root {
 			publicKey = &data.PublicKey
 			signature = &data.Signature
-		}
 
-		if err != nil {
-			log.Println("Unable to find leaf in the database:", err)
-			return err
+			err = leaf.VerifyRootLeaf()
+			if err != nil {
+				err = nil
+			}
+		} else {
+			err = leaf.VerifyLeaf()
+			if err != nil {
+				err = nil
+			}
 		}
 
 		if !includeContent {
@@ -93,6 +102,12 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 	}
 
 	dag := builder.BuildDag(root)
+
+	err := dag.Verify()
+	if err != nil {
+		fmt.Println("Failed to verify full dag")
+		return nil, err
+	}
 
 	data := &types.DagData{
 		PublicKey: *publicKey,

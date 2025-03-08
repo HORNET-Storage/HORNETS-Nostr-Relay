@@ -2,6 +2,7 @@ package upload
 
 import (
 	"context"
+	"fmt"
 	"log"
 
 	"github.com/gabriel-vasile/mimetype"
@@ -9,11 +10,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 )
 
 type CanUploadDagFunc func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool
@@ -83,26 +84,29 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		err = message.Leaf.VerifyRootLeaf()
+		dag := &merkle_dag.Dag{
+			Root:  message.Root,
+			Leafs: make(map[string]*merkle_dag.DagLeaf),
+		}
+
+		packet := merkle_dag.TransmissionPacketFromSerializable(&message.Packet)
+
+		err = packet.Leaf.VerifyRootLeaf()
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to verify root leaf", err))
 			return
 		}
 
-		if !canUploadDag(&message.Leaf, &message.PublicKey, &message.Signature) {
+		dag.ApplyTransmissionPacket(packet)
+
+		err = dag.Verify()
+		if err != nil {
+			write(utils.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
+			return
+		}
+
+		if !canUploadDag(packet.Leaf, &message.PublicKey, &message.Signature) {
 			write(utils.BuildErrorMessage("Not allowed to upload this", nil))
-			return
-		}
-
-		rootData := &types.DagLeafData{
-			PublicKey: message.PublicKey,
-			Signature: message.Signature,
-			Leaf:      message.Leaf,
-		}
-
-		err = store.StoreLeaf(message.Root, rootData, true)
-		if err != nil {
-			write(utils.BuildErrorMessage("Failed to verify root leaf", err))
 			return
 		}
 
@@ -112,74 +116,60 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		leafCount := 1
+		dagData := types.DagData{
+			PublicKey: message.PublicKey,
+			Signature: message.Signature,
+		}
 
 		for {
 			message, err := read()
 			if err != nil {
 				write(utils.BuildErrorMessage("Failed to recieve upload message in time", nil))
-				break
-			}
-
-			err = message.Leaf.VerifyLeaf()
-			if err != nil {
-				write(utils.BuildErrorMessage("Failed to verify leaf", err))
-				break
-			}
-
-			parentData, err := store.RetrieveLeaf(message.Root, message.Parent, false, true)
-			if err != nil {
-				write(utils.BuildErrorMessage("Failed to find parent leaf", err))
-				break
-			}
-
-			parent := parentData.Leaf
-
-			if message.Branch != nil {
-				err = parent.VerifyBranch(message.Branch)
-				if err != nil {
-					write(utils.BuildErrorMessage("Failed to verify leaf branch", err))
-					break
-				}
-			}
-
-			data := &types.DagLeafData{
-				Leaf: message.Leaf,
-			}
-
-			err = store.StoreLeaf(message.Root, data, true)
-			if err != nil {
-				write(utils.BuildErrorMessage("Failed to add leaf to block database", err))
 				return
 			}
 
-			leafCount++
+			packet := merkle_dag.TransmissionPacketFromSerializable(&message.Packet)
+
+			err = packet.Leaf.VerifyLeaf()
+			if err != nil {
+				write(utils.BuildErrorMessage("Failed to verify leaf", err))
+				return
+			}
+
+			dag.ApplyTransmissionPacket(packet)
+
+			err = dag.Verify()
+			if err != nil {
+				write(utils.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
+				return
+			}
 
 			err = write(utils.BuildResponseMessage(true))
 			if err != nil {
 				write(utils.BuildErrorMessage("Failed to write response to stream", err))
 				break
 			}
-		}
 
-		// Rebuild the dag from the temporary database
-		dagData, err := store.BuildDagFromStore(message.Root, true, true)
-		if err != nil {
-			write(utils.BuildErrorMessage("Failed to build dag from provided leaves", err))
-			return
+			if len(dag.Leafs) >= (dag.Leafs[dag.Root].LeafCount + 1) {
+				fmt.Println("All leaves receieved")
+				break
+			}
 		}
 
 		// Verify the dag
-		err = dagData.Dag.Verify()
+		err = dag.Verify()
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to verify dag", err))
+			fmt.Println("Failed to verify dag???")
 			return
 		}
 
+		fmt.Println("Dag verified")
+
 		// Check to see if any data in the dag is not allows to be stored by this relay
-		for _, leaf := range dagData.Dag.Leafs {
+		for _, leaf := range dag.Leafs {
 			if leaf.Type == "File" {
-				data, err := dagData.Dag.GetContentFromLeaf(leaf)
+				data, err := dag.GetContentFromLeaf(leaf)
 				if err != nil {
 					write(utils.BuildErrorMessage("Failed to extract content from file leaf", err))
 					return
@@ -192,14 +182,19 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 					return
 				}
 
-				store.GetStatsStore().SaveFile(dagData.Dag.Root, leaf.Hash, leaf.ItemName, mimeType.String(), len(leaf.Links), int64(len(data)))
+				store.GetStatsStore().SaveFile(dag.Root, leaf.Hash, leaf.ItemName, mimeType.String(), len(leaf.Links), int64(len(data)))
 			}
 		}
 
-		// Store dag in the long term database
-		err = store.StoreDag(dagData, false)
+		fmt.Println("Files saved to stats")
+
+		dagData.Dag = *dag
+
+		err = store.StoreDag(&dagData, false)
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to commit dag to long term store", err))
+			fmt.Println("Fuck sake")
+			return
 		}
 
 		handleRecievedDag(&dagData.Dag, &message.PublicKey)
