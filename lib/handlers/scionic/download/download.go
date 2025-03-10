@@ -90,6 +90,11 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 					Packet: *packet.ToSerializable(),
 				}
 
+				if packet.Leaf.Hash == dag.Root {
+					message.PublicKey = dagData.PublicKey
+					message.Signature = dagData.Signature
+				}
+
 				err := enc.Encode(&message)
 				if err != nil {
 					utils.WriteErrorToStream(libp2pStream, "Failed to encode partial dag %e", err)
@@ -120,6 +125,11 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 				message := types.UploadMessage{
 					Root:   dag.Root,
 					Packet: *packet.ToSerializable(),
+				}
+
+				if packet.Leaf.Hash == dag.Root {
+					message.PublicKey = dagData.PublicKey
+					message.Signature = dagData.Signature
 				}
 
 				err := enc.Encode(&message)

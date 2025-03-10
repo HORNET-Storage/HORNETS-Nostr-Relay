@@ -133,40 +133,93 @@ func (store *BadgerholdStore) RetrieveLeafContent(contentHash []byte, temp bool)
 func (store *BadgerholdStore) QueryDag(filter types.QueryFilter, temp bool) ([]string, error) {
 	var results []types.WrappedLeaf
 
-	for _, queryKey := range filter.PubKeys {
-		err := store.GetDatabase(temp).Find(&results, badgerhold.Where("PublicKey").Eq(queryKey).Index("PublicKey"))
-		if err != nil {
-			fmt.Println("Failed to query for pub key in query dag")
-			continue
+	fmt.Println("Searching for dags with filter: ")
+	bytes, _ := json.Marshal(filter)
+	fmt.Println(string(bytes))
+
+	// Start query with a dummy condition
+	query := badgerhold.Where("Hash").Ne("") // Ensures chaining works
+	first := true
+
+	// Add filtering by PublicKey
+	if len(filter.PubKeys) > 0 {
+		pubKeysAsInterface := make([]interface{}, len(filter.PubKeys))
+		for i, pubKey := range filter.PubKeys {
+			pubKeysAsInterface[i] = pubKey
+		}
+
+		if first {
+			query = badgerhold.Where("PublicKey").In(pubKeysAsInterface...)
+			first = false
+		} else {
+			query = query.And("PublicKey").In(pubKeysAsInterface...)
 		}
 	}
 
-	for _, queryKey := range filter.Names {
-		err := store.GetDatabase(temp).Find(&results, badgerhold.Where("ItemName").Eq(queryKey).Index("ItemName"))
-		if err != nil {
-			fmt.Println("Failed to query for pub key in query dag")
-			continue
+	// Add filtering by ItemName
+	if len(filter.Names) > 0 {
+		namesAsInterface := make([]interface{}, len(filter.Names))
+		for i, name := range filter.Names {
+			namesAsInterface[i] = name
+		}
+
+		if first {
+			query = badgerhold.Where("ItemName").In(namesAsInterface...)
+			first = false
+		} else {
+			query = query.And("ItemName").In(namesAsInterface...)
 		}
 	}
 
-	hashes := []string{}
+	// Execute the primary query
+	err := store.GetDatabase(temp).Find(&results, query)
+	if err != nil && err != badgerhold.ErrNotFound {
+		return nil, fmt.Errorf("failed to query WrappedLeaf: %w", err)
+	}
 
+	// Extract hashes from primary results
+	hashSet := make(map[string]struct{})
 	for _, leaf := range results {
-		hashes = append(hashes, leaf.Hash)
+		hashSet[leaf.Hash] = struct{}{}
 	}
 
-	for queryKey, queryValue := range filter.Tags {
-		var entries []types.AdditionalDataEntry
+	var entries []types.AdditionalDataEntry
+	err = store.GetDatabase(temp).Find(&entries, badgerhold.Where("Key").Ne(""))
+	if err != nil {
+		return nil, err
+	}
 
-		err := store.GetDatabase(temp).Find(&entries, badgerhold.Where("Key").Eq(queryKey).And("Value").Eq(queryValue).Index("Key"))
-		if err != nil {
-			fmt.Println("Failed to query for key value pair entries in query dag")
-			continue
-		}
+	for _, entry := range entries {
+		fmt.Println("Entry: " + entry.Key + " | " + entry.Value)
+	}
 
-		for _, entry := range entries {
-			hashes = append(hashes, entry.Hash)
+	// If we have tag filters, run a secondary query to filter based on tags
+	if len(filter.Tags) > 0 {
+		for tagKey, tagValue := range filter.Tags {
+			var tagEntries []types.AdditionalDataEntry
+
+			fmt.Printf("searching for tags: ")
+
+			err := store.GetDatabase(temp).Find(&tagEntries, badgerhold.Where("Key").Eq(tagKey).And("Value").Eq(tagValue))
+			if err != nil && err != badgerhold.ErrNotFound {
+				return nil, fmt.Errorf("failed to query AdditionalDataEntry for key=%s, value=%s: %w", tagKey, tagValue, err)
+			}
+
+			// Keep only hashes that match the tag query
+			tempHashSet := make(map[string]struct{})
+			for _, entry := range tagEntries {
+				if _, exists := hashSet[entry.Hash]; exists { // Keep only those already in our result set
+					tempHashSet[entry.Hash] = struct{}{}
+				}
+			}
+			hashSet = tempHashSet // Update result set to only include tag-matching hashes
 		}
+	}
+
+	// Convert hashSet to a slice of strings
+	hashes := make([]string, 0, len(hashSet))
+	for hash := range hashSet {
+		hashes = append(hashes, hash)
 	}
 
 	return hashes, nil
@@ -196,7 +249,13 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 		return err
 	}
 
+	fmt.Println("Storing Leaf")
+	if len(leafData.Leaf.AdditionalData) > 0 {
+		fmt.Println("WITH DATA")
+	}
+
 	for key, value := range leafData.Leaf.AdditionalData {
+		fmt.Println(key + " | " + value)
 		entry := types.AdditionalDataEntry{
 			Hash:  leafData.Leaf.Hash,
 			Key:   key,

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/immudb"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 	"github.com/spf13/viper"
 	//"github.com/libp2p/go-libp2p/p2p/security/noise"
@@ -33,7 +33,7 @@ func init() {
 }
 
 func main() {
-	store, err := immudb.InitStore("data")
+	store, err := badgerhold.InitStore("data")
 	if err != nil {
 		log.Fatal(err)
 	}

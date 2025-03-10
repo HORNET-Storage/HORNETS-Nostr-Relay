@@ -2,9 +2,11 @@ package upload
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -14,6 +16,7 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -81,6 +84,30 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 		message, err := read()
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to recieve upload message", err))
+			return
+		}
+
+		publicKey, err := signing.DeserializePublicKey(message.PublicKey)
+		if err != nil {
+			write(utils.BuildErrorMessage("Failed to deserialize public key", err))
+			return
+		}
+
+		signatureBytes, err := hex.DecodeString(message.Signature)
+		if err != nil {
+			write(utils.BuildErrorMessage("Failed to deserialize signature", err))
+			return
+		}
+
+		signature, err := schnorr.ParseSignature(signatureBytes)
+		if err != nil {
+			write(utils.BuildErrorMessage("Failed to deserialize signature", err))
+			return
+		}
+
+		err = signing.VerifySignature(signature, []byte(message.Root), publicKey)
+		if err != nil {
+			write(utils.BuildErrorMessage("Signature failed to verify", err))
 			return
 		}
 

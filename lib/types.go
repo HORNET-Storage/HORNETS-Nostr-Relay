@@ -15,10 +15,10 @@ import (
 )
 
 type WrappedLeaf struct {
-	PublicKey         string
+	PublicKey         string `badgerhold:"index"`
 	Signature         string
-	Hash              string
-	ItemName          string
+	Hash              string `badgerhold:"index"`
+	ItemName          string `badgerhold:"index"`
 	Type              merkle_dag.LeafType
 	ContentHash       []byte
 	ClassicMerkleRoot []byte

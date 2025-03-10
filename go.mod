@@ -2,19 +2,18 @@ module github.com/HORNET-Storage/hornet-storage
 
 go 1.22.1
 
-replace github.com/codenotary/immugorm => D:\organizations\akashic_record\merge\immugorm
+//replace github.com/codenotary/immugorm => D:\organizations\akashic_record\merge\immugorm
 
-replace github.com/HORNET-Storage/Scionic-Merkle-Tree => D:/organizations/akashic_record/relevant/golang/scionic-merkletree
+//replace github.com/HORNET-Storage/Scionic-Merkle-Tree => D:/organizations/akashic_record/relevant/golang/scionic-merkletree
 
 require (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree v0.0.0-00010101000000-000000000000
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20240727220204-7da57d9ad146
+	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.1
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250310130615-f4b83d0723b6
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/codenotary/immudb v1.9.5
-	github.com/codenotary/immugorm v0.0.0-20220117103200-5d136efdb292
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.6.0

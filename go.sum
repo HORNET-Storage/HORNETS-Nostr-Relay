@@ -50,8 +50,12 @@ filippo.io/edwards25519 v1.0.0-rc.1/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7
 git.apache.org/thrift.git v0.0.0-20180902110319-2566ecd5d999/go.mod h1:fPE2ZNJGynbRyZ4dJvy6G277gSllfV2HJqblrnkyeyg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
+github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.1 h1:rcOSsN/jSJh9HXul+J2Fbj8ncKWXjtr64An7S4TvVAw=
+github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.1/go.mod h1:6D9s+1RWxsJLcB1Na+7fOYwqSedyrERbYGs2RSgs3q0=
 github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20240727220204-7da57d9ad146 h1:gzXt8HFOLmFxeKqfu0QGy8U4Km5XjLg9vrFmmcqwww4=
 github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20240727220204-7da57d9ad146/go.mod h1:jaIbpo9BgxreMiQNLuZ09j1D9VGkXUHcOQylUpadWeU=
+github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250310130615-f4b83d0723b6 h1:rs8K/tQiBXAHNHcfefFIpxmpJQ4rAL9/KxZltjVvWks=
+github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250310130615-f4b83d0723b6/go.mod h1:BwY0Xa34UnRTiNIDP0jRkkAlrNGR7yyo2KdVFdkfxTc=
 github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36 h1:bNFcI0dOyOlhLxI8pmbLgNdXviEA9j+MQqw215E4hDs=
 github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36/go.mod h1:MsGOIAMgWJjofvEd/f2s7U8rsN11cliY1vexfpPExeM=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=

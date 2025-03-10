@@ -36,11 +36,11 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 
 	handlers "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/immudb"
 	net "github.com/libp2p/go-libp2p/core/network"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	// 	negentropy "github.com/illuzen/go-negentropy"
@@ -150,7 +150,7 @@ func setupStore(basepath string) stores.Store {
 		return nil
 	}
 
-	store, err := immudb.InitStore(basepath)
+	store, err := badgerhold.InitStore(basepath)
 	if err != nil {
 		log.Fatal(err)
 	}

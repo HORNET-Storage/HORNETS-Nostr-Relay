@@ -157,7 +157,7 @@ func DownloadDag(root string) {
 	}()
 
 	// Upload the dag to the hornet storage node
-	_, dag, err := connmgr.DownloadDag(ctx, conMgr, "default", root, nil, nil, nil, progressChan)
+	_, dag, err := connmgr.DownloadDag(ctx, conMgr, "default", root, nil, nil, progressChan)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func DownloadDag(root string) {
 	close(progressChan)
 
 	// Verify the entire dag
-	err = dag.Verify()
+	err = dag.Dag.Verify()
 	if err != nil {
 		log.Fatalf("Error: %s", err)
 	}
