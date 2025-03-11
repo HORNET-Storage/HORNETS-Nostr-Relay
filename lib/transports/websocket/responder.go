@@ -105,12 +105,17 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 			return
 		}
 
-		// No reason provided in this message format; handling accordingly.
-		// You could define a default or conditional reason based on success, if needed.
+		// Check if a specific reason was provided as the fourth element
 		var reason string
-		if !success {
-			// Define how you want to handle a false success scenario. Maybe a default reason or additional handling.
-			reason = "Operation failed" // Placeholder; adjust based on your requirements or context.
+		if len(messageSlice) > 3 {
+			if reasonStr, ok := messageSlice[3].(string); ok {
+				reason = reasonStr
+			}
+		}
+
+		// If no reason was provided but success is false, use a generic message
+		if !success && reason == "" {
+			reason = "Operation failed - Check server logs for details"
 		}
 
 		// Constructing the OKEnvelope with the provided data.

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
@@ -129,6 +130,9 @@ func init() {
 			"price":      "70000", // in sats
 		},
 	})
+
+	viper.SetDefault("freeTierEnabled", true)
+	viper.SetDefault("freeTierLimit", "100 MB per month")
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -364,6 +368,7 @@ func main() {
 		nostr.RegisterHandler("kind/10001", kind10001.BuildKind10001Handler(store))
 		nostr.RegisterHandler("kind/10002", kind10002.BuildKind10002Handler(store))
 		nostr.RegisterHandler("kind/11011", kind11011.BuildKind11011Handler(store))
+		nostr.RegisterHandler("kind/22242", auth.BuildAuthHandler(store))
 		nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
 		nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
 		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
