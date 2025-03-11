@@ -3,6 +3,7 @@ package websocket
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
@@ -51,7 +52,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	success, err := env.Event.CheckSignature()
 	if err != nil {
 		log.Printf("Failed to check signature: %v", err)
-		write("NOTICE", "Failed to check signature")
+		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to check signature: %v", err))
 		return
 	}
 
@@ -71,7 +72,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Create user session
 	if err := createUserSession(env.Event.PubKey, env.Event.Sig); err != nil {
 		log.Printf("Failed to create session for %s: %v", env.Event.PubKey, err)
-		write("NOTICE", "Failed to create session")
+		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
 
@@ -79,14 +80,23 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	subManager, err := initializeSubscriptionManager(store)
 	if err != nil {
 		log.Printf("Failed to initialize subscription manager: %v", err)
-		write("NOTICE", "Failed to initialize subscription")
+		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to initialize subscription manager: %v", err))
 		return
 	}
 
 	// Initialize subscriber
 	if err := subManager.InitializeSubscriber(env.Event.PubKey); err != nil {
 		log.Printf("Failed to initialize subscriber %s: %v", env.Event.PubKey, err)
-		write("NOTICE", fmt.Sprintf("Failed to initialize subscriber: %v", err))
+
+		// Check for common errors and provide more specific messages
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "no available addresses") {
+			write("OK", env.Event.ID, false, "Failed to allocate Bitcoin address: No addresses available in the pool")
+		} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") {
+			write("OK", env.Event.ID, false, fmt.Sprintf("Bitcoin address allocation error: %v", err))
+		} else {
+			write("OK", env.Event.ID, false, fmt.Sprintf("Subscriber initialization failed: %v", err))
+		}
 		return
 	}
 
