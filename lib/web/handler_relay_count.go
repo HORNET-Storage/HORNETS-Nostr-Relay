@@ -21,8 +21,8 @@ func getRelayCount(c *fiber.Ctx, store stores.Store) error {
 	for group, types := range relaySettings.MimeTypeGroups {
 		for _, mimeType := range types {
 			amount, err := store.GetStatsStore().FetchFileCountByType(mimeType)
-			if err == nil {
-				continue
+			if err != nil {
+				continue // Skip if there's an error fetching count
 			}
 
 			if _, ok := responseData[group]; !ok {
@@ -31,6 +31,12 @@ func getRelayCount(c *fiber.Ctx, store stores.Store) error {
 
 			responseData[group] += amount
 		}
+	}
+
+	// Add notes count (Nostr events) to the response
+	noteCount, err := store.GetStatsStore().FetchKindCount()
+	if err == nil { // Only add if there was no error
+		responseData["Notes"] = noteCount
 	}
 
 	// Respond with the aggregated counts
