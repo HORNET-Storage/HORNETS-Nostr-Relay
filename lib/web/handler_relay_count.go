@@ -9,34 +9,50 @@ import (
 
 // Refactored getRelayCount function
 func getRelayCount(c *fiber.Ctx, store stores.Store) error {
-	// Initialize the response data
-	responseData := map[string]int{}
+	// Initialize the response data with the keys expected by the frontend
+	responseData := map[string]int{
+		"kinds":  0,
+		"photos": 0,
+		"videos": 0,
+		"audio":  0,
+		"misc":   0,
+	}
 
 	relaySettings, err := RetrieveSettings()
 	if err != nil {
 		return err
 	}
 
+	// Map config group names to frontend expected names
+	groupMapping := map[string]string{
+		"images":    "photos",
+		"videos":    "videos",
+		"audio":     "audio",
+		"documents": "misc",
+	}
+
 	// Fetch counts from the statistics store
 	for group, types := range relaySettings.MimeTypeGroups {
+		frontendGroup := groupMapping[group]
+		if frontendGroup == "" {
+			// If no mapping exists, use the original group name
+			frontendGroup = group
+		}
+
 		for _, mimeType := range types {
 			amount, err := store.GetStatsStore().FetchFileCountByType(mimeType)
 			if err != nil {
 				continue // Skip if there's an error fetching count
 			}
 
-			if _, ok := responseData[group]; !ok {
-				responseData[group] = 0
-			}
-
-			responseData[group] += amount
+			responseData[frontendGroup] += amount
 		}
 	}
 
 	// Add notes count (Nostr events) to the response
 	noteCount, err := store.GetStatsStore().FetchKindCount()
 	if err == nil { // Only add if there was no error
-		responseData["Notes"] = noteCount
+		responseData["kinds"] = noteCount
 	}
 
 	// Respond with the aggregated counts
