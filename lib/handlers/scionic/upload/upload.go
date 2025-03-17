@@ -193,7 +193,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		fmt.Println("Dag verified")
 
-		// Check to see if any data in the dag is not allows to be stored by this relay
+		// Check to see if any data in the dag is not allowed to be stored by this relay
 		for _, leaf := range dag.Leafs {
 			if leaf.Type == "File" {
 				data, err := dag.GetContentFromLeaf(leaf)
@@ -208,12 +208,8 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 					write(utils.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", err))
 					return
 				}
-
-				store.GetStatsStore().SaveFile(dag.Root, leaf.Hash, leaf.ItemName, mimeType.String(), len(leaf.Links), int64(len(data)))
 			}
 		}
-
-		fmt.Println("Files saved to stats")
 
 		dagData.Dag = *dag
 

@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/uuid"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -232,9 +233,18 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 	}
 
 	var err error
+	var contentSize int64
+	var mimeType string
 
 	if leafData.Leaf.Content != nil {
-		err = store.StoreContent(hex.EncodeToString(leafData.Leaf.ContentHash), leafData.Leaf.Content, temp)
+		contentHash := hex.EncodeToString(leafData.Leaf.ContentHash)
+		contentSize = int64(len(leafData.Leaf.Content))
+		
+		// Detect MIME type if content is available
+		mtype := mimetype.Detect(leafData.Leaf.Content)
+		mimeType = mtype.String()
+		
+		err = store.StoreContent(contentHash, leafData.Leaf.Content, temp)
 		if err != nil {
 			return err
 		}
@@ -263,6 +273,36 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 		}
 
 		store.GetDatabase(temp).Upsert(fmt.Sprintf("%s:%s", leafData.Leaf.Hash, key), entry)
+	}
+
+	// Record file statistics if this is not a temporary store and it has content
+	if !temp && store.StatsDatabase != nil && contentSize > 0 {
+		// Extract filename from additional data if available
+		fileName := ""
+		if name, ok := leafData.Leaf.AdditionalData["name"]; ok {
+			fileName = name
+		}
+
+		err = store.StatsDatabase.SaveFile(
+			root,
+			leafData.Leaf.Hash,
+			fileName,
+			mimeType,
+			int(leafData.Leaf.LeafCount),
+			contentSize,
+		)
+		if err != nil {
+			// Log the error but don't fail the operation
+			fmt.Printf("Failed to record leaf file statistics: %v\n", err)
+		}
+
+		// Save tags for the file if any exist
+		if len(leafData.Leaf.AdditionalData) > 0 {
+			err = store.StatsDatabase.SaveTags(root, &leafData.Leaf)
+			if err != nil {
+				fmt.Printf("Failed to record leaf tags: %v\n", err)
+			}
+		}
 	}
 
 	return nil
@@ -542,6 +582,15 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		}
 	}
 
+	// Record event statistics
+	if store.StatsDatabase != nil {
+		err = store.StatsDatabase.SaveEventKind(ev)
+		if err != nil {
+			// Log the error but don't fail the operation
+			fmt.Printf("Failed to record event statistics: %v\n", err)
+		}
+	}
+
 	return nil
 }
 
@@ -551,6 +600,15 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 		return fmt.Errorf("failed to find event to delete: %w", err)
 	}
 
+	// Remove event from statistics
+	if store.StatsDatabase != nil {
+		err = store.StatsDatabase.DeleteEventByID(eventID)
+		if err != nil {
+			// Log the error but don't fail the operation
+			fmt.Printf("Failed to delete event from statistics: %v\n", err)
+		}
+	}
+
 	return nil
 }
 
@@ -558,7 +616,7 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 func (store *BadgerholdStore) StoreBlob(data []byte, hash []byte, publicKey string) error {
 	encodedHash := hex.EncodeToString(hash)
 
-	//mtype := mimetype.Detect(data)
+	mtype := mimetype.Detect(data)
 
 	content := types.BlobContent{
 		Hash:    encodedHash,
@@ -569,6 +627,22 @@ func (store *BadgerholdStore) StoreBlob(data []byte, hash []byte, publicKey stri
 	err := store.Database.Upsert(encodedHash, content)
 	if err != nil {
 		return err
+	}
+
+	// Record file statistics
+	if store.StatsDatabase != nil {
+		err = store.StatsDatabase.SaveFile(
+			encodedHash,         // Using hash as root
+			encodedHash,         // Using hash as hash too
+			"",                  // No filename available for blobs
+			mtype.String(),      // MIME type
+			1,                   // Leaf count is 1 for blobs
+			int64(len(data)),    // Size in bytes
+		)
+		if err != nil {
+			// Log the error but don't fail the operation
+			fmt.Printf("Failed to record blob statistics: %v\n", err)
+		}
 	}
 
 	return nil
