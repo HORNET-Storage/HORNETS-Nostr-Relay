@@ -769,3 +769,159 @@ func getTagUnixValue(tags []nostr.Tag, key string) int64 {
 	}
 	return 0
 }
+
+// CheckAndUpdateSubscriptionEvent checks if a kind 888 event needs to be updated
+// based on current free tier settings and updates it if necessary
+func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event) (*nostr.Event, error) {
+	// Only process kind 888 events
+	if event.Kind != 888 {
+		return event, nil
+	}
+
+	log.Printf("Checking kind 888 event for updates based on free tier status")
+
+	// Get the pubkey from the p tag
+	var pubkey string
+	for _, tag := range event.Tags {
+		if tag[0] == "p" && len(tag) > 1 {
+			pubkey = tag[1]
+			break
+		}
+	}
+
+	if pubkey == "" {
+		return event, fmt.Errorf("no pubkey found in kind 888 event")
+	}
+
+	// Get subscription status
+	var status string
+	for _, tag := range event.Tags {
+		if tag[0] == "subscription_status" && len(tag) > 1 {
+			status = tag[1]
+			break
+		}
+	}
+
+	// Extract current storage info
+	storageInfo, err := m.extractStorageInfo(event)
+	if err != nil {
+		return event, fmt.Errorf("failed to extract storage info: %v", err)
+	}
+
+	// Extract active subscription tier
+	var activeTier string
+	var expirationDate time.Time
+	for _, tag := range event.Tags {
+		if tag[0] == "active_subscription" && len(tag) > 1 {
+			activeTier = tag[1]
+			if len(tag) > 2 {
+				expirationTimeUnix, err := strconv.ParseInt(tag[2], 10, 64)
+				if err == nil {
+					expirationDate = time.Unix(expirationTimeUnix, 0)
+				}
+			}
+			break
+		}
+	}
+
+	// Get bitcoin address from event
+	var address string
+	for _, tag := range event.Tags {
+		if tag[0] == "relay_bitcoin_address" && len(tag) > 1 {
+			address = tag[1]
+			break
+		}
+	}
+
+	// Load relay settings to check last update timestamp
+	var settings lib.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		log.Printf("Error loading relay settings: %v", err)
+		return event, nil // Return original event if we can't get settings
+	}
+
+	// Check if event was created/updated after the last settings change
+	eventCreatedAt := time.Unix(int64(event.CreatedAt), 0)
+	settingsUpdatedAt := time.Unix(settings.LastUpdated, 0)
+	
+	// If event is newer than the last settings change, it's already up to date
+	if settings.LastUpdated > 0 && eventCreatedAt.After(settingsUpdatedAt) {
+		log.Printf("Event was created/updated after the last settings change, no update needed")
+		return event, nil
+	}
+
+	needsUpdate := false
+
+	// Check if free tier is enabled and the event needs updating
+	if m.freeTierEnabled {
+		// If subscription is inactive, or total bytes is 0, or no active subscription
+		if status == "inactive" || storageInfo.TotalBytes == 0 || activeTier == "" {
+			log.Printf("Free tier is enabled, updating kind 888 event for pubkey %s", pubkey)
+			needsUpdate = true
+		} else if activeTier == m.freeTierLimit && status != "active" {
+			// Free tier is active but status is not set correctly
+			log.Printf("Free tier entry exists but status is not active, updating for pubkey %s", pubkey)
+			needsUpdate = true
+		} else if activeTier == m.freeTierLimit {
+			// If it's a free tier and the free tier limit changed
+			freeTierBytes := m.calculateStorageLimit(m.freeTierLimit)
+			expectedFreeTierBytes := m.calculateStorageLimit(settings.FreeTierLimit)
+			
+			if freeTierBytes != expectedFreeTierBytes {
+				log.Printf("Free tier limit changed from %d to %d bytes, updating for pubkey %s", 
+					storageInfo.TotalBytes, expectedFreeTierBytes, pubkey)
+				needsUpdate = true
+			}
+		}
+	} else {
+		// If free tier is disabled but the user has the free tier set as active
+		if activeTier == m.freeTierLimit && storageInfo.TotalBytes > 0 {
+			// This is a free tier user but free tier is now disabled
+			log.Printf("Free tier is disabled but user has free tier, keeping their existing allocation")
+			// We don't change anything here - let them keep what they have until they pay
+		}
+	}
+
+	if !needsUpdate {
+		return event, nil
+	}
+
+	// Update the event
+	if m.freeTierEnabled {
+		// Set free tier expiration if not set
+		if expirationDate.IsZero() || expirationDate.Before(time.Now()) {
+			expirationDate = time.Now().AddDate(0, 1, 0) // 1 month from now
+		}
+
+		// Calculate storage based on free tier
+		freeTierBytes := m.calculateStorageLimit(m.freeTierLimit)
+		
+		// Don't reduce storage if they already have more
+		if storageInfo.TotalBytes < freeTierBytes {
+			storageInfo.TotalBytes = freeTierBytes
+		}
+		
+		// Set active tier to free tier if not set
+		if activeTier == "" {
+			activeTier = m.freeTierLimit
+		}
+	}
+
+	// Create a new updated event
+	updatedEvent, err := m.createEvent(&lib.Subscriber{
+		Npub:    pubkey,
+		Address: address,
+	}, activeTier, expirationDate, &storageInfo)
+	
+	if err != nil {
+		return event, fmt.Errorf("failed to create updated event: %v", err)
+	}
+
+	// Store the updated event
+	if err := m.store.StoreEvent(updatedEvent); err != nil {
+		return event, fmt.Errorf("failed to store updated event: %v", err)
+	}
+
+	log.Printf("Successfully updated kind 888 event for pubkey %s", pubkey)
+	return updatedEvent, nil
+}
