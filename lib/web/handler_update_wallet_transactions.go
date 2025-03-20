@@ -235,10 +235,16 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		return nil, fmt.Errorf("failed to load relay private key: %v", err)
 	}
 
-	// Get subscription tiers from config
-	var subscriptionTiers []types.SubscriptionTier
-	if err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers); err != nil {
-		return nil, fmt.Errorf("failed to load subscription tiers: %v", err)
+	// Get subscription tiers from relay_settings config
+	var relaySettings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		return nil, fmt.Errorf("failed to load relay settings: %v", err)
+	}
+	
+	// Log the tiers for debugging
+	log.Printf("Loading subscription tiers from relay_settings: %+v", relaySettings.SubscriptionTiers)
+	for i, tier := range relaySettings.SubscriptionTiers {
+		log.Printf("Tier %d: DataLimit='%s', Price='%s'", i, tier.DataLimit, tier.Price)
 	}
 
 	// Create and return the subscription manager
@@ -246,6 +252,6 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		store,
 		privateKey,
 		viper.GetString("RelayDHTkey"),
-		subscriptionTiers,
+		relaySettings.SubscriptionTiers,
 	), nil
 }

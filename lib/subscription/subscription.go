@@ -58,6 +58,12 @@ func NewSubscriptionManager(
 	tiers []lib.SubscriptionTier,
 ) *SubscriptionManager {
 	log.Printf("Initializing SubscriptionManager with tiers: %+v", tiers)
+	
+	// Log each tier in detail for debugging
+	for i, tier := range tiers {
+		log.Printf("DEBUG: Initial tier %d: DataLimit='%s', Price='%s'", 
+			i, tier.DataLimit, tier.Price)
+	}
 
 	// Load relay settings first to get free tier configuration
 	var settings lib.RelaySettings
