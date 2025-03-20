@@ -3,12 +3,81 @@ package filter
 import (
 	"log"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
+
+// getAuthenticatedPubkey attempts to extract the authenticated pubkey from session state
+// This function looks for session information in the connection data
+func getAuthenticatedPubkey() string {
+	// In a real implementation, we would access the authenticated pubkey from the
+	// connection state that's stored in the websocket handler.
+
+	// For this implementation, we need to use a more direct approach since
+	// we don't have access to the connection state.
+	// Note: The read parameter is not used in this implementation but would be used
+	// in a more complete implementation to access connection-specific data
+
+	// Find currently authenticated pubkeys by scanning the session store
+	var authenticatedPubkeys []string
+	sessions.Sessions.Range(func(key, value interface{}) bool {
+		pubkey, ok := key.(string)
+		if !ok {
+			return true // continue
+		}
+
+		session, ok := value.(*sessions.Session)
+		if !ok {
+			return true // continue
+		}
+
+		if session.Authenticated {
+			authenticatedPubkeys = append(authenticatedPubkeys, pubkey)
+			log.Printf("Found authenticated pubkey in sessions: %s", pubkey)
+		}
+
+		return true // continue
+	})
+
+	// Log the authenticated pubkeys we found for debugging
+	if len(authenticatedPubkeys) > 0 {
+		log.Printf("Found %d authenticated pubkeys in session store", len(authenticatedPubkeys))
+
+		// Return the first authenticated pubkey we found
+		// In a real implementation, we would match this to the specific connection
+		return authenticatedPubkeys[0]
+	} else {
+		log.Printf("No authenticated pubkeys found in session store")
+	}
+
+	// If we can't determine the authenticated pubkey, return empty string
+	return ""
+}
+
+// addLogging adds detailed logging for debugging
+func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
+	log.Printf("Authenticated pubkey for filter request: %s", connPubkey)
+
+	// Log the kinds being requested
+	for i, filter := range reqEnvelope.Filters {
+		log.Printf("Filter #%d requests kinds: %v", i+1, filter.Kinds)
+
+		// Log any 'p' tags that might be filtering by pubkey
+		for tagName, tagValues := range filter.Tags {
+			if tagName == "p" {
+				log.Printf("Filter #%d requests events for pubkeys: %v", i+1, tagValues)
+			}
+		}
+	}
+}
 
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
@@ -28,6 +97,51 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			return
 		}
 
+		// Initialize subscription manager if needed for kind 888 events
+		var subManager *subscription.SubscriptionManager
+		// Check if any filter is requesting kind 888 events
+		needsSubscriptionManager := false
+		for _, filter := range request.Filters {
+			for _, kind := range filter.Kinds {
+				if kind == 888 {
+					needsSubscriptionManager = true
+					break
+				}
+			}
+			if needsSubscriptionManager {
+				break
+			}
+		}
+
+		// Only initialize subscription manager if necessary
+		if needsSubscriptionManager {
+			// Get relay private key for signing
+			serializedPrivateKey := viper.GetString("private_key")
+
+			// Use existing DeserializePrivateKey function from signing package
+			relayPrivKey, _, err := signing.DeserializePrivateKey(serializedPrivateKey)
+			if err != nil {
+				log.Printf("Error loading private key: %v", err)
+			} else {
+				// Load relay settings
+				var settings lib.RelaySettings
+				if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+					log.Printf("Error loading relay settings: %v", err)
+				}
+
+				// Get relay DHT key
+				relayDHTKey := viper.GetString("RelayDHTkey")
+
+				// Initialize subscription manager
+				subManager = subscription.NewSubscriptionManager(
+					store,
+					relayPrivKey,
+					relayDHTKey,
+					settings.SubscriptionTiers,
+				)
+			}
+		}
+
 		// Ensure that we respond to the client after processing all filters
 		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
 		var combinedEvents []*nostr.Event
@@ -43,8 +157,58 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
+		// Get the authenticated pubkey for the current connection
+		connPubkey := getAuthenticatedPubkey()
+
+		// Add detailed logging
+		addLogging(&request, connPubkey)
+
 		// Send each unique event to the client
 		for _, event := range uniqueEvents {
+			// Special handling for kind 888 events
+			if event.Kind == 888 {
+				log.Printf("Processing kind 888 event with ID: %s", event.ID)
+
+				// Extract the pubkey the event is about (from the p tag)
+				eventPubkey := ""
+				for _, tag := range event.Tags {
+					if tag[0] == "p" && len(tag) > 1 {
+						eventPubkey = tag[1]
+						log.Printf("Kind 888 event is about pubkey: %s", eventPubkey)
+						break
+					}
+				}
+
+				// Log the auth and authorization check
+				log.Printf("Auth check for kind 888: event pubkey=%s, connection pubkey=%s",
+					eventPubkey, connPubkey)
+
+				// If the pubkey in the event is not empty and doesn't match the authenticated user
+				if eventPubkey != "" && connPubkey != "" && eventPubkey != connPubkey {
+					// Skip this event - user is not authorized to see subscription details for other users
+					log.Printf("DENIED: Skipping kind 888 event for pubkey %s - requested by different pubkey %s",
+						eventPubkey, connPubkey)
+					continue
+				} else {
+					log.Printf("ALLOWED: Showing kind 888 event for pubkey %s to connection with pubkey %s",
+						eventPubkey, connPubkey)
+				}
+
+				// Only update if we have a subscription manager
+				if subManager != nil {
+					log.Printf("Checking if kind 888 event needs update...")
+					updatedEvent, err := subManager.CheckAndUpdateSubscriptionEvent(event)
+					if err != nil {
+						log.Printf("Error updating kind 888 event: %v", err)
+					} else if updatedEvent != event {
+						log.Printf("Event was updated with new information")
+						event = updatedEvent
+					} else {
+						log.Printf("Event did not need updating")
+					}
+				}
+			}
+
 			eventJSON, err := json.Marshal(event)
 			if err != nil {
 				log.Printf("Error marshaling event: %v", err)

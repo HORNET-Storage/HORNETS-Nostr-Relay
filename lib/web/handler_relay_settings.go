@@ -2,6 +2,7 @@ package web
 
 import (
 	"log"
+	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
@@ -59,6 +60,10 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 	if relaySettings.FreeTierEnabled && relaySettings.FreeTierLimit == "" {
 		relaySettings.FreeTierLimit = "100 MB per month" // Set default if not provided
 	}
+
+	// Add timestamp to track when settings were last updated
+	relaySettings.LastUpdated = time.Now().Unix()
+	log.Printf("Setting LastUpdated timestamp to %d", relaySettings.LastUpdated)
 
 	// Store new settings first
 	viper.Set("relay_settings", relaySettings)
@@ -131,9 +136,9 @@ func getRelaySettings(c *fiber.Ctx) error {
 	if relaySettings.SubscriptionTiers == nil {
 		log.Println("SubscriptionTiers is nil.")
 		relaySettings.SubscriptionTiers = []types.SubscriptionTier{
-			{DataLimit: "1 GB per month", Price: "8000"},
-			{DataLimit: "5 GB per month", Price: "10000"},
-			{DataLimit: "10 GB per month", Price: "15000"},
+			{DataLimit: "1 GB per month", Price: "10000"},
+			{DataLimit: "5 GB per month", Price: "40000"},
+			{DataLimit: "10 GB per month", Price: "70000"},
 		}
 	}
 

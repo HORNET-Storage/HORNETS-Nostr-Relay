@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -17,7 +18,6 @@ import (
 )
 
 // updateWalletTransactions processes incoming wallet transactions
-// This is the entry point for handling Bitcoin payments
 func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	var transactions []map[string]interface{}
 	log.Println("Transactions request received")
@@ -46,24 +46,60 @@ func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// Process each transaction
-	for _, transaction := range transactions {
-		// Skip transactions from different wallets
-		walletName, ok := transaction["wallet_name"].(string)
-		if !ok || walletName != expectedWalletName {
-			continue
+	// Filter valid transactions
+	validTransactions := make([]map[string]interface{}, 0)
+	for _, tx := range transactions {
+		walletName, ok := tx["wallet_name"].(string)
+		if ok && walletName == expectedWalletName {
+			validTransactions = append(validTransactions, tx)
 		}
+	}
 
-		if err := processTransaction(store, subManager, transaction); err != nil {
+	// Process transactions concurrently using a worker pool
+	const numWorkers = 5
+	jobs := make(chan map[string]interface{}, len(validTransactions))
+	results := make(chan error, len(validTransactions))
+	var wg sync.WaitGroup
+
+	// Worker function to process transactions
+	worker := func(jobs <-chan map[string]interface{}, results chan<- error) {
+		for tx := range jobs {
+			err := processTransaction(store, subManager, tx)
+			results <- err
+		}
+		wg.Done()
+	}
+
+	// Start worker pool
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go worker(jobs, results)
+	}
+
+	// Enqueue jobs
+	for _, tx := range validTransactions {
+		jobs <- tx
+	}
+	close(jobs)
+
+	// Wait for all workers to finish
+	wg.Wait()
+	close(results)
+
+	// Collect results
+	var processedCount, errorCount int
+	for err := range results {
+		if err != nil {
 			log.Printf("Error processing transaction: %v", err)
-			// Continue processing other transactions even if one fails
-			continue
+			errorCount++
+		} else {
+			processedCount++
 		}
 	}
 
 	return c.JSON(fiber.Map{
 		"status":  "success",
-		"message": "Transactions processed successfully",
+		"message": fmt.Sprintf("Processed %d transactions successfully, %d errors", processedCount, errorCount),
 	})
 }
 
@@ -199,10 +235,16 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		return nil, fmt.Errorf("failed to load relay private key: %v", err)
 	}
 
-	// Get subscription tiers from config
-	var subscriptionTiers []types.SubscriptionTier
-	if err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers); err != nil {
-		return nil, fmt.Errorf("failed to load subscription tiers: %v", err)
+	// Get subscription tiers from relay_settings config
+	var relaySettings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		return nil, fmt.Errorf("failed to load relay settings: %v", err)
+	}
+	
+	// Log the tiers for debugging
+	log.Printf("Loading subscription tiers from relay_settings: %+v", relaySettings.SubscriptionTiers)
+	for i, tier := range relaySettings.SubscriptionTiers {
+		log.Printf("Tier %d: DataLimit='%s', Price='%s'", i, tier.DataLimit, tier.Price)
 	}
 
 	// Create and return the subscription manager
@@ -210,6 +252,6 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		store,
 		privateKey,
 		viper.GetString("RelayDHTkey"),
-		subscriptionTiers,
+		relaySettings.SubscriptionTiers,
 	), nil
 }

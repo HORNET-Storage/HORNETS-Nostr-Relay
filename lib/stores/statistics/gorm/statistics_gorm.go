@@ -1,6 +1,7 @@
 package gorm
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -27,6 +28,13 @@ const BatchSize = 50
 type GormStatisticsStore struct {
 	DB    *gorm.DB
 	mutex sync.RWMutex
+
+	// Function-specific mutexes to avoid global locking
+	walletBalanceMutex sync.RWMutex
+	bitcoinRateMutex   sync.RWMutex
+	walletTxMutex      sync.RWMutex
+	eventKindMutex     sync.RWMutex
+	addressMutex       sync.RWMutex
 }
 
 const (
@@ -81,70 +89,101 @@ func (store *GormStatisticsStore) Init() error {
 }
 
 func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Address, error) {
-	tx := store.DB.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
+	// Use a dedicated mutex for address allocation
+	store.addressMutex.Lock()
+	defer store.addressMutex.Unlock()
+	
+	// Maximum retries for database operations
+	const maxRetries = 8 // High retry count for this critical operation
+	
+	var addressToReturn *types.Address
+	var err error
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Extended timeout
+		defer cancel()
+		
+		// Execute transaction with explicit context timeout
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Step 1: Check if the npub already has an allocated address
+			var existingAddressRecord types.SubscriberAddress
+			err := tx.Where("npub = ?", npub).First(&existingAddressRecord).Error
+			if err == nil {
+				// If an existing record is found, prepare it to return
+				addressToReturn = &types.Address{
+					IndexHornets: existingAddressRecord.IndexHornets,
+					Address:      existingAddressRecord.Address,
+					WalletName:   existingAddressRecord.WalletName,
+					Status:       existingAddressRecord.Status,
+					AllocatedAt:  existingAddressRecord.AllocatedAt,
+					Npub:         npub,
+				}
+				return nil
+			} else if err != gorm.ErrRecordNotFound {
+				// If another error occurred (not record not found), return error
+				return fmt.Errorf("failed to query existing address for npub: %v", err)
+			}
+		
+			// Step 2: Allocate a new address if no existing address is found
+			var addressRecord types.SubscriberAddress
+			err = tx.Where("status = ? AND (npub IS NULL OR npub = '')", AddressStatusAvailable).
+				Order("id").
+				First(&addressRecord).Error
+		
+			if err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return fmt.Errorf("no available addresses")
+				}
+				return fmt.Errorf("failed to query available addresses: %v", err)
+			}
+			
+			// Step 3: Store the address allocation in a local variable to return
+			// Step 3: Update the address record with the npub
+			now := time.Now()
+			updates := map[string]interface{}{
+				"status":       AddressStatusAllocated,
+				"allocated_at": &now,
+				"npub":         npub,
+			}
+			
+			if err := tx.Model(&addressRecord).Updates(updates).Error; err != nil {
+				return fmt.Errorf("failed to update address record: %v", err)
+			}
+			
+			// Store the address allocation in a local variable to return
+			addressToReturn = &types.Address{
+				IndexHornets: addressRecord.IndexHornets,
+				Address:      addressRecord.Address,
+				WalletName:   addressRecord.WalletName,
+				Status:       AddressStatusAllocated,
+				AllocatedAt:  &now,
+				Npub:         npub,
+			}
+			
+			return nil
+		})
+		
+		if err == nil {
+			log.Printf("Successfully allocated address for npub %s after %d attempts", npub, attempt+1)
+			return addressToReturn, nil
 		}
-	}()
-
-	// Step 1: Check if the npub already has an allocated address
-	var existingAddressRecord types.SubscriberAddress
-	err := tx.Where("npub = ?", npub).First(&existingAddressRecord).Error
-	if err == nil {
-		// If an existing record is found, return it
-		return &types.Address{
-			IndexHornets: existingAddressRecord.IndexHornets,
-			Address:      existingAddressRecord.Address,
-			WalletName:   existingAddressRecord.WalletName,
-			Status:       existingAddressRecord.Status,
-			AllocatedAt:  existingAddressRecord.AllocatedAt,
-			Npub:         npub,
-		}, nil
-	} else if err != gorm.ErrRecordNotFound {
-		// If another error occurred (not record not found), rollback and return error
-		tx.Rollback()
-		return nil, fmt.Errorf("failed to query existing address for npub: %v", err)
-	}
-
-	// Step 2: Allocate a new address if no existing address is found
-	var addressRecord types.SubscriberAddress
-	err = tx.Where("status = ? AND (npub IS NULL OR npub = '')", AddressStatusAvailable).
-		Order("id").
-		First(&addressRecord).Error
-
-	if err != nil {
-		tx.Rollback()
-		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("no available addresses")
+		
+		// If this is a database lock error, retry with longer exponential backoff
+		if strings.Contains(err.Error(), "database is locked") ||
+			strings.Contains(err.Error(), "busy") ||
+			strings.Contains(err.Error(), "tx read conflict") {
+			backoffTime := time.Duration(1000*(1<<attempt)) * time.Millisecond // Base of 1 second for address allocation
+			log.Printf("Database lock detected when allocating address, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
 		}
-		return nil, fmt.Errorf("failed to query available addresses: %v", err)
+		
+		// For other errors, break the loop and return the error
+		break
 	}
-
-	now := time.Now()
-	updates := map[string]interface{}{
-		"status":       AddressStatusAllocated,
-		"allocated_at": &now,
-		"npub":         npub,
-	}
-
-	if err := tx.Model(&addressRecord).Updates(updates).Error; err != nil {
-		tx.Rollback()
-		return nil, fmt.Errorf("failed to update address allocation: %v", err)
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %v", err)
-	}
-
-	return &types.Address{
-		IndexHornets: addressRecord.IndexHornets,
-		Address:      addressRecord.Address,
-		WalletName:   addressRecord.WalletName,
-		Status:       addressRecord.Status,
-		AllocatedAt:  addressRecord.AllocatedAt,
-		Npub:         npub,
-	}, nil
+	
+	return nil, fmt.Errorf("failed to allocate address after %d attempts: %v", maxRetries, err)
 }
 
 // CountAvailableAddresses counts the number of available addresses in the database
@@ -229,7 +268,14 @@ func (store *GormStatisticsStore) GetPendingTransactionByID(id string) (*types.P
 
 // SaveEventKind stores event kind information in the database.
 func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
+	// Use event-specific mutex to prevent concurrent access
+	store.eventKindMutex.Lock()
+	defer store.eventKindMutex.Unlock()
+
 	kindStr := fmt.Sprintf("kind%d", event.Kind)
+
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
 
 	var relaySettings types.RelaySettings
 	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
@@ -237,54 +283,124 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 		return err
 	}
 
-	// Handle user profile creation or update if the event is of kind 0
-	if event.Kind == 0 {
-		var contentData map[string]interface{}
-		if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
-			log.Println("No lightningAddr or dhtKey keys in event content, proceeding with default values.")
-			contentData = map[string]interface{}{}
-		}
+	// Try multiple times with backoff
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context for the transaction
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
 
-		npubKey := event.PubKey
-		lightningAddr := false
-		dhtKey := false
+		// Start a database transaction
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Handle user profile creation or update if the event is of kind 0
+			if event.Kind == 0 {
+				var contentData map[string]interface{}
+				if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
+					log.Println("No lightningAddr or dhtKey keys in event content, proceeding with default values.")
+					contentData = map[string]interface{}{}
+				}
 
-		if nip05, ok := contentData["nip05"].(string); ok && nip05 != "" {
-			lightningAddr = true
-		}
+				npubKey := event.PubKey
+				lightningAddr := false
+				dhtKey := false
 
-		if dht, ok := contentData["dht-key"].(string); ok && dht != "" {
-			dhtKey = true
-		}
+				if nip05, ok := contentData["nip05"].(string); ok && nip05 != "" {
+					lightningAddr = true
+				}
 
-		err := store.UpsertUserProfile(npubKey, lightningAddr, dhtKey, time.Unix(int64(event.CreatedAt), 0))
-		if err != nil {
-			log.Printf("Error upserting user profile: %v", err)
-			return err
-		}
-	}
+				if dht, ok := contentData["dht-key"].(string); ok && dht != "" {
+					dhtKey = true
+				}
 
-	// If the event kind matches relay settings, store it in the database
-	if contains(relaySettings.KindWhitelist, kindStr) {
-		sizeBytes := len(event.ID) + len(event.PubKey) + len(event.Content) + len(event.Sig)
-		for _, tag := range event.Tags {
-			for _, t := range tag {
-				sizeBytes += len(t)
+				// Use the same transaction for profile update
+				if err := store.upsertUserProfileTx(tx, npubKey, lightningAddr, dhtKey, time.Unix(int64(event.CreatedAt), 0)); err != nil {
+					log.Printf("Error upserting user profile: %v", err)
+					return err
+				}
 			}
-		}
-		sizeMB := float64(sizeBytes) / (1024 * 1024)
 
-		kind := types.Kind{
-			KindNumber: event.Kind,
-			EventID:    event.ID,
-			Size:       sizeMB,
+			// If the event kind matches relay settings, store it in the database
+			if contains(relaySettings.KindWhitelist, kindStr) {
+				// Check if event already exists to avoid duplicates
+				var count int64
+				if err := tx.Model(&types.Kind{}).Where("event_id = ?", event.ID).Count(&count).Error; err != nil {
+					return err
+				}
+
+				if count > 0 {
+					// Event already exists, skip insertion
+					log.Printf("Event %s already exists in the database, skipping", event.ID)
+					return nil
+				}
+
+				sizeBytes := len(event.ID) + len(event.PubKey) + len(event.Content) + len(event.Sig)
+				for _, tag := range event.Tags {
+					for _, t := range tag {
+						sizeBytes += len(t)
+					}
+				}
+				sizeMB := float64(sizeBytes) / (1024 * 1024)
+
+				kind := types.Kind{
+					KindNumber: event.Kind,
+					EventID:    event.ID,
+					Size:       sizeMB,
+				}
+				if err := tx.Create(&kind).Error; err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+
+		if err == nil {
+			// Success - no need to retry
+			return nil
 		}
-		if err := store.DB.Create(&kind).Error; err != nil {
-			return err
+
+		// If this is a database lock error, retry
+		if strings.Contains(err.Error(), "database is locked") ||
+			strings.Contains(err.Error(), "busy") ||
+			strings.Contains(err.Error(), "tx read conflict") {
+			backoffTime := time.Duration(100*(1<<attempt)) * time.Millisecond
+			log.Printf("Database lock detected when saving event kind, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
 		}
+
+		// For other errors, break and return the error
+		break
 	}
 
-	return nil
+	return err
+}
+
+// upsertUserProfileTx is an internal helper function for SaveEventKind
+// that uses the provided transaction to upsert a user profile
+func (store *GormStatisticsStore) upsertUserProfileTx(tx *gorm.DB, npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error {
+	var userProfile types.UserProfile
+	result := tx.Where("npub_key = ?", npubKey).First(&userProfile)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			// Create new user profile
+			userProfile = types.UserProfile{
+				NpubKey:          npubKey,
+				LightningAddr:    lightningAddr,
+				DHTKey:           dhtKey,
+				TimestampHornets: createdAt,
+			}
+			return tx.Create(&userProfile).Error
+		}
+		return result.Error
+	}
+
+	// Update existing user profile
+	userProfile.LightningAddr = lightningAddr
+	userProfile.DHTKey = dhtKey
+	userProfile.TimestampHornets = createdAt
+	return tx.Save(&userProfile).Error
 }
 
 // UpsertUserProfile inserts or updates the user profile in the database.
@@ -866,107 +982,298 @@ func (store *GormStatisticsStore) GetPendingTransactions() ([]types.PendingTrans
 
 // UpdateBitcoinRate checks the latest rate and updates the database if it's new
 func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
-	// Query the latest Bitcoin rate
-	var latestBitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp_hornets desc").First(&latestBitcoinRate)
+	// Use Bitcoin rate-specific mutex
+	store.bitcoinRateMutex.Lock()
+	defer store.bitcoinRateMutex.Unlock()
 
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying bitcoin rate: %v", result.Error)
-		return result.Error
-	}
+	log.Printf("Updating Bitcoin rate to %.8f", rate)
+
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
 
 	// Convert current rate to string for comparison
 	rateStr := fmt.Sprintf("%.8f", rate)
 
-	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
-		// If the rate is the same as the latest entry, no update needed
-		log.Println("Rate is the same as the latest entry, no update needed")
-		return nil
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context for the transaction with increased timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
+
+		// Start a database transaction with a timeout
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Query the latest Bitcoin rate
+			var latestBitcoinRate types.BitcoinRate
+			result := tx.Order("timestamp_hornets desc").First(&latestBitcoinRate)
+
+			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+				log.Printf("Error querying bitcoin rate: %v", result.Error)
+				return result.Error
+			}
+
+			if result.Error == nil && latestBitcoinRate.Rate == rateStr {
+				// If the rate is the same as the latest entry, no update needed
+				log.Println("Rate is the same as the latest entry, no update needed")
+				return nil
+			}
+
+			// Add the new rate
+			newRate := types.BitcoinRate{
+				Rate:             rateStr,
+				TimestampHornets: time.Now(),
+			}
+
+			if err := tx.Create(&newRate).Error; err != nil {
+				log.Printf("Error saving new rate: %v", err)
+				return err
+			}
+
+			return nil
+		})
+
+		if err == nil {
+			log.Println("Bitcoin rate updated successfully")
+			return nil
+		}
+
+		// If this is a database lock error, retry with increased backoff
+		if strings.Contains(err.Error(), "database is locked") ||
+			strings.Contains(err.Error(), "busy") ||
+			strings.Contains(err.Error(), "tx read conflict") {
+			// Longer exponential backoff with base of 500ms instead of 100ms
+			backoffTime := time.Duration(500*(1<<attempt)) * time.Millisecond
+			log.Printf("Database lock detected when updating Bitcoin rate, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
+		}
+
+		// For other errors, break and return the error
+		break
 	}
 
-	// Add the new rate
-	newRate := types.BitcoinRate{
-		Rate:             rateStr,
-		TimestampHornets: time.Now(),
-	}
-	if err := store.DB.Create(&newRate).Error; err != nil {
-		log.Printf("Error saving new rate: %v", err)
-		return err
+	if err != nil {
+		log.Printf("Failed to update Bitcoin rate after %d attempts: %v", maxRetries, err)
 	}
 
-	log.Println("Bitcoin rate updated successfully")
-	return nil
+	return err
 }
 
 // UpdateWalletBalance updates the wallet balance if it's new
 func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string) error {
-	// Query the latest wallet balance
-	var latestBalance types.WalletBalance
-	result := store.DB.Order("timestamp_hornets desc").First(&latestBalance)
+	// Use wallet-specific mutex to prevent concurrent updates to wallet balance
+	store.walletBalanceMutex.Lock()
+	defer store.walletBalanceMutex.Unlock()
 
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying latest balance: %v", result.Error)
-		return result.Error
+	log.Printf("Updating wallet balance for %s to %s", walletName, balance)
+
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
+
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context for the transaction with increased timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
+
+		// Start a database transaction with a timeout
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Query the latest wallet balance
+			var latestBalance types.WalletBalance
+			result := tx.Order("timestamp_hornets desc").First(&latestBalance)
+
+			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+				log.Printf("Error querying latest balance: %v", result.Error)
+				return result.Error
+			}
+
+			// If the balance is the same as the latest entry, no update needed
+			if result.Error == nil && latestBalance.Balance == balance {
+				log.Println("Balance is the same as the latest entry, no update needed")
+				return nil
+			}
+
+			// Add a new balance entry
+			newBalance := types.WalletBalance{
+				Balance:          balance,
+				TimestampHornets: time.Now(),
+			}
+
+			if err := tx.Create(&newBalance).Error; err != nil {
+				log.Printf("Error saving new balance: %v", err)
+				return err
+			}
+
+			return nil
+		})
+
+		if err == nil {
+			log.Println("Wallet balance updated successfully")
+			return nil
+		}
+
+		// If this is a database lock error, retry with increased backoff
+		if strings.Contains(err.Error(), "database is locked") ||
+			strings.Contains(err.Error(), "busy") ||
+			strings.Contains(err.Error(), "tx read conflict") {
+			// Longer exponential backoff with base of 500ms instead of 100ms
+			backoffTime := time.Duration(500*(1<<attempt)) * time.Millisecond
+			log.Printf("Database lock detected when updating wallet balance, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
+		}
+
+		// For other errors, break and return the error
+		break
 	}
 
-	// If the balance is the same as the latest entry, no update needed
-	if result.Error == nil && latestBalance.Balance == balance {
-		log.Println("Balance is the same as the latest entry, no update needed")
-		return nil
-	}
-
-	// Add a new balance entry
-	newBalance := types.WalletBalance{
-		Balance:          balance,
-		TimestampHornets: time.Now(),
-	}
-
-	if err := store.DB.Create(&newBalance).Error; err != nil {
-		log.Printf("Error saving new balance: %v", err)
+	if err != nil {
+		log.Printf("Failed to update wallet balance after %d attempts: %v", maxRetries, err)
 		return err
 	}
 
-	log.Println("Wallet balance updated successfully")
 	return nil
 }
 
 // SaveWalletTransaction saves a new wallet transaction to the database
 func (store *GormStatisticsStore) SaveWalletTransaction(tx types.WalletTransactions) error {
-	return store.DB.Create(&tx).Error
+	// Use wallet transaction specific mutex
+	store.walletTxMutex.Lock()
+	defer store.walletTxMutex.Unlock()
+
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
+
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context with increased timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
+
+		// Start a database transaction with timeout
+		err = store.DB.WithContext(ctx).Transaction(func(txDB *gorm.DB) error {
+			return txDB.Create(&tx).Error
+		})
+
+		if err == nil {
+			return nil
+		}
+
+		log.Printf("Attempt %d: Error saving wallet transaction: %v", attempt+1, err)
+
+		// Enhanced exponential backoff
+		if attempt < maxRetries-1 {
+			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
+			log.Printf("Retrying in %v...", backoffDuration)
+			time.Sleep(backoffDuration)
+		}
+	}
+
+	return fmt.Errorf("failed to save wallet transaction after %d attempts: %v", maxRetries, err)
 }
 
 // DeletePendingTransaction deletes a pending transaction from the database by TxID
 func (store *GormStatisticsStore) DeletePendingTransaction(txID string) error {
-	var pendingTx types.PendingTransaction
-	result := store.DB.Where("tx_id = ?", txID).First(&pendingTx)
-	if result.Error == nil {
-		return store.DB.Delete(&pendingTx).Error
+	// Use wallet transaction specific mutex
+	store.walletTxMutex.Lock()
+	defer store.walletTxMutex.Unlock()
+
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
+
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context with increased timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
+
+		// Execute operation with transaction
+		err = store.DB.WithContext(ctx).Transaction(func(txDB *gorm.DB) error {
+			var pendingTx types.PendingTransaction
+			result := txDB.Where("tx_id = ?", txID).First(&pendingTx)
+
+			if result.Error == nil {
+				return txDB.Delete(&pendingTx).Error
+			}
+
+			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+				log.Printf("Error querying pending transaction with TxID %s: %v", txID, result.Error)
+				return result.Error
+			}
+
+			log.Printf("No pending transaction found with TxID %s", txID)
+			return nil
+		})
+
+		if err == nil {
+			return nil
+		}
+
+		log.Printf("Attempt %d: Error deleting pending transaction: %v", attempt+1, err)
+
+		// Enhanced exponential backoff
+		if attempt < maxRetries-1 {
+			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
+			log.Printf("Retrying in %v...", backoffDuration)
+			time.Sleep(backoffDuration)
+		}
 	}
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying pending transaction with TxID %s: %v", txID, result.Error)
-		return result.Error
-	}
-	log.Printf("No pending transaction found with TxID %s", txID)
-	return nil
+
+	return fmt.Errorf("failed to delete pending transaction after %d attempts: %v", maxRetries, err)
 }
 
-// ExistingTransactionExists checks if a transaction already exists in the database
+// TransactionExists checks if a transaction already exists in the database
 func (store *GormStatisticsStore) TransactionExists(address string, date time.Time, output string, value string) (bool, error) {
-	var existingTransaction types.WalletTransactions
-	result := store.DB.Where("address = ? AND date = ? AND output = ? AND value = ?", address, date, output, value).First(&existingTransaction)
+	// Use a read lock for this operation - since we're only reading
+	store.walletTxMutex.RLock()
+	defer store.walletTxMutex.RUnlock()
 
-	// Handle "Record Not Found" case without raising an error
-	if result.Error == gorm.ErrRecordNotFound {
-		return false, nil // No transaction exists, but it's not an error
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
+
+	var exists bool
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context with increased timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
+
+		// Query with timeout context
+		var existingTransaction types.WalletTransactions
+		result := store.DB.WithContext(ctx).
+			Where("address = ? AND date = ? AND output = ? AND value = ?",
+				address, date, output, value).
+			First(&existingTransaction)
+
+		// Handle "Record Not Found" case without raising an error
+		if result.Error == gorm.ErrRecordNotFound {
+			exists = false
+			return false, nil // No transaction exists, but it's not an error
+		}
+
+		// If there's another error, we'll retry
+		if result.Error != nil {
+			err = result.Error
+			log.Printf("Attempt %d: Error checking transaction existence: %v", attempt+1, err)
+
+			// Enhanced exponential backoff
+			if attempt < maxRetries-1 {
+				backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
+				log.Printf("Retrying in %v...", backoffDuration)
+				time.Sleep(backoffDuration)
+				continue
+			}
+
+			return false, fmt.Errorf("failed to check transaction existence after %d attempts: %v", maxRetries, err)
+		}
+
+		// If no error, the transaction exists
+		exists = true
+		return true, nil
 	}
 
-	// If there’s another error, return it
-	if result.Error != nil {
-		return false, result.Error
-	}
-
-	// If no error, the transaction exists
-	return true, nil
+	// This should not be reached due to the returns above, but just in case
+	return exists, err
 }
 
 // UserExists checks if any user exists in the database
@@ -1028,7 +1335,7 @@ func (store *GormStatisticsStore) SaveAddressBatch(addresses []*types.WalletAddr
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
-	const maxRetries = 3
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
 
 	// Split addresses into batches
 	for i := 0; i < len(addresses); i += BatchSize {
@@ -1074,7 +1381,7 @@ func (store *GormStatisticsStore) SaveSubscriberAddressBatch(addresses []*types.
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 
-	const maxRetries = 3
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
 
 	// Split addresses into batches
 	for i := 0; i < len(addresses); i += BatchSize {
@@ -1233,17 +1540,42 @@ func (store *GormStatisticsStore) IsActiveToken(token string) (bool, error) {
 
 // GetSubscriberByAddress retrieves subscriber information by Bitcoin address
 func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types.SubscriberAddress, error) {
-	var subscriber types.SubscriberAddress
+	// Use address-specific mutex for reading subscribers
+	store.addressMutex.RLock()
+	defer store.addressMutex.RUnlock()
 
-	err := store.DB.Where("address = ?", address).First(&subscriber).Error
-	if err != nil {
+	// Maximum retries for database operations
+	const maxRetries = 6 // Increased from 3 to handle persistent locks
+
+	var subscriber types.SubscriberAddress
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Increased from 5s to 10s
+		defer cancel()
+
+		err = store.DB.WithContext(ctx).Where("address = ?", address).First(&subscriber).Error
+
+		if err == nil {
+			return &subscriber, nil
+		}
+
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("no subscriber found for address: %s", address)
 		}
-		return nil, fmt.Errorf("failed to query subscriber: %v", err)
+
+		log.Printf("Attempt %d: Error querying subscriber by address: %v", attempt+1, err)
+
+		// Exponential backoff for retries
+		if attempt < maxRetries-1 {
+			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
+			log.Printf("Retrying in %v...", backoffDuration)
+			time.Sleep(backoffDuration)
+		}
 	}
 
-	return &subscriber, nil
+	return nil, fmt.Errorf("failed to query subscriber after %d attempts: %v", maxRetries, err)
 }
 
 // SaveSubscriberAddress saves or updates a subscriber address in the database

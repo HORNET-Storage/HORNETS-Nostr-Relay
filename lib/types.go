@@ -209,6 +209,7 @@ type RelaySettings struct {
 	SubscriptionTiers   []SubscriptionTier `json:"subscription_tiers" mapstructure:"subscription_tiers"`
 	FreeTierEnabled     bool               `json:"freeTierEnabled" mapstructure:"freeTierEnabled"`
 	FreeTierLimit       string             `json:"freeTierLimit" mapstructure:"freeTierLimit"`
+	LastUpdated         int64              `json:"lastUpdated" mapstructure:"lastUpdated"`
 	MimeTypeGroups      map[string][]string
 	MimeTypeWhitelist   []string
 	KindWhitelist       []string
