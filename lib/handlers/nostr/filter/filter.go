@@ -17,10 +17,10 @@ import (
 
 // getAuthenticatedPubkey attempts to extract the authenticated pubkey from session state
 // This function looks for session information in the connection data
-func getAuthenticatedPubkey(_ lib_nostr.KindReader) string {
+func getAuthenticatedPubkey() string {
 	// In a real implementation, we would access the authenticated pubkey from the
 	// connection state that's stored in the websocket handler.
-	
+
 	// For this implementation, we need to use a more direct approach since
 	// we don't have access to the connection state.
 	// Note: The read parameter is not used in this implementation but would be used
@@ -33,31 +33,31 @@ func getAuthenticatedPubkey(_ lib_nostr.KindReader) string {
 		if !ok {
 			return true // continue
 		}
-		
+
 		session, ok := value.(*sessions.Session)
 		if !ok {
 			return true // continue
 		}
-		
+
 		if session.Authenticated {
 			authenticatedPubkeys = append(authenticatedPubkeys, pubkey)
 			log.Printf("Found authenticated pubkey in sessions: %s", pubkey)
 		}
-		
+
 		return true // continue
 	})
-	
+
 	// Log the authenticated pubkeys we found for debugging
 	if len(authenticatedPubkeys) > 0 {
 		log.Printf("Found %d authenticated pubkeys in session store", len(authenticatedPubkeys))
-		
+
 		// Return the first authenticated pubkey we found
 		// In a real implementation, we would match this to the specific connection
 		return authenticatedPubkeys[0]
 	} else {
 		log.Printf("No authenticated pubkeys found in session store")
 	}
-	
+
 	// If we can't determine the authenticated pubkey, return empty string
 	return ""
 }
@@ -69,7 +69,7 @@ func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
 	// Log the kinds being requested
 	for i, filter := range reqEnvelope.Filters {
 		log.Printf("Filter #%d requests kinds: %v", i+1, filter.Kinds)
-		
+
 		// Log any 'p' tags that might be filtering by pubkey
 		for tagName, tagValues := range filter.Tags {
 			if tagName == "p" {
@@ -117,7 +117,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		if needsSubscriptionManager {
 			// Get relay private key for signing
 			serializedPrivateKey := viper.GetString("private_key")
-			
+
 			// Use existing DeserializePrivateKey function from signing package
 			relayPrivKey, _, err := signing.DeserializePrivateKey(serializedPrivateKey)
 			if err != nil {
@@ -158,8 +158,8 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
 		// Get the authenticated pubkey for the current connection
-		connPubkey := getAuthenticatedPubkey(read)
-		
+		connPubkey := getAuthenticatedPubkey()
+
 		// Add detailed logging
 		addLogging(&request, connPubkey)
 
@@ -168,7 +168,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Special handling for kind 888 events
 			if event.Kind == 888 {
 				log.Printf("Processing kind 888 event with ID: %s", event.ID)
-				
+
 				// Extract the pubkey the event is about (from the p tag)
 				eventPubkey := ""
 				for _, tag := range event.Tags {
@@ -180,7 +180,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				}
 
 				// Log the auth and authorization check
-				log.Printf("Auth check for kind 888: event pubkey=%s, connection pubkey=%s", 
+				log.Printf("Auth check for kind 888: event pubkey=%s, connection pubkey=%s",
 					eventPubkey, connPubkey)
 
 				// If the pubkey in the event is not empty and doesn't match the authenticated user
