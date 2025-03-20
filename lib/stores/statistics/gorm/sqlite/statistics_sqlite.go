@@ -16,12 +16,15 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 
 	var err error
 	
-	// Configure SQLite with proper connection handling:
+	// Configure SQLite with optimal connection handling for concurrent access:
 	// - journal_mode=WAL enables Write-Ahead Logging for better concurrency
-	// - busy_timeout=10000 waits up to 10 seconds when database is locked
+	// - busy_timeout=30000 waits up to 30 seconds when database is locked (increased from 10s)
 	// - _txlock=immediate begins transactions sooner to reduce deadlocks
 	// - _synchronous=normal provides a balance of safety and performance
-	dsn := "statistics.db?_journal_mode=WAL&_busy_timeout=10000&_txlock=immediate&_synchronous=normal&cache=shared"
+	// - _mutex=no disables recursive mutexes for better concurrency
+	// - _locking_mode=normal allows multiple readers
+	// - cache=shared enables shared cache mode for better performance
+	dsn := "statistics.db?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate&_synchronous=normal&_mutex=no&_locking_mode=normal&cache=shared"
 	
 	// Configure GORM with more advanced settings
 	store.DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -50,11 +53,11 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 		return nil, fmt.Errorf("failed to get database connection: %v", err)
 	}
 	
-	// Set connection pool parameters
-	sqlDB.SetMaxIdleConns(5)     // Maximum number of idle connections
-	sqlDB.SetMaxOpenConns(20)    // Maximum number of open connections
-	sqlDB.SetConnMaxLifetime(30 * time.Minute) // Maximum connection lifetime
-	sqlDB.SetConnMaxIdleTime(10 * time.Minute) // Maximum idle connection lifetime
+	// Set optimized connection pool parameters
+	sqlDB.SetMaxIdleConns(10)     // Maximum number of idle connections (increased from 5)
+	sqlDB.SetMaxOpenConns(30)     // Maximum number of open connections (increased from 20)
+	sqlDB.SetConnMaxLifetime(60 * time.Minute) // Maximum connection lifetime (increased from 30 min)
+	sqlDB.SetConnMaxIdleTime(20 * time.Minute) // Maximum idle connection lifetime (increased from 10 min)
 
 	// Initialize store schema
 	err = store.Init()
@@ -62,11 +65,16 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 		return nil, err
 	}
 	
-	// Enable foreign key constraints
+	// Set additional PRAGMA settings for better concurrency
 	store.DB.Exec("PRAGMA foreign_keys = ON")
+	store.DB.Exec("PRAGMA journal_size_limit = 67110000") // Limit WAL size to ~64MB
+	store.DB.Exec("PRAGMA mmap_size = 134217728")        // Use memory mapping for better performance (128MB)
+	store.DB.Exec("PRAGMA page_size = 8192")             // Larger pages for better performance
+	store.DB.Exec("PRAGMA cache_size = -32000")          // Use a 32MB page cache (negative means KB)
+	store.DB.Exec("PRAGMA temp_store = MEMORY")          // Store temporary tables in memory
 	
-	// Log successful initialization
-	fmt.Println("SQLite database initialized with optimized settings")
+	// Log successful initialization with detailed settings
+	fmt.Println("SQLite database initialized with optimized concurrency settings")
 
 	return store, nil
 }
