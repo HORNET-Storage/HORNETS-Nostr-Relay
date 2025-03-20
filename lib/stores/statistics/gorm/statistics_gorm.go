@@ -257,7 +257,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Use timeout context for the transaction
-		ctx, cancel := store.DB.WithContext(context.Background()).Timeout(5 * time.Second).Context()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		
 		// Start a database transaction
@@ -967,7 +967,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Use timeout context for the transaction
-		ctx, cancel := store.DB.WithContext(context.Background()).Timeout(5 * time.Second).Context()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		
 		// Start a database transaction with a timeout
@@ -1041,7 +1041,7 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Use timeout context for the transaction
-		ctx, cancel := store.DB.WithContext(context.Background()).Timeout(5 * time.Second).Context()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		
 		// Start a database transaction with a timeout

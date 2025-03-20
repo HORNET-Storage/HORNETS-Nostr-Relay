@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	statistics_gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm"
 )
@@ -25,7 +26,7 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	// Configure GORM with more advanced settings
 	store.DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		// Logger configuration to show SQL queries during development
-		Logger: gorm.Default.LogMode(gorm.Silent), // Change to Info for debugging
+		Logger: logger.Default.LogMode(logger.Silent), // Change to Info for debugging
 		
 		// Performance improvements
 		PrepareStmt: true, // Caches prepared statements for better performance
