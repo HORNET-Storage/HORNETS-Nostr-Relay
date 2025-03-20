@@ -1,6 +1,7 @@
 package gorm
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -27,6 +28,14 @@ const BatchSize = 50
 type GormStatisticsStore struct {
 	DB    *gorm.DB
 	mutex sync.RWMutex
+	
+	// Function-specific mutexes to avoid global locking
+	walletBalanceMutex  sync.RWMutex
+	bitcoinRateMutex    sync.RWMutex
+	walletTxMutex       sync.RWMutex
+	eventKindMutex      sync.RWMutex
+	addressMutex        sync.RWMutex
+	sessionMutex        sync.RWMutex
 }
 
 const (
@@ -229,62 +238,139 @@ func (store *GormStatisticsStore) GetPendingTransactionByID(id string) (*types.P
 
 // SaveEventKind stores event kind information in the database.
 func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
-	kindStr := fmt.Sprintf("kind%d", event.Kind)
+	// Use event-specific mutex to prevent concurrent access
+	store.eventKindMutex.Lock()
+	defer store.eventKindMutex.Unlock()
 
+	kindStr := fmt.Sprintf("kind%d", event.Kind)
+	
+	// Maximum retries for database operations
+	const maxRetries = 3
+	
 	var relaySettings types.RelaySettings
 	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
 		log.Printf("Error unmarshaling relay settings: %v", err)
 		return err
 	}
-
-	// Handle user profile creation or update if the event is of kind 0
-	if event.Kind == 0 {
-		var contentData map[string]interface{}
-		if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
-			log.Println("No lightningAddr or dhtKey keys in event content, proceeding with default values.")
-			contentData = map[string]interface{}{}
-		}
-
-		npubKey := event.PubKey
-		lightningAddr := false
-		dhtKey := false
-
-		if nip05, ok := contentData["nip05"].(string); ok && nip05 != "" {
-			lightningAddr = true
-		}
-
-		if dht, ok := contentData["dht-key"].(string); ok && dht != "" {
-			dhtKey = true
-		}
-
-		err := store.UpsertUserProfile(npubKey, lightningAddr, dhtKey, time.Unix(int64(event.CreatedAt), 0))
-		if err != nil {
-			log.Printf("Error upserting user profile: %v", err)
-			return err
-		}
-	}
-
-	// If the event kind matches relay settings, store it in the database
-	if contains(relaySettings.KindWhitelist, kindStr) {
-		sizeBytes := len(event.ID) + len(event.PubKey) + len(event.Content) + len(event.Sig)
-		for _, tag := range event.Tags {
-			for _, t := range tag {
-				sizeBytes += len(t)
+	
+	// Try multiple times with backoff
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context for the transaction
+		ctx, cancel := store.DB.WithContext(context.Background()).Timeout(5 * time.Second).Context()
+		defer cancel()
+		
+		// Start a database transaction
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Handle user profile creation or update if the event is of kind 0
+			if event.Kind == 0 {
+				var contentData map[string]interface{}
+				if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
+					log.Println("No lightningAddr or dhtKey keys in event content, proceeding with default values.")
+					contentData = map[string]interface{}{}
+				}
+				
+				npubKey := event.PubKey
+				lightningAddr := false
+				dhtKey := false
+				
+				if nip05, ok := contentData["nip05"].(string); ok && nip05 != "" {
+					lightningAddr = true
+				}
+				
+				if dht, ok := contentData["dht-key"].(string); ok && dht != "" {
+					dhtKey = true
+				}
+				
+				// Use the same transaction for profile update
+				if err := store.upsertUserProfileTx(tx, npubKey, lightningAddr, dhtKey, time.Unix(int64(event.CreatedAt), 0)); err != nil {
+					log.Printf("Error upserting user profile: %v", err)
+					return err
+				}
 			}
+			
+			// If the event kind matches relay settings, store it in the database
+			if contains(relaySettings.KindWhitelist, kindStr) {
+				// Check if event already exists to avoid duplicates
+				var count int64
+				if err := tx.Model(&types.Kind{}).Where("event_id = ?", event.ID).Count(&count).Error; err != nil {
+					return err
+				}
+				
+				if count > 0 {
+					// Event already exists, skip insertion
+					log.Printf("Event %s already exists in the database, skipping", event.ID)
+					return nil
+				}
+				
+				sizeBytes := len(event.ID) + len(event.PubKey) + len(event.Content) + len(event.Sig)
+				for _, tag := range event.Tags {
+					for _, t := range tag {
+						sizeBytes += len(t)
+					}
+				}
+				sizeMB := float64(sizeBytes) / (1024 * 1024)
+				
+				kind := types.Kind{
+					KindNumber: event.Kind,
+					EventID:    event.ID,
+					Size:       sizeMB,
+				}
+				if err := tx.Create(&kind).Error; err != nil {
+					return err
+				}
+			}
+			
+			return nil
+		})
+		
+		if err == nil {
+			// Success - no need to retry
+			return nil
 		}
-		sizeMB := float64(sizeBytes) / (1024 * 1024)
-
-		kind := types.Kind{
-			KindNumber: event.Kind,
-			EventID:    event.ID,
-			Size:       sizeMB,
+		
+		// If this is a database lock error, retry
+		if strings.Contains(err.Error(), "database is locked") || 
+		   strings.Contains(err.Error(), "busy") ||
+		   strings.Contains(err.Error(), "tx read conflict") {
+			backoffTime := time.Duration(100 * (1 << attempt)) * time.Millisecond
+			log.Printf("Database lock detected when saving event kind, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
 		}
-		if err := store.DB.Create(&kind).Error; err != nil {
-			return err
-		}
+		
+		// For other errors, break and return the error
+		break
 	}
+	
+	return err
+}
 
-	return nil
+// upsertUserProfileTx is an internal helper function for SaveEventKind
+// that uses the provided transaction to upsert a user profile
+func (store *GormStatisticsStore) upsertUserProfileTx(tx *gorm.DB, npubKey string, lightningAddr, dhtKey bool, createdAt time.Time) error {
+	var userProfile types.UserProfile
+	result := tx.Where("npub_key = ?", npubKey).First(&userProfile)
+	
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			// Create new user profile
+			userProfile = types.UserProfile{
+				NpubKey:          npubKey,
+				LightningAddr:    lightningAddr,
+				DHTKey:           dhtKey,
+				TimestampHornets: createdAt,
+			}
+			return tx.Create(&userProfile).Error
+		}
+		return result.Error
+	}
+	
+	// Update existing user profile
+	userProfile.LightningAddr = lightningAddr
+	userProfile.DHTKey = dhtKey
+	userProfile.TimestampHornets = createdAt
+	return tx.Save(&userProfile).Error
 }
 
 // UpsertUserProfile inserts or updates the user profile in the database.
@@ -866,67 +952,153 @@ func (store *GormStatisticsStore) GetPendingTransactions() ([]types.PendingTrans
 
 // UpdateBitcoinRate checks the latest rate and updates the database if it's new
 func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
-	// Query the latest Bitcoin rate
-	var latestBitcoinRate types.BitcoinRate
-	result := store.DB.Order("timestamp_hornets desc").First(&latestBitcoinRate)
-
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying bitcoin rate: %v", result.Error)
-		return result.Error
-	}
-
+	// Use Bitcoin rate-specific mutex
+	store.bitcoinRateMutex.Lock()
+	defer store.bitcoinRateMutex.Unlock()
+	
+	log.Printf("Updating Bitcoin rate to %.8f", rate)
+	
+	// Maximum retries for database operations
+	const maxRetries = 3
+	
 	// Convert current rate to string for comparison
 	rateStr := fmt.Sprintf("%.8f", rate)
-
-	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
-		// If the rate is the same as the latest entry, no update needed
-		log.Println("Rate is the same as the latest entry, no update needed")
-		return nil
+	
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context for the transaction
+		ctx, cancel := store.DB.WithContext(context.Background()).Timeout(5 * time.Second).Context()
+		defer cancel()
+		
+		// Start a database transaction with a timeout
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Query the latest Bitcoin rate
+			var latestBitcoinRate types.BitcoinRate
+			result := tx.Order("timestamp_hornets desc").First(&latestBitcoinRate)
+			
+			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+				log.Printf("Error querying bitcoin rate: %v", result.Error)
+				return result.Error
+			}
+			
+			if result.Error == nil && latestBitcoinRate.Rate == rateStr {
+				// If the rate is the same as the latest entry, no update needed
+				log.Println("Rate is the same as the latest entry, no update needed")
+				return nil
+			}
+			
+			// Add the new rate
+			newRate := types.BitcoinRate{
+				Rate:             rateStr,
+				TimestampHornets: time.Now(),
+			}
+			
+			if err := tx.Create(&newRate).Error; err != nil {
+				log.Printf("Error saving new rate: %v", err)
+				return err
+			}
+			
+			return nil
+		})
+		
+		if err == nil {
+			log.Println("Bitcoin rate updated successfully")
+			return nil
+		}
+		
+		// If this is a database lock error, retry
+		if strings.Contains(err.Error(), "database is locked") || 
+		   strings.Contains(err.Error(), "busy") ||
+		   strings.Contains(err.Error(), "tx read conflict") {
+			backoffTime := time.Duration(100 * (1 << attempt)) * time.Millisecond
+			log.Printf("Database lock detected when updating Bitcoin rate, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
+		}
+		
+		// For other errors, break and return the error
+		break
 	}
-
-	// Add the new rate
-	newRate := types.BitcoinRate{
-		Rate:             rateStr,
-		TimestampHornets: time.Now(),
+	
+	if err != nil {
+		log.Printf("Failed to update Bitcoin rate after %d attempts: %v", maxRetries, err)
 	}
-	if err := store.DB.Create(&newRate).Error; err != nil {
-		log.Printf("Error saving new rate: %v", err)
-		return err
-	}
-
-	log.Println("Bitcoin rate updated successfully")
-	return nil
+	
+	return err
 }
 
 // UpdateWalletBalance updates the wallet balance if it's new
 func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string) error {
-	// Query the latest wallet balance
-	var latestBalance types.WalletBalance
-	result := store.DB.Order("timestamp_hornets desc").First(&latestBalance)
-
-	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying latest balance: %v", result.Error)
-		return result.Error
+	// Use wallet-specific mutex to prevent concurrent updates to wallet balance
+	store.walletBalanceMutex.Lock()
+	defer store.walletBalanceMutex.Unlock()
+	
+	log.Printf("Updating wallet balance for %s to %s", walletName, balance)
+	
+	// Maximum retries for database operations
+	const maxRetries = 3
+	
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context for the transaction
+		ctx, cancel := store.DB.WithContext(context.Background()).Timeout(5 * time.Second).Context()
+		defer cancel()
+		
+		// Start a database transaction with a timeout
+		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Query the latest wallet balance
+			var latestBalance types.WalletBalance
+			result := tx.Order("timestamp_hornets desc").First(&latestBalance)
+			
+			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+				log.Printf("Error querying latest balance: %v", result.Error)
+				return result.Error
+			}
+			
+			// If the balance is the same as the latest entry, no update needed
+			if result.Error == nil && latestBalance.Balance == balance {
+				log.Println("Balance is the same as the latest entry, no update needed")
+				return nil
+			}
+			
+			// Add a new balance entry
+			newBalance := types.WalletBalance{
+				Balance:          balance,
+				TimestampHornets: time.Now(),
+			}
+			
+			if err := tx.Create(&newBalance).Error; err != nil {
+				log.Printf("Error saving new balance: %v", err)
+				return err
+			}
+			
+			return nil
+		})
+		
+		if err == nil {
+			log.Println("Wallet balance updated successfully")
+			return nil
+		}
+		
+		// If this is a database lock error, retry
+		if strings.Contains(err.Error(), "database is locked") || 
+		   strings.Contains(err.Error(), "busy") ||
+		   strings.Contains(err.Error(), "tx read conflict") {
+			backoffTime := time.Duration(100 * (1 << attempt)) * time.Millisecond
+			log.Printf("Database lock detected when updating wallet balance, retrying in %v: %v", backoffTime, err)
+			time.Sleep(backoffTime)
+			continue
+		}
+		
+		// For other errors, break and return the error
+		break
 	}
-
-	// If the balance is the same as the latest entry, no update needed
-	if result.Error == nil && latestBalance.Balance == balance {
-		log.Println("Balance is the same as the latest entry, no update needed")
-		return nil
-	}
-
-	// Add a new balance entry
-	newBalance := types.WalletBalance{
-		Balance:          balance,
-		TimestampHornets: time.Now(),
-	}
-
-	if err := store.DB.Create(&newBalance).Error; err != nil {
-		log.Printf("Error saving new balance: %v", err)
+	
+	if err != nil {
+		log.Printf("Failed to update wallet balance after %d attempts: %v", maxRetries, err)
 		return err
 	}
-
-	log.Println("Wallet balance updated successfully")
+	
 	return nil
 }
 
