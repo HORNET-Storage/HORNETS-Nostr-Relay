@@ -136,9 +136,9 @@ func getRelaySettings(c *fiber.Ctx) error {
 	if relaySettings.SubscriptionTiers == nil {
 		log.Println("SubscriptionTiers is nil.")
 		relaySettings.SubscriptionTiers = []types.SubscriptionTier{
-			{DataLimit: "1 GB per month", Price: "8000"},
-			{DataLimit: "5 GB per month", Price: "10000"},
-			{DataLimit: "10 GB per month", Price: "15000"},
+			{DataLimit: "1 GB per month", Price: "10000"},
+			{DataLimit: "5 GB per month", Price: "40000"},
+			{DataLimit: "10 GB per month", Price: "70000"},
 		}
 	}
 
