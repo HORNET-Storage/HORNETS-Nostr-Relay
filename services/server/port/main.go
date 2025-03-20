@@ -119,16 +119,16 @@ func init() {
 
 	viper.SetDefault("subscription_tiers", []map[string]interface{}{
 		{
-			"data_limit": "1 GB per month",
-			"price":      "10000", // in sats
+			"datalimit": "1 GB per month",
+			"price":     "10000", // in sats
 		},
 		{
-			"data_limit": "5 GB per month",
-			"price":      "40000", // in sats
+			"datalimit": "5 GB per month",
+			"price":     "40000", // in sats
 		},
 		{
-			"data_limit": "10 GB per month",
-			"price":      "70000", // in sats
+			"datalimit": "10 GB per month",
+			"price":     "70000", // in sats
 		},
 	})
 
