@@ -314,6 +314,7 @@ type SubscriberAddress struct {
 	Status       string     `gorm:"default:'available'"`
 	AllocatedAt  *time.Time `gorm:"default:null"`
 	Npub         *string    `gorm:"type:text;unique"` // Pointer type and unique constraint
+	CreditSats   int64      `gorm:"default:0"`        // Track accumulated satoshis that haven't reached a tier
 }
 
 type UserChallenge struct {
