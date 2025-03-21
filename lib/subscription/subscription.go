@@ -445,13 +445,19 @@ func (m *SubscriptionManager) processHighTierPayment(
 		fullPeriods = 1 // Ensure at least one period
 	}
 
-	// Set highest tier storage limit
+	// Calculate the storage for one period of highest tier
+	tierStorageBytes := m.calculateStorageLimit(highestTier.DataLimit)
+
+	// Calculate total new storage for all periods purchased
+	totalNewStorage := tierStorageBytes * fullPeriods
+
+	// Add the new storage to existing storage (accumulate instead of replace)
 	prevBytes := storageInfo.TotalBytes
-	storageInfo.TotalBytes = m.calculateStorageLimit(highestTier.DataLimit)
+	storageInfo.TotalBytes += totalNewStorage
 	storageInfo.UpdatedAt = time.Now()
 
-	log.Printf("Upgrading storage from %d to %d bytes (tier: %s)",
-		prevBytes, storageInfo.TotalBytes, highestTier.DataLimit)
+	log.Printf("Upgrading storage from %d to %d bytes (adding %d bytes for %d periods of tier: %s)",
+		prevBytes, storageInfo.TotalBytes, totalNewStorage, fullPeriods, highestTier.DataLimit)
 
 	// Calculate end date based on multiple periods
 	var endDate time.Time
