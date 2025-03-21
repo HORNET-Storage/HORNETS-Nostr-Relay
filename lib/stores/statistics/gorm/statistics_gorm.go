@@ -44,27 +44,6 @@ const (
 
 // Generic Init for gorm
 func (store *GormStatisticsStore) Init() error {
-	testing := false
-	if testing {
-		tablesToDrop := []string{
-			// "wallet_addresses",
-			// "subscriber_addresses",
-			// "wallet_transactions",
-			// "wallet_balances",
-			"kinds",
-		}
-
-		for _, table := range tablesToDrop {
-			if err := store.DB.Exec(fmt.Sprintf("DROP TABLE %s", table)).Error; err != nil {
-				log.Printf("Error dropping table %s: %v", table, err)
-				// If table doesn't exist, that's fine - continue
-				if !strings.Contains(err.Error(), "does not exist") {
-					continue
-				}
-			}
-			log.Printf("Successfully dropped table: %s", table)
-		}
-	}
 
 	err := store.DB.AutoMigrate(
 		&types.Kind{},
@@ -92,18 +71,18 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 	// Use a dedicated mutex for address allocation
 	store.addressMutex.Lock()
 	defer store.addressMutex.Unlock()
-	
+
 	// Maximum retries for database operations
 	const maxRetries = 8 // High retry count for this critical operation
-	
+
 	var addressToReturn *types.Address
 	var err error
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Use timeout context
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Extended timeout
 		defer cancel()
-		
+
 		// Execute transaction with explicit context timeout
 		err = store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			// Step 1: Check if the npub already has an allocated address
@@ -124,20 +103,20 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 				// If another error occurred (not record not found), return error
 				return fmt.Errorf("failed to query existing address for npub: %v", err)
 			}
-		
+
 			// Step 2: Allocate a new address if no existing address is found
 			var addressRecord types.SubscriberAddress
 			err = tx.Where("status = ? AND (npub IS NULL OR npub = '')", AddressStatusAvailable).
 				Order("id").
 				First(&addressRecord).Error
-		
+
 			if err != nil {
 				if err == gorm.ErrRecordNotFound {
 					return fmt.Errorf("no available addresses")
 				}
 				return fmt.Errorf("failed to query available addresses: %v", err)
 			}
-			
+
 			// Step 3: Store the address allocation in a local variable to return
 			// Step 3: Update the address record with the npub
 			now := time.Now()
@@ -146,11 +125,11 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 				"allocated_at": &now,
 				"npub":         npub,
 			}
-			
+
 			if err := tx.Model(&addressRecord).Updates(updates).Error; err != nil {
 				return fmt.Errorf("failed to update address record: %v", err)
 			}
-			
+
 			// Store the address allocation in a local variable to return
 			addressToReturn = &types.Address{
 				IndexHornets: addressRecord.IndexHornets,
@@ -160,15 +139,15 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 				AllocatedAt:  &now,
 				Npub:         npub,
 			}
-			
+
 			return nil
 		})
-		
+
 		if err == nil {
 			log.Printf("Successfully allocated address for npub %s after %d attempts", npub, attempt+1)
 			return addressToReturn, nil
 		}
-		
+
 		// If this is a database lock error, retry with longer exponential backoff
 		if strings.Contains(err.Error(), "database is locked") ||
 			strings.Contains(err.Error(), "busy") ||
@@ -178,11 +157,11 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 			time.Sleep(backoffTime)
 			continue
 		}
-		
+
 		// For other errors, break the loop and return the error
 		break
 	}
-	
+
 	return nil, fmt.Errorf("failed to allocate address after %d attempts: %v", maxRetries, err)
 }
 
@@ -1576,6 +1555,92 @@ func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types
 	}
 
 	return nil, fmt.Errorf("failed to query subscriber after %d attempts: %v", maxRetries, err)
+}
+
+// GetSubscriberByNpub retrieves subscriber information by Npub
+func (store *GormStatisticsStore) GetSubscriberByNpub(npub string) (*types.SubscriberAddress, error) {
+	// Use address-specific mutex for reading subscribers
+	store.addressMutex.RLock()
+	defer store.addressMutex.RUnlock()
+
+	// Maximum retries for database operations
+	const maxRetries = 6
+
+	var subscriber types.SubscriberAddress
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err = store.DB.WithContext(ctx).Where("npub = ?", npub).First(&subscriber).Error
+
+		if err == nil {
+			return &subscriber, nil
+		}
+
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("no subscriber found for npub: %s", npub)
+		}
+
+		log.Printf("Attempt %d: Error querying subscriber by npub: %v", attempt+1, err)
+
+		// Exponential backoff for retries
+		if attempt < maxRetries-1 {
+			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt))
+			log.Printf("Retrying in %v...", backoffDuration)
+			time.Sleep(backoffDuration)
+		}
+	}
+
+	return nil, fmt.Errorf("failed to query subscriber after %d attempts: %v", maxRetries, err)
+}
+
+// GetSubscriberCredit retrieves the credit amount for a subscriber by npub
+func (store *GormStatisticsStore) GetSubscriberCredit(npub string) (int64, error) {
+	subscriber, err := store.GetSubscriberByNpub(npub)
+	if err != nil {
+		return 0, err
+	}
+	return subscriber.CreditSats, nil
+}
+
+// UpdateSubscriberCredit updates the credit amount for a subscriber
+func (store *GormStatisticsStore) UpdateSubscriberCredit(npub string, creditSats int64) error {
+	// Use address-specific mutex for updating subscriber credit
+	store.addressMutex.Lock()
+	defer store.addressMutex.Unlock()
+
+	// Maximum retries for database operations
+	const maxRetries = 6
+
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Use timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err = store.DB.WithContext(ctx).Model(&types.SubscriberAddress{}).
+			Where("npub = ?", npub).
+			Update("credit_sats", creditSats).Error
+
+		if err == nil {
+			log.Printf("Updated credit for npub %s to %d sats", npub, creditSats)
+			return nil
+		}
+
+		log.Printf("Attempt %d: Error updating subscriber credit: %v", attempt+1, err)
+
+		// Exponential backoff for retries
+		if attempt < maxRetries-1 {
+			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt))
+			log.Printf("Retrying in %v...", backoffDuration)
+			time.Sleep(backoffDuration)
+		}
+	}
+
+	return fmt.Errorf("failed to update subscriber credit after %d attempts: %v", maxRetries, err)
 }
 
 // SaveSubscriberAddress saves or updates a subscriber address in the database
