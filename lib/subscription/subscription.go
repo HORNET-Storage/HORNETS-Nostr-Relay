@@ -260,6 +260,47 @@ func (m *SubscriptionManager) ProcessPayment(
 
 			log.Printf("Added %d sats to credit for %s (total credit: %d)",
 				amountSats, npub, newCredit)
+
+			// Update the NIP-88 event to reflect the new credit amount
+			events, err := m.store.QueryEvents(nostr.Filter{
+				Kinds: []int{888},
+				Tags:  nostr.TagMap{"p": []string{npub}},
+				Limit: 1,
+			})
+			if err == nil && len(events) > 0 {
+				currentEvent := events[0]
+
+				// Extract current info
+				storageInfo, err := m.extractStorageInfo(currentEvent)
+				if err != nil {
+					log.Printf("Warning: could not extract storage info: %v", err)
+					return nil
+				}
+
+				// Get address and current tier information
+				address := getTagValue(currentEvent.Tags, "relay_bitcoin_address")
+				activeTier := getTagValue(currentEvent.Tags, "active_subscription")
+
+				// Get expiration date if any
+				var expirationDate time.Time
+				if expirationUnix := getTagUnixValue(currentEvent.Tags, "active_subscription"); expirationUnix > 0 {
+					expirationDate = time.Unix(expirationUnix, 0)
+				} else if m.freeTierEnabled {
+					// Set default expiration for free tier
+					expirationDate = time.Now().AddDate(0, 1, 0)
+				}
+
+				// Update the NIP-88 event to reflect the new credit
+				if err := m.createOrUpdateNIP88Event(&lib.Subscriber{
+					Npub:    npub,
+					Address: address,
+				}, activeTier, expirationDate, &storageInfo); err != nil {
+					log.Printf("Warning: failed to update NIP-88 event with credit: %v", err)
+				} else {
+					log.Printf("Updated NIP-88 event for %s with credit: %d sats", npub, newCredit)
+				}
+			}
+
 			return nil
 		}
 		return err
