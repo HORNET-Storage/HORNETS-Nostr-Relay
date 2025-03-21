@@ -304,30 +304,33 @@ func (m *SubscriptionManager) ProcessPayment(
 			paidTierBytes, freeTierBytes)
 	}
 
-	// Get current tier
-	currentTierLimit := getTagValue(currentEvent.Tags, "active_subscription")
-
-	// Check if this is an upgrade
-	isUpgrade := false
-	if currentTierLimit != "" {
-		currentTierBytes := m.calculateStorageLimit(currentTierLimit)
-		newTierBytes := m.calculateStorageLimit(tier.DataLimit)
-
-		isUpgrade = newTierBytes > currentTierBytes
+	// Get current expiration date from event
+	expirationUnix := getTagUnixValue(currentEvent.Tags, "active_subscription")
+	existingExpiration := time.Time{}
+	if expirationUnix > 0 {
+		existingExpiration = time.Unix(expirationUnix, 0)
 	}
 
-	// Calculate new expiration date
-	createdAt := time.Unix(int64(currentEvent.CreatedAt), 0)
-	endDate := m.calculateEndDate(createdAt)
+	// Always accumulate storage capacity for paid tiers
+	prevBytes := storageInfo.TotalBytes
+	newTierBytes := m.calculateStorageLimit(tier.DataLimit)
 
-	// Update storage info if this is an upgrade or first subscription
-	if isUpgrade || currentTierLimit == "" {
-		prevBytes := storageInfo.TotalBytes
-		storageInfo.TotalBytes = m.calculateStorageLimit(tier.DataLimit)
-		log.Printf("Updating storage limit from %d to %d bytes", prevBytes, storageInfo.TotalBytes)
+	// Add new tier capacity to existing capacity
+	storageInfo.TotalBytes += newTierBytes
+	log.Printf("Accumulating storage: adding %d bytes to existing %d bytes (new total: %d bytes)",
+		newTierBytes, prevBytes, storageInfo.TotalBytes)
+
+	// Calculate new expiration date - add one month from current expiration
+	// If existing subscription is valid, extend it by 1 month
+	var endDate time.Time
+	if existingExpiration.After(time.Now()) {
+		endDate = existingExpiration.AddDate(0, 1, 0)
+		log.Printf("Extending subscription expiration from %s to %s",
+			existingExpiration.Format("2006-01-02"), endDate.Format("2006-01-02"))
 	} else {
-		log.Printf("Keeping existing storage limit of %d bytes (same or lower tier payment)",
-			storageInfo.TotalBytes)
+		// If expired or no previous subscription, start fresh
+		endDate = time.Now().AddDate(0, 1, 0)
+		log.Printf("Setting new subscription expiration to %s", endDate.Format("2006-01-02"))
 	}
 
 	storageInfo.UpdatedAt = time.Now()
@@ -931,14 +934,6 @@ func (m *SubscriptionManager) calculateStorageLimit(tier string) int64 {
 	}
 
 	return bytes
-}
-
-// calculateEndDate determines the subscription end date
-func (m *SubscriptionManager) calculateEndDate(currentEnd time.Time) time.Time {
-	if time.Now().Before(currentEnd) {
-		return currentEnd.AddDate(0, 1, 0) // Extend by 1 month
-	}
-	return time.Now().AddDate(0, 1, 0) // Start new 1 month period
 }
 
 func getTagValue(tags []nostr.Tag, key string) string {
