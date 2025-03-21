@@ -779,10 +779,6 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*lib.Subscript
 	var bestMatch *lib.SubscriptionTier
 	var bestPrice int64
 
-	// Define tolerance for price matching - both absolute and percentage-based
-	const absoluteTolerance int64 = 10      // 10 sats absolute tolerance
-	const relativeTolerance float64 = 0.001 // 0.1% relative tolerance
-
 	for _, tier := range m.subscriptionTiers {
 		if tier.DataLimit == "" || tier.Price == "" {
 			log.Printf("Warning: skipping invalid tier: DataLimit='%s', Price='%s'",
@@ -794,33 +790,19 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*lib.Subscript
 		log.Printf("Checking tier: DataLimit='%s', Price='%s' (%d sats)",
 			tier.DataLimit, tier.Price, price)
 
-		// Calculate the actual tolerance for this tier (the larger of absolute and relative)
-		tierTolerance := absoluteTolerance
-		relTolerance := int64(float64(price) * relativeTolerance)
-		if relTolerance > tierTolerance {
-			tierTolerance = relTolerance
-		}
+		// Strict matching: Payment must be >= tier price exactly
+		// No tolerance - exact matches only
+		exactMatch := (amountSats >= price)
 
-		// Check if payment is within tolerance range
-		// Either the payment is >= price, OR it's within the tolerance range
-		withinTolerance := (amountSats >= price) || (price-amountSats <= tierTolerance)
-
-		// Must be within tolerance AND better than current best match
-		if withinTolerance && price > bestPrice {
+		// Must match exactly AND be better than current best match
+		if exactMatch && price > bestPrice {
 			bestMatch = &lib.SubscriptionTier{
 				DataLimit: tier.DataLimit,
 				Price:     tier.Price,
 			}
 			bestPrice = price
-
-			// Log if we're matching with tolerance
-			if amountSats < price {
-				log.Printf("New best match (within tolerance of %d sats): DataLimit='%s', Price='%s'",
-					tierTolerance, bestMatch.DataLimit, bestMatch.Price)
-			} else {
-				log.Printf("New best match: DataLimit='%s', Price='%s'",
-					bestMatch.DataLimit, bestMatch.Price)
-			}
+			log.Printf("New best match: DataLimit='%s', Price='%s' (exact match)",
+				bestMatch.DataLimit, bestMatch.Price)
 		}
 	}
 
