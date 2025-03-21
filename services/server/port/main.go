@@ -108,6 +108,22 @@ func init() {
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
 		"KindWhitelist":    []string{"kind0", "kind1", "kind22242"}, // Essential kinds always enabled
+		"FreeTierEnabled":  true,
+		"FreeTierLimit":    "100 MB per month",
+		"subscription_tiers": []map[string]interface{}{
+			{
+				"DataLimit": "1 GB per month",
+				"Price":     "1000", // in sats
+			},
+			{
+				"DataLimit": "5 GB per month",
+				"Price":     "10000", // in sats
+			},
+			{
+				"DataLimit": "10 GB per month",
+				"Price":     "15000", // in sats
+			},
+		},
 	})
 
 	// Generate a random wallet API key
@@ -117,21 +133,7 @@ func init() {
 	}
 	viper.SetDefault("wallet_api_key", apiKey)
 
-	viper.SetDefault("subscription_tiers", []map[string]interface{}{
-		{
-			"datalimit": "1 GB per month",
-			"price":     "10000", // in sats
-		},
-		{
-			"datalimit": "5 GB per month",
-			"price":     "40000", // in sats
-		},
-		{
-			"datalimit": "10 GB per month",
-			"price":     "70000", // in sats
-		},
-	})
-
+	// Free tier settings are only used from relay_settings now
 	viper.SetDefault("freeTierEnabled", true)
 	viper.SetDefault("freeTierLimit", "100 MB per month")
 
