@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -24,6 +25,34 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
+
+// Global subscription manager instance
+var globalManager *SubscriptionManager
+var globalManagerMutex sync.RWMutex
+
+// InitGlobalManager initializes the global subscription manager instance
+func InitGlobalManager(
+	store stores.Store,
+	relayPrivKey *btcec.PrivateKey,
+	relayDHTKey string,
+	tiers []lib.SubscriptionTier,
+) *SubscriptionManager {
+	globalManagerMutex.Lock()
+	defer globalManagerMutex.Unlock()
+
+	globalManager = NewSubscriptionManager(store, relayPrivKey, relayDHTKey, tiers)
+	log.Printf("Initialized global subscription manager with %d tiers", len(tiers))
+	return globalManager
+}
+
+// GetGlobalManager returns the global subscription manager instance
+// Returns nil if not initialized
+func GetGlobalManager() *SubscriptionManager {
+	globalManagerMutex.RLock()
+	defer globalManagerMutex.RUnlock()
+
+	return globalManager
+}
 
 // Address status constants
 const (
