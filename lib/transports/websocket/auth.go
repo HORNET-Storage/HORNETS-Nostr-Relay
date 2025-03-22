@@ -7,12 +7,9 @@ import (
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 )
@@ -23,7 +20,7 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, store stores.Store) {
+func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, _ stores.Store) {
 	write := func(messageType string, params ...interface{}) {
 		response := lib_nostr.BuildResponse(messageType, params)
 		if len(response) > 0 {
@@ -76,11 +73,11 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
-	// Initialize subscription manager
-	subManager, err := initializeSubscriptionManager(store)
-	if err != nil {
-		log.Printf("Failed to initialize subscription manager: %v", err)
-		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to initialize subscription manager: %v", err))
+	// Get the global subscription manager
+	subManager := subscription.GetGlobalManager()
+	if subManager == nil {
+		log.Printf("Failed to get global subscription manager")
+		write("OK", env.Event.ID, false, "Failed to get subscription manager: Global manager not initialized")
 		return
 	}
 
@@ -142,25 +139,4 @@ func createUserSession(pubKey string, sig string) error {
 	return nil
 }
 
-func initializeSubscriptionManager(store stores.Store) (*subscription.SubscriptionManager, error) {
-	// Load relay private key
-	privateKey, _, err := signing.DeserializePrivateKey(viper.GetString("private_key"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize private key: %v", err)
-	}
-
-	// Get subscription tiers from config
-	var settings types.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-		return nil, fmt.Errorf("failed to load relay settings: %v", err)
-	}
-
-	log.Printf("Loaded subscription tiers from settings: %+v", settings.SubscriptionTiers)
-
-	return subscription.NewSubscriptionManager(
-		store,
-		privateKey,
-		viper.GetString("RelayDHTkey"),
-		settings.SubscriptionTiers,
-	), nil
-}
+// Removed unused function: initializeSubscriptionManager
