@@ -14,8 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
@@ -269,6 +271,21 @@ func main() {
 			log.Printf("Failed to cleanup temp database: %v", err)
 		}
 	}()
+
+	// Initialize the global subscription manager
+	log.Println("Initializing global subscription manager...")
+	var relaySettings lib.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		log.Printf("Failed to load relay settings: %v", err)
+	} else {
+		subscription.InitGlobalManager(
+			store,
+			privateKey,
+			viper.GetString("RelayDHTkey"),
+			relaySettings.SubscriptionTiers,
+		)
+		log.Println("Global subscription manager initialized successfully")
+	}
 
 	// Create and store kind 411 event
 	if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
