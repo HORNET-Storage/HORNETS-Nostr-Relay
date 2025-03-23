@@ -418,6 +418,9 @@ func (m *SubscriptionManager) ProcessPayment(
 		return fmt.Errorf("failed to update NIP-88 event: %v", err)
 	}
 
+	// Also update the paid subscribers table
+	m.updatePaidSubscriberRecord(npub, tier.DataLimit, endDate, &storageInfo)
+
 	// Verify the update
 	updatedEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
@@ -442,10 +445,13 @@ func (m *SubscriptionManager) ProcessPayment(
 // the subscription period and crediting any remainder
 func (m *SubscriptionManager) processHighTierPayment(
 	npub string,
-	_ string, // transactionID not used but kept for API consistency
+	transactionID string,
 	amountSats int64,
 	highestTier *lib.SubscriptionTier,
 ) error {
+	log.Printf("Processing high-tier payment (tx: %s) for %s: %d sats for tier %s",
+		transactionID, npub, amountSats, highestTier.DataLimit)
+
 	// Fetch current NIP-88 event to get existing state
 	events, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
@@ -520,6 +526,9 @@ func (m *SubscriptionManager) processHighTierPayment(
 	if err != nil {
 		return fmt.Errorf("failed to update NIP-88 event: %v", err)
 	}
+
+	// Also update the paid subscribers table
+	m.updatePaidSubscriberRecord(npub, highestTier.DataLimit, endDate, &storageInfo)
 
 	// Credit remainder if any
 	if remainder > 0 {
@@ -1192,4 +1201,49 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 
 	log.Printf("Successfully updated kind 888 event for pubkey %s", pubkey)
 	return updatedEvent, nil
+}
+
+// updatePaidSubscriberRecord is a helper method to update the PaidSubscriber table
+// This should be called after successfully updating a NIP-88 event
+func (m *SubscriptionManager) updatePaidSubscriberRecord(
+	npub string,
+	tier string,
+	expirationDate time.Time,
+	storageInfo *StorageInfo,
+) {
+	// Skip free tier subscriptions
+	if m.freeTierEnabled && tier == m.freeTierLimit {
+		return
+	}
+
+	// Try to get the existing subscriber
+	existingSubscriber, err := m.store.GetStatsStore().GetPaidSubscriberByNpub(npub)
+	if err != nil {
+		log.Printf("Warning: error checking for existing paid subscriber record: %v", err)
+		return
+	}
+
+	// Create or update the paid subscriber record
+	paidSubscriber := &lib.PaidSubscriber{
+		Npub:           npub,
+		Tier:           tier,
+		ExpirationDate: expirationDate,
+		StorageBytes:   storageInfo.TotalBytes,
+		UsedBytes:      storageInfo.UsedBytes,
+	}
+
+	// If subscriber already exists, keep the ID
+	var updateErr error
+	if existingSubscriber != nil {
+		paidSubscriber.ID = existingSubscriber.ID
+		updateErr = m.store.GetStatsStore().UpdatePaidSubscriber(paidSubscriber)
+	} else {
+		updateErr = m.store.GetStatsStore().SavePaidSubscriber(paidSubscriber)
+	}
+
+	if updateErr != nil {
+		log.Printf("Warning: failed to update paid subscriber record: %v", updateErr)
+	} else {
+		log.Printf("Successfully updated paid subscriber record for %s", npub)
+	}
 }
