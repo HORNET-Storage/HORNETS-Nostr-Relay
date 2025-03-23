@@ -59,6 +59,7 @@ func (store *GormStatisticsStore) Init() error {
 		&types.ActiveToken{},
 		&types.SubscriberAddress{},
 		&types.FileTag{},
+		&types.PaidSubscriber{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -1646,4 +1647,56 @@ func (store *GormStatisticsStore) UpdateSubscriberCredit(npub string, creditSats
 // SaveSubscriberAddress saves or updates a subscriber address in the database
 func (store *GormStatisticsStore) SaveSubscriberAddress(address *types.SubscriberAddress) error {
 	return store.SaveSubscriberAddressBatch([]*types.SubscriberAddress{address})
+}
+
+// GetPaidSubscribers retrieves all paid subscribers from the database
+func (store *GormStatisticsStore) GetPaidSubscribers() ([]types.PaidSubscriber, error) {
+	var subscribers []types.PaidSubscriber
+
+	// Query all paid subscribers
+	if err := store.DB.Find(&subscribers).Error; err != nil {
+		log.Printf("Error fetching paid subscribers: %v", err)
+		return nil, err
+	}
+
+	// Filter out expired subscriptions
+	var activeSubscribers []types.PaidSubscriber
+	now := time.Now()
+
+	for _, sub := range subscribers {
+		if sub.ExpirationDate.After(now) {
+			activeSubscribers = append(activeSubscribers, sub)
+		}
+	}
+
+	return activeSubscribers, nil
+}
+
+// GetPaidSubscriberByNpub retrieves a specific paid subscriber by their npub
+func (store *GormStatisticsStore) GetPaidSubscriberByNpub(npub string) (*types.PaidSubscriber, error) {
+	var subscriber types.PaidSubscriber
+
+	if err := store.DB.Where("npub = ?", npub).First(&subscriber).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil // Subscriber not found
+		}
+		return nil, err
+	}
+
+	return &subscriber, nil
+}
+
+// SavePaidSubscriber creates a new paid subscriber record
+func (store *GormStatisticsStore) SavePaidSubscriber(subscriber *types.PaidSubscriber) error {
+	return store.DB.Create(subscriber).Error
+}
+
+// UpdatePaidSubscriber updates an existing paid subscriber record
+func (store *GormStatisticsStore) UpdatePaidSubscriber(subscriber *types.PaidSubscriber) error {
+	return store.DB.Save(subscriber).Error
+}
+
+// DeletePaidSubscriber deletes a paid subscriber record by npub
+func (store *GormStatisticsStore) DeletePaidSubscriber(npub string) error {
+	return store.DB.Where("npub = ?", npub).Delete(&types.PaidSubscriber{}).Error
 }
