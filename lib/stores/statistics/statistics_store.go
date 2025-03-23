@@ -82,4 +82,11 @@ type StatisticsStore interface {
 	FetchKindCount() (int, error)
 	FetchFileCountByType(mimeType string) (int, error)
 	FetchFilesByType(mimeType string, page int, pageSize int) ([]types.FileInfo, *types.PaginationMetadata, error)
+
+	// Paid subscriber management
+	GetPaidSubscribers() ([]types.PaidSubscriber, error)
+	GetPaidSubscriberByNpub(npub string) (*types.PaidSubscriber, error)
+	SavePaidSubscriber(subscriber *types.PaidSubscriber) error
+	UpdatePaidSubscriber(subscriber *types.PaidSubscriber) error
+	DeletePaidSubscriber(npub string) error
 }
