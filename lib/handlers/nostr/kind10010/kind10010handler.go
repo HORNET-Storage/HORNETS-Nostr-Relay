@@ -20,33 +20,33 @@ type FilterPreference struct {
 // BuildKind10010Handler creates a handler for kind 10010 filter preference events
 func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+		// Use Jsoniter for JSON operations
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+		// Read data from the stream
 		data, err := read()
 		if err != nil {
-			log.Println("Error reading from stream:", err)
 			write("NOTICE", "Error reading from stream.")
 			return
 		}
 
-		var event nostr.Event
-		if err := json.Unmarshal(data, &event); err != nil {
-			log.Println("Error unmarshaling event:", err)
+		// Unmarshal the received data into a Nostr event
+		var env nostr.EventEnvelope
+		if err := json.Unmarshal(data, &env); err != nil {
 			write("NOTICE", "Error unmarshaling event.")
 			return
 		}
 
-		// Verify the event is kind 10010
-		if event.Kind != 10010 {
-			log.Println("Received non-10010 event in kind10010 handler")
-			write("NOTICE", "Wrong event type.")
+		// Check relay settings for allowed events whilst also verifying signatures and kind number
+		success := lib_nostr.ValidateEvent(write, env, 10010)
+		if !success {
 			return
 		}
 
 		// Verify and store the event
-		if err := store.StoreEvent(&event); err != nil {
+		if err := store.StoreEvent(&env.Event); err != nil {
 			log.Printf("Error storing filter preference event: %v", err)
-			write("OK", event.ID, false, "Failed to store filter preference")
+			write("OK", env.Event.ID, false, "Failed to store filter preference")
 			return
 		}
 
@@ -54,13 +54,13 @@ func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// by deleting old ones for this user
 		filters, err := store.QueryEvents(nostr.Filter{
 			Kinds:   []int{10010},
-			Authors: []string{event.PubKey},
+			Authors: []string{env.Event.PubKey},
 			Limit:   10,
 		})
 
 		if err == nil {
 			for _, oldEvent := range filters {
-				if oldEvent.ID != event.ID {
+				if oldEvent.ID != env.Event.ID {
 					if err := store.DeleteEvent(oldEvent.ID); err != nil {
 						log.Printf("Warning: could not delete old filter preference: %v", err)
 					}
@@ -68,8 +68,8 @@ func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			}
 		}
 
-		log.Printf("Stored filter preference for user %s", event.PubKey)
-		write("OK", event.ID, true, "")
+		log.Printf("Stored filter preference for user %s", env.Event.PubKey)
+		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler

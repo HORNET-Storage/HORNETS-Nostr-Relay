@@ -110,7 +110,7 @@ func init() {
 		"Audio":            []string{},
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
-		"KindWhitelist":    []string{"kind0", "kind1", "kind22242"}, // Essential kinds always enabled
+		"KindWhitelist":    []string{"kind0", "kind1", "kind22242", "kind10010"}, // Essential kinds always enabled
 		"FreeTierEnabled":  true,
 		"FreeTierLimit":    "100 MB per month",
 		"subscription_tiers": []map[string]interface{}{
@@ -139,6 +139,13 @@ func init() {
 	// Free tier settings are only used from relay_settings now
 	viper.SetDefault("freeTierEnabled", true)
 	viper.SetDefault("freeTierLimit", "100 MB per month")
+
+	// Nest Feeder API settings
+	viper.SetDefault("nest_feeder_url", "http://localhost:8080/moderate")
+	viper.SetDefault("nest_feeder_timeout", 500)
+	viper.SetDefault("nest_feeder_cache_size", 10000)
+	viper.SetDefault("nest_feeder_cache_ttl", 60)
+	viper.SetDefault("nest_feeder_enabled", true)
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
