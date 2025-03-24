@@ -314,6 +314,7 @@ type SubscriberAddress struct {
 	Status       string     `gorm:"default:'available'"`
 	AllocatedAt  *time.Time `gorm:"default:null"`
 	Npub         *string    `gorm:"type:text;unique"` // Pointer type and unique constraint
+	CreditSats   int64      `gorm:"default:0"`        // Track accumulated satoshis that haven't reached a tier
 }
 
 type UserChallenge struct {
@@ -459,4 +460,16 @@ type BlobContent struct {
 	Hash    string
 	PubKey  string
 	Content []byte
+}
+
+// PaidSubscriber represents a user with an active paid subscription
+type PaidSubscriber struct {
+	ID               uint      `gorm:"primaryKey"`
+	Npub             string    `gorm:"size:128;uniqueIndex"` // Unique public key of the subscriber
+	Tier             string    `gorm:"not null"`             // Subscription tier (e.g. "1 GB per month")
+	ExpirationDate   time.Time `gorm:"not null"`             // When the subscription expires
+	StorageBytes     int64     `gorm:"default:0"`            // Total storage allocated in bytes
+	UsedBytes        int64     `gorm:"default:0"`            // Currently used storage in bytes
+	TimestampHornets time.Time `gorm:"autoCreateTime"`       // When the record was created
+	UpdatedAt        time.Time `gorm:"autoUpdateTime"`       // When the record was last updated
 }

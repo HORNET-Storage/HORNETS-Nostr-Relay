@@ -14,8 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
@@ -84,7 +86,7 @@ func init() {
 	viper.SetDefault("RelayName", "HORNETS")
 	viper.SetDefault("RelayDescription", "The best relay ever.")
 	viper.SetDefault("RelayPubkey", "")
-	viper.SetDefault("RelaySupportedNips", []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116})
+	viper.SetDefault("RelaySupportedNips", []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116, 888})
 	viper.SetDefault("RelayContact", "support@hornets.net")
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")
@@ -108,6 +110,22 @@ func init() {
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
 		"KindWhitelist":    []string{"kind0", "kind1", "kind22242"}, // Essential kinds always enabled
+		"FreeTierEnabled":  true,
+		"FreeTierLimit":    "100 MB per month",
+		"subscription_tiers": []map[string]interface{}{
+			{
+				"DataLimit": "1 GB per month",
+				"Price":     "1000", // in sats
+			},
+			{
+				"DataLimit": "5 GB per month",
+				"Price":     "10000", // in sats
+			},
+			{
+				"DataLimit": "10 GB per month",
+				"Price":     "15000", // in sats
+			},
+		},
 	})
 
 	// Generate a random wallet API key
@@ -117,21 +135,7 @@ func init() {
 	}
 	viper.SetDefault("wallet_api_key", apiKey)
 
-	viper.SetDefault("subscription_tiers", []map[string]interface{}{
-		{
-			"datalimit": "1 GB per month",
-			"price":     "10000", // in sats
-		},
-		{
-			"datalimit": "5 GB per month",
-			"price":     "40000", // in sats
-		},
-		{
-			"datalimit": "10 GB per month",
-			"price":     "70000", // in sats
-		},
-	})
-
+	// Free tier settings are only used from relay_settings now
 	viper.SetDefault("freeTierEnabled", true)
 	viper.SetDefault("freeTierLimit", "100 MB per month")
 
@@ -267,6 +271,21 @@ func main() {
 			log.Printf("Failed to cleanup temp database: %v", err)
 		}
 	}()
+
+	// Initialize the global subscription manager
+	log.Println("Initializing global subscription manager...")
+	var relaySettings lib.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		log.Printf("Failed to load relay settings: %v", err)
+	} else {
+		subscription.InitGlobalManager(
+			store,
+			privateKey,
+			viper.GetString("RelayDHTkey"),
+			relaySettings.SubscriptionTiers,
+		)
+		log.Println("Global subscription manager initialized successfully")
+	}
 
 	// Create and store kind 411 event
 	if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {

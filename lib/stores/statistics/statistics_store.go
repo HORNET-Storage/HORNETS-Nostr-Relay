@@ -57,9 +57,12 @@ type StatisticsStore interface {
 	CountAvailableAddresses() (int64, error)
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
 	GetSubscriberByAddress(address string) (*types.SubscriberAddress, error)
+	GetSubscriberByNpub(npub string) (*types.SubscriberAddress, error)
 	SaveSubscriberAddress(address *types.SubscriberAddress) error
 	WalletAddressExists(address string) (bool, error)
 	SubscriberAddressExists(address string) (bool, error)
+	GetSubscriberCredit(npub string) (int64, error)
+	UpdateSubscriberCredit(npub string, creditSats int64) error
 
 	// User challenge and token management
 	SaveUserChallenge(userChallenge *types.UserChallenge) error
@@ -79,4 +82,11 @@ type StatisticsStore interface {
 	FetchKindCount() (int, error)
 	FetchFileCountByType(mimeType string) (int, error)
 	FetchFilesByType(mimeType string, page int, pageSize int) ([]types.FileInfo, *types.PaginationMetadata, error)
+
+	// Paid subscriber management
+	GetPaidSubscribers() ([]types.PaidSubscriber, error)
+	GetPaidSubscriberByNpub(npub string) (*types.PaidSubscriber, error)
+	SavePaidSubscriber(subscriber *types.PaidSubscriber) error
+	UpdatePaidSubscriber(subscriber *types.PaidSubscriber) error
+	DeletePaidSubscriber(npub string) error
 }

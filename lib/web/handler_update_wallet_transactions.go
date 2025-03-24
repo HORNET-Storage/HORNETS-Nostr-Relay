@@ -151,6 +151,12 @@ func processTransaction(store stores.Store, subManager *subscription.Subscriptio
 		log.Printf("Subscriber retrieved: %v", subscriber)
 	}
 
+	// Check if subscriber.Npub is nil before dereferencing
+	if subscriber.Npub == nil {
+		log.Printf("Warning: subscriber found for address %s but has nil Npub", txDetails.output)
+		return fmt.Errorf("subscriber found but has nil npub for address: %s", txDetails.output)
+	}
+
 	// Convert BTC value to satoshis for subscription processing
 	satoshis := int64(txDetails.value * 100_000_000)
 
