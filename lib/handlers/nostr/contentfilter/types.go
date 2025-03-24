@@ -18,6 +18,17 @@ type FilterRequest struct {
 	EventData         interface{} `json:"event_data"`
 }
 
+// BatchFilterRequest represents a batch of events to be filtered with the same custom instruction
+type BatchFilterRequest struct {
+	CustomInstruction string        `json:"custom_instruction"`
+	Events            []interface{} `json:"events"`
+}
+
+// BatchFilterResponse represents the response for a batch filter request
+type BatchFilterResponse struct {
+	Results []FilterResult `json:"results"`
+}
+
 // CacheItem represents a cached filter result with expiration
 type CacheItem struct {
 	Result    FilterResult

@@ -112,8 +112,12 @@ The following settings can be configured in `config.json`:
 ## Technical Details
 
 - Content filtering is only applied to kind 1 (text note) events for efficiency
-- Filtering is performed in parallel for better performance
-- Results are cached to minimize API calls and improve response time
+- Batch processing is used for efficient handling of multiple events:
+  - Events are automatically grouped into batches when their count exceeds the threshold
+  - Each batch is processed as a single API call, reducing HTTP overhead
+  - If the batch API fails, the system gracefully falls back to individual processing
+- Intelligent caching minimizes API calls for previously seen events
+- Parallel processing ensures high throughput even with large event volumes
 - The implementation includes graceful degradation if the API is unavailable
 
 ## Client Integration
