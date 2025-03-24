@@ -45,6 +45,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1984"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
@@ -395,6 +396,7 @@ func main() {
 		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
 		nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
+		nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))
 	} else {
 		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
 	}

@@ -2,6 +2,7 @@ package filter
 
 import (
 	"log"
+	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/contentfilter"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
 )
 
 // getAuthenticatedPubkey attempts to extract the authenticated pubkey from session state
@@ -80,6 +83,22 @@ func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
 }
 
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+	// Initialize content filter service
+	filterConfig := contentfilter.ServiceConfig{
+		APIURL:     viper.GetString("nest_feeder_url"),
+		Timeout:    time.Duration(viper.GetInt("nest_feeder_timeout")) * time.Millisecond,
+		CacheSize:  viper.GetInt("nest_feeder_cache_size"),
+		CacheTTL:   time.Duration(viper.GetInt("nest_feeder_cache_ttl")) * time.Minute,
+		FilterKind: []int{1}, // Default to filtering only kind 1 events (text notes)
+		Enabled:    viper.GetBool("nest_feeder_enabled"),
+	}
+
+	// Create the filter service
+	filterService := contentfilter.NewService(filterConfig)
+
+	// Start a background goroutine to periodically clean up the cache
+	filterService.RunPeriodicCacheCleanup(15 * time.Minute)
+
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -163,8 +182,42 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Add detailed logging
 		addLogging(&request, connPubkey)
 
+		// Apply content filtering if the user is authenticated
+		if connPubkey != "" && filterService.ShouldFilterKind(1) {
+			// Get user's filter preferences
+			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
+			if err == nil && pref.Enabled && pref.Instructions != "" {
+				log.Printf("Applying content filter for user %s", connPubkey)
+
+				// Filter events
+				filteredEvents, err := filterService.FilterEvents(uniqueEvents, pref.Instructions)
+				if err != nil {
+					log.Printf("Error filtering events: %v", err)
+				} else {
+					uniqueEvents = filteredEvents
+					log.Printf("Filtered events: %d/%d passed filter", len(filteredEvents), len(uniqueEvents))
+				}
+			} else {
+				log.Printf("Content filtering not enabled for user %s", connPubkey)
+			}
+		}
+
 		// Send each unique event to the client
 		for _, event := range uniqueEvents {
+			// Special handling for kind 10010 events - only visible to the author
+			if event.Kind == 10010 {
+				// Extract the pubkey the event is about (the author)
+				eventPubkey := event.PubKey
+
+				// If the authenticated user doesn't match the author
+				if connPubkey != "" && connPubkey != eventPubkey {
+					// Skip this event - user is not authorized to see filter preferences for other users
+					log.Printf("DENIED: Skipping kind 10010 event for pubkey %s - requested by different pubkey %s",
+						eventPubkey, connPubkey)
+					continue
+				}
+			}
+
 			// Special handling for kind 888 events
 			if event.Kind == 888 {
 				log.Printf("Processing kind 888 event with ID: %s", event.ID)
