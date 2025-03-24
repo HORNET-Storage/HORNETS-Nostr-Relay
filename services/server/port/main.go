@@ -142,7 +142,7 @@ func init() {
 
 	// Nest Feeder API settings
 	viper.SetDefault("nest_feeder_url", "http://localhost:8080/moderate")
-	viper.SetDefault("nest_feeder_timeout", 500)
+	viper.SetDefault("nest_feeder_timeout", 10000)
 	viper.SetDefault("nest_feeder_cache_size", 10000)
 	viper.SetDefault("nest_feeder_cache_ttl", 60)
 	viper.SetDefault("nest_feeder_enabled", true)
