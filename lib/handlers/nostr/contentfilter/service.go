@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -299,15 +300,20 @@ func (s *Service) makeBatchAPICall(events []*nostr.Event, instructions string) (
 		Events:            make([]interface{}, len(events)),
 	}
 
-	// Convert events to interface{}
+	// Convert events to interface{} and log the events being sent
+	log.Printf("Preparing batch API call with %d events", len(events))
 	for i, event := range events {
 		payload.Events[i] = event
+		log.Printf("Batch event %d: ID=%s, Kind=%d, PubKey=%s", i, event.ID, event.Kind, event.PubKey)
 	}
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling batch request: %v", err)
 	}
+
+	// Log the API endpoint we're using
+	log.Printf("Sending batch request to: %s", s.apiURL+"/batch")
 
 	// Send request to Nest Feeder API
 	resp, err := s.client.Post(s.apiURL+"/batch", "application/json", bytes.NewBuffer(jsonData))
@@ -321,13 +327,33 @@ func (s *Service) makeBatchAPICall(events []*nostr.Event, instructions string) (
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Batch API returned non-OK status: %d", resp.StatusCode)
+		// Try to read error message from response body
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr == nil {
+			log.Printf("Response body: %s", string(bodyBytes))
+		}
 		return s.fallbackToIndividualProcessing(events, instructions)
 	}
 
 	// Parse batch response
 	var batchResponse BatchFilterResponse
-	if err := json.NewDecoder(resp.Body).Decode(&batchResponse); err != nil {
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	log.Printf("Raw API response: %s", string(bodyBytes))
+
+	if err := json.Unmarshal(bodyBytes, &batchResponse); err != nil {
 		return nil, fmt.Errorf("error parsing batch API response: %v", err)
+	}
+
+	// Log the results received
+	log.Printf("Received %d results from batch API", len(batchResponse.Results))
+	for i, result := range batchResponse.Results {
+		if i < len(events) {
+			log.Printf("Result for event %s: Pass=%v, Reason=%s",
+				events[i].ID, result.Pass, result.Reason)
+		} else {
+			log.Printf("Extra result %d: Pass=%v, Reason=%s",
+				i, result.Pass, result.Reason)
+		}
 	}
 
 	// Ensure we have results for all events
@@ -335,6 +361,7 @@ func (s *Service) makeBatchAPICall(events []*nostr.Event, instructions string) (
 		log.Printf("Warning: Received %d results for %d events", len(batchResponse.Results), len(events))
 		// Pad the results if needed
 		for len(batchResponse.Results) < len(events) {
+			log.Printf("Adding missing result for index %d", len(batchResponse.Results))
 			batchResponse.Results = append(batchResponse.Results, FilterResult{
 				Pass:   true,
 				Reason: "Missing result in batch response",

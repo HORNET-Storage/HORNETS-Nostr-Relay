@@ -189,13 +189,29 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			if err == nil && pref.Enabled && pref.Instructions != "" {
 				log.Printf("Applying content filter for user %s", connPubkey)
 
+				// Store the original count for proper logging
+				originalCount := len(uniqueEvents)
+
+				// Log event details before filtering for diagnostics
+				log.Printf("Before filtering: Processing %d events for user %s", originalCount, connPubkey)
+				for _, e := range uniqueEvents {
+					log.Printf("Event to filter: ID=%s, Kind=%d, PubKey=%s, Content (first 50 chars): %s",
+						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
+				}
+
 				// Filter events
 				filteredEvents, err := filterService.FilterEvents(uniqueEvents, pref.Instructions)
 				if err != nil {
 					log.Printf("Error filtering events: %v", err)
 				} else {
+					// Log which events passed filtering
+					log.Printf("Events that passed filtering:")
+					for _, e := range filteredEvents {
+						log.Printf("PASSED: ID=%s, Kind=%d, PubKey=%s", e.ID, e.Kind, e.PubKey)
+					}
+
 					uniqueEvents = filteredEvents
-					log.Printf("Filtered events: %d/%d passed filter", len(filteredEvents), len(uniqueEvents))
+					log.Printf("Filtered events: %d/%d passed filter", len(filteredEvents), originalCount)
 				}
 			} else {
 				log.Printf("Content filtering not enabled for user %s", connPubkey)
@@ -274,6 +290,14 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 	}
 
 	return handler
+}
+
+// truncateString limits the length of a string for logging purposes
+func truncateString(s string, maxLength int) string {
+	if len(s) <= maxLength {
+		return s
+	}
+	return s[:maxLength] + "..."
 }
 
 func deduplicateEvents(events []*nostr.Event) []*nostr.Event {
