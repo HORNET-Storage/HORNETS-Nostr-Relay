@@ -189,29 +189,54 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			if err == nil && pref.Enabled && pref.Instructions != "" {
 				log.Printf("Applying content filter for user %s", connPubkey)
 
+				// Separate filterable (kind 1) and non-filterable events
+				var filterableEvents []*nostr.Event
+				var nonFilterableEvents []*nostr.Event
+
+				for _, e := range uniqueEvents {
+					if filterService.ShouldFilterKind(e.Kind) {
+						filterableEvents = append(filterableEvents, e)
+					} else {
+						nonFilterableEvents = append(nonFilterableEvents, e)
+						log.Printf("EXEMPT from filtering: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)",
+							e.ID, e.Kind, e.PubKey)
+					}
+				}
+
 				// Store the original count for proper logging
-				originalCount := len(uniqueEvents)
+				originalCount := len(filterableEvents)
 
 				// Log event details before filtering for diagnostics
-				log.Printf("Before filtering: Processing %d events for user %s", originalCount, connPubkey)
-				for _, e := range uniqueEvents {
+				log.Printf("Before filtering: Processing %d filterable events for user %s", originalCount, connPubkey)
+				for _, e := range filterableEvents {
 					log.Printf("Event to filter: ID=%s, Kind=%d, PubKey=%s, Content (first 50 chars): %s",
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
-				// Filter events
-				filteredEvents, err := filterService.FilterEvents(uniqueEvents, pref.Instructions)
-				if err != nil {
-					log.Printf("Error filtering events: %v", err)
-				} else {
-					// Log which events passed filtering
-					log.Printf("Events that passed filtering:")
-					for _, e := range filteredEvents {
-						log.Printf("PASSED: ID=%s, Kind=%d, PubKey=%s", e.ID, e.Kind, e.PubKey)
-					}
+				// Only filter the filterable events
+				if len(filterableEvents) > 0 {
+					filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
+					if err != nil {
+						log.Printf("Error filtering events: %v", err)
+						// On error, use the original filterable events
+						// Combine with non-filterable events
+						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+					} else {
+						// Log which events passed filtering
+						log.Printf("Events that passed filtering:")
+						for _, e := range filteredEvents {
+							log.Printf("PASSED: ID=%s, Kind=%d, PubKey=%s", e.ID, e.Kind, e.PubKey)
+						}
 
-					uniqueEvents = filteredEvents
-					log.Printf("Filtered events: %d/%d passed filter", len(filteredEvents), originalCount)
+						// Combine filtered events with non-filterable events
+						uniqueEvents = append(nonFilterableEvents, filteredEvents...)
+						log.Printf("Filtered events: %d/%d filterable events passed filter, %d exempt events",
+							len(filteredEvents), originalCount, len(nonFilterableEvents))
+					}
+				} else {
+					// No filterable events, just use non-filterable ones
+					uniqueEvents = nonFilterableEvents
+					log.Printf("No filterable events to process, %d exempt events passed through", len(nonFilterableEvents))
 				}
 			} else {
 				log.Printf("Content filtering not enabled for user %s", connPubkey)
