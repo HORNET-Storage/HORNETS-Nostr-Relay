@@ -434,6 +434,41 @@ func (m *SubscriptionManager) ProcessPayment(
 			getTagValue(updatedEvents[0].Tags, "subscription_status"))
 	}
 
+	// Check if there are any sats leftover from this payment that could be credited
+	tierPrice := m.parseSats(tier.Price)
+	if totalAmount > tierPrice {
+		leftover := totalAmount - tierPrice
+		log.Printf("Payment has %d sats leftover after purchasing tier", leftover)
+
+		// Update credit with leftover amount
+		if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, leftover); err != nil {
+			log.Printf("Warning: failed to update credit with leftover amount: %v", err)
+		} else {
+			log.Printf("Added %d sats to credit for %s", leftover, npub)
+
+			// Check if the updated credit can be used to purchase additional tier capacity
+			_, err := m.checkAndApplyCredit(npub, address, &storageInfo, endDate)
+			if err != nil {
+				log.Printf("Warning: error checking credit for additional tier purchase: %v", err)
+			}
+
+			// Fetch the final credit amount to include in the NIP-88 event
+			finalCredit, _ := m.store.GetStatsStore().GetSubscriberCredit(npub)
+
+			// Final update of the NIP-88 event to include the latest credit
+			if finalCredit > 0 {
+				if err := m.createOrUpdateNIP88Event(&lib.Subscriber{
+					Npub:    npub,
+					Address: address,
+				}, tier.DataLimit, endDate, &storageInfo); err != nil {
+					log.Printf("Warning: failed to update final NIP-88 event with credit: %v", err)
+				} else {
+					log.Printf("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
+				}
+			}
+		}
+	}
+
 	// Add transaction processing log
 	log.Printf("Successfully processed payment for %s: %d sats for tier %s",
 		npub, amountSats, tier.DataLimit)
@@ -442,7 +477,7 @@ func (m *SubscriptionManager) ProcessPayment(
 }
 
 // processHighTierPayment handles payments that exceed the highest tier price by extending
-// the subscription period and crediting any remainder
+// the subscription period and attempting to use any remainder for lower tiers
 func (m *SubscriptionManager) processHighTierPayment(
 	npub string,
 	transactionID string,
@@ -471,20 +506,20 @@ func (m *SubscriptionManager) processHighTierPayment(
 
 	address := getTagValue(currentEvent.Tags, "relay_bitcoin_address")
 
-	// Calculate full periods and remainder
-	tierPrice, _ := strconv.ParseInt(highestTier.Price, 10, 64)
-	fullPeriods := amountSats / tierPrice
-	remainder := amountSats % tierPrice
+	// Calculate full periods and remainder for highest tier
+	highestTierPrice, _ := strconv.ParseInt(highestTier.Price, 10, 64)
+	fullPeriods := amountSats / highestTierPrice
+	remainingSats := amountSats % highestTierPrice
 
 	if fullPeriods < 1 {
 		fullPeriods = 1 // Ensure at least one period
 	}
 
 	// Calculate the storage for one period of highest tier
-	tierStorageBytes := m.calculateStorageLimit(highestTier.DataLimit)
+	highestTierStorageBytes := m.calculateStorageLimit(highestTier.DataLimit)
 
 	// Calculate total new storage for all periods purchased
-	totalNewStorage := tierStorageBytes * fullPeriods
+	totalNewStorage := highestTierStorageBytes * fullPeriods
 
 	// Add the new storage to existing storage (accumulate instead of replace)
 	prevBytes := storageInfo.TotalBytes
@@ -530,12 +565,111 @@ func (m *SubscriptionManager) processHighTierPayment(
 	// Also update the paid subscribers table
 	m.updatePaidSubscriberRecord(npub, highestTier.DataLimit, endDate, &storageInfo)
 
+	// Try to use remaining sats for lower tiers (cascading approach)
+	// Sort tiers by price (descending)
+	if remainingSats > 0 && len(m.subscriptionTiers) > 1 {
+		log.Printf("Attempting to use remaining %d sats for lower tiers", remainingSats)
+
+		// Create a sorted list of tiers by price (descending)
+		type tierInfo struct {
+			tier  lib.SubscriptionTier
+			price int64
+		}
+
+		sortedTiers := make([]tierInfo, 0)
+		for _, tier := range m.subscriptionTiers {
+			// Skip free tiers and the highest tier (already processed)
+			if tier.Price == "0" || tier.DataLimit == highestTier.DataLimit {
+				continue
+			}
+
+			price := m.parseSats(tier.Price)
+			if price > 0 {
+				sortedTiers = append(sortedTiers, tierInfo{tier: tier, price: price})
+			}
+		}
+
+		// Sort tiers by price (descending)
+		for i := 0; i < len(sortedTiers)-1; i++ {
+			for j := i + 1; j < len(sortedTiers); j++ {
+				if sortedTiers[i].price < sortedTiers[j].price {
+					sortedTiers[i], sortedTiers[j] = sortedTiers[j], sortedTiers[i]
+				}
+			}
+		}
+
+		// Get the lowest tier price for later comparison
+		var lowestTierPrice int64 = highestTierPrice
+		if len(sortedTiers) > 0 {
+			lowestTierPrice = sortedTiers[len(sortedTiers)-1].price
+		}
+
+		// Try to use remaining sats for each tier
+		for _, tierInfo := range sortedTiers {
+			if remainingSats >= tierInfo.price {
+				// We can afford this tier
+				tierBytes := m.calculateStorageLimit(tierInfo.tier.DataLimit)
+
+				// Add storage
+				storageInfo.TotalBytes += tierBytes
+
+				log.Printf("Using %d sats for additional tier: %s (adding %d bytes)",
+					tierInfo.price, tierInfo.tier.DataLimit, tierBytes)
+
+				// Subtract from remaining sats
+				remainingSats -= tierInfo.price
+
+				// If we run out of sats, break
+				if remainingSats < lowestTierPrice {
+					break
+				}
+			}
+		}
+
+		// Update the NIP-88 event with the additional storage
+		if storageInfo.TotalBytes > totalNewStorage+prevBytes {
+			err = m.createOrUpdateNIP88Event(&lib.Subscriber{
+				Npub:    npub,
+				Address: address,
+			}, highestTier.DataLimit, endDate, &storageInfo)
+
+			if err != nil {
+				return fmt.Errorf("failed to update NIP-88 event with additional storage: %v", err)
+			}
+
+			// Update the paid subscribers table
+			m.updatePaidSubscriberRecord(npub, highestTier.DataLimit, endDate, &storageInfo)
+		}
+	}
+
 	// Credit remainder if any
-	if remainder > 0 {
-		if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, remainder); err != nil {
-			log.Printf("Warning: failed to save remainder credit of %d sats: %v", remainder, err)
+	if remainingSats > 0 {
+		if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, remainingSats); err != nil {
+			log.Printf("Warning: failed to save remainder credit of %d sats: %v", remainingSats, err)
 		} else {
-			log.Printf("Credited remainder of %d sats to user account", remainder)
+			log.Printf("Credited remainder of %d sats to user account", remainingSats)
+
+			// Check if the stored credit can be used to purchase additional tier capacity
+			_, err := m.checkAndApplyCredit(npub, address, &storageInfo, endDate)
+			if err != nil {
+				log.Printf("Warning: error checking credit for additional tier purchase: %v", err)
+			}
+		}
+	}
+
+	// Final update to ensure credit tag is included in NIP-88 event
+	finalCredit, err := m.store.GetStatsStore().GetSubscriberCredit(npub)
+	if err == nil && finalCredit > 0 {
+		// One last update to ensure the credit is reflected in the NIP-88 event
+		err = m.createOrUpdateNIP88Event(&lib.Subscriber{
+			Npub:    npub,
+			Address: address,
+		}, highestTier.DataLimit, endDate, &storageInfo)
+
+		if err != nil {
+			log.Printf("Warning: failed to update final NIP-88 event with credit: %v", err)
+		} else {
+			log.Printf("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
 		}
 	}
 
@@ -1201,6 +1335,77 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 
 	log.Printf("Successfully updated kind 888 event for pubkey %s", pubkey)
 	return updatedEvent, nil
+}
+
+// checkAndApplyCredit checks if the subscriber's credit can be used to purchase any tier
+// and applies it if possible. It returns the remaining credit and any error.
+func (m *SubscriptionManager) checkAndApplyCredit(
+	npub string,
+	address string,
+	storageInfo *StorageInfo,
+	endDate time.Time,
+) (int64, error) {
+	// Get current credit
+	credit, err := m.store.GetStatsStore().GetSubscriberCredit(npub)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get subscriber credit: %v", err)
+	}
+
+	// If credit is too low, just return it
+	if credit <= 0 {
+		return credit, nil
+	}
+
+	log.Printf("Checking if credit of %d sats can be used for any tier", credit)
+
+	// Try to find a tier that the credit can afford
+	tier, err := m.findMatchingTier(credit)
+	if err != nil {
+		// No matching tier, just return the credit
+		log.Printf("No tier found for credit of %d sats", credit)
+		return credit, nil
+	}
+
+	// We found a tier! Apply it
+	tierPrice := m.parseSats(tier.Price)
+	tierBytes := m.calculateStorageLimit(tier.DataLimit)
+
+	// Add storage
+	prevBytes := storageInfo.TotalBytes
+	storageInfo.TotalBytes += tierBytes
+	storageInfo.UpdatedAt = time.Now()
+
+	log.Printf("Using credit of %d sats for tier: %s (adding %d bytes to existing %d bytes, new total: %d bytes)",
+		tierPrice, tier.DataLimit, tierBytes, prevBytes, storageInfo.TotalBytes)
+
+	// Update the NIP-88 event
+	err = m.createOrUpdateNIP88Event(&lib.Subscriber{
+		Npub:    npub,
+		Address: address,
+	}, tier.DataLimit, endDate, storageInfo)
+
+	if err != nil {
+		return credit, fmt.Errorf("failed to update NIP-88 event with credit-purchased tier: %v", err)
+	}
+
+	// Update paid subscriber record
+	m.updatePaidSubscriberRecord(npub, tier.DataLimit, endDate, storageInfo)
+
+	// Update credit in database
+	remainingCredit := credit - tierPrice
+	if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, remainingCredit); err != nil {
+		return remainingCredit, fmt.Errorf("failed to update credit after using for tier: %v", err)
+	}
+
+	log.Printf("Successfully used %d sats from credit for tier %s, remaining credit: %d",
+		tierPrice, tier.DataLimit, remainingCredit)
+
+	// Check if remaining credit can be used for another tier recursively
+	if remainingCredit > 0 {
+		return m.checkAndApplyCredit(npub, address, storageInfo, endDate)
+	}
+
+	return remainingCredit, nil
 }
 
 // updatePaidSubscriberRecord is a helper method to update the PaidSubscriber table
