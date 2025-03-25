@@ -138,8 +138,8 @@ func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, e
 		return FilterResult{Pass: true, Reason: "Error parsing response"}, fmt.Errorf("error parsing Ollama response: %v", err)
 	}
 
-	// Log the raw response
-	log.Printf("Ollama raw response: %s", ollamaResp.Response)
+	// Log the raw response with distinctive formatting
+	log.Printf("[CONTENT FILTER] OLLAMA RESPONSE: %s", ollamaResp.Response)
 
 	// Process the response to determine true/false
 	responseLower := strings.ToLower(strings.TrimSpace(ollamaResp.Response))
@@ -167,7 +167,7 @@ func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, e
 	}
 
 	// If we couldn't find a clear true/false, default to false (safer)
-	log.Printf("Could not determine clear true/false from response: %s", ollamaResp.Response)
+	log.Printf("[CONTENT FILTER] UNCLEAR RESPONSE: %s", ollamaResp.Response)
 	return FilterResult{
 		Pass:   false,
 		Reason: fmt.Sprintf("Default filter: Unclear model response for \"%s\"", contentPreview),

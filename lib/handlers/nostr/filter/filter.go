@@ -188,7 +188,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Get user's filter preferences
 			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
 			if err == nil && pref.Enabled && pref.Instructions != "" {
-				log.Printf("Applying content filter for user %s", connPubkey)
+				log.Printf("[CONTENT FILTER] APPLYING FILTER FOR USER: %s", connPubkey)
 
 				// Separate filterable (kind 1) and non-filterable events
 				var filterableEvents []*nostr.Event
@@ -199,7 +199,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						filterableEvents = append(filterableEvents, e)
 					} else {
 						nonFilterableEvents = append(nonFilterableEvents, e)
-						log.Printf("EXEMPT from filtering: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)",
+						log.Printf("[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)",
 							e.ID, e.Kind, e.PubKey)
 					}
 				}
@@ -208,9 +208,9 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				originalCount := len(filterableEvents)
 
 				// Log event details before filtering for diagnostics
-				log.Printf("Before filtering: Processing %d filterable events for user %s", originalCount, connPubkey)
+				log.Printf("[CONTENT FILTER] PROCESSING: %d filterable events for user %s", originalCount, connPubkey)
 				for _, e := range filterableEvents {
-					log.Printf("Event to filter: ID=%s, Kind=%d, PubKey=%s, Content (first 50 chars): %s",
+					log.Printf("[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s",
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
@@ -224,20 +224,20 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
 					} else {
 						// Log which events passed filtering
-						log.Printf("Events that passed filtering:")
+						log.Printf("[CONTENT FILTER] EVENTS THAT PASSED FILTERING:")
 						for _, e := range filteredEvents {
-							log.Printf("PASSED: ID=%s, Kind=%d, PubKey=%s", e.ID, e.Kind, e.PubKey)
+							log.Printf("[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s", e.ID, e.Kind, e.PubKey)
 						}
 
 						// Combine filtered events with non-filterable events
 						uniqueEvents = append(nonFilterableEvents, filteredEvents...)
-						log.Printf("Filtered events: %d/%d filterable events passed filter, %d exempt events",
+						log.Printf("[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events",
 							len(filteredEvents), originalCount, len(nonFilterableEvents))
 					}
 				} else {
 					// No filterable events, just use non-filterable ones
 					uniqueEvents = nonFilterableEvents
-					log.Printf("No filterable events to process, %d exempt events passed through", len(nonFilterableEvents))
+					log.Printf("[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through", len(nonFilterableEvents))
 				}
 			} else {
 				log.Printf("Content filtering not enabled for user %s", connPubkey)
