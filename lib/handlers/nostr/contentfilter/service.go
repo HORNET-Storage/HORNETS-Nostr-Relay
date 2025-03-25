@@ -4,27 +4,29 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// Service handles communication with the Nest Feeder API
+// Service handles direct communication with Ollama for content filtering
 type Service struct {
-	apiURL     string
-	client     *http.Client
-	cache      *Cache
-	enabled    bool
-	filterKind []int // Event kinds that should be filtered
+	ollamaURL   string
+	ollamaModel string
+	client      *http.Client
+	cache       *Cache
+	enabled     bool
+	filterKind  []int // Event kinds that should be filtered
 }
 
 // ServiceConfig defines the configuration options for the filter service
 type ServiceConfig struct {
 	APIURL     string
+	Model      string
 	Timeout    time.Duration
 	CacheSize  int
 	CacheTTL   time.Duration
@@ -36,7 +38,7 @@ type ServiceConfig struct {
 func NewService(config ServiceConfig) *Service {
 	// Use default values if not provided
 	if config.Timeout == 0 {
-		config.Timeout = 500 * time.Millisecond
+		config.Timeout = 10 * time.Second
 	}
 	if config.CacheSize == 0 {
 		config.CacheSize = 10000
@@ -47,13 +49,17 @@ func NewService(config ServiceConfig) *Service {
 	if len(config.FilterKind) == 0 {
 		config.FilterKind = []int{1} // Default to only filtering kind 1 (text notes)
 	}
+	if config.Model == "" {
+		config.Model = "gemma3:1b" // Default model
+	}
 
 	return &Service{
-		apiURL:     config.APIURL,
-		client:     &http.Client{Timeout: config.Timeout},
-		cache:      NewCache(config.CacheSize, config.CacheTTL),
-		enabled:    config.Enabled,
-		filterKind: config.FilterKind,
+		ollamaURL:   config.APIURL,
+		ollamaModel: config.Model,
+		client:      &http.Client{Timeout: config.Timeout},
+		cache:       NewCache(config.CacheSize, config.CacheTTL),
+		enabled:     config.Enabled,
+		filterKind:  config.FilterKind,
 	}
 }
 
@@ -67,7 +73,7 @@ func (s *Service) ShouldFilterKind(kind int) bool {
 	return false
 }
 
-// FilterEvent filters a single event using the Nest Feeder API
+// FilterEvent filters a single event using Ollama directly
 func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterResult, error) {
 	// Skip if filtering is disabled or event kind shouldn't be filtered
 	if !s.enabled || !s.ShouldFilterKind(event.Kind) {
@@ -83,28 +89,13 @@ func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterRe
 		return result, nil
 	}
 
-	// Prepare request payload
-	payload := FilterRequest{
-		CustomInstruction: instructions,
-		EventData:         event,
-	}
+	// Build prompt for Ollama
+	prompt := BuildPrompt(event.Content, instructions)
 
-	jsonData, err := json.Marshal(payload)
+	// Call Ollama directly
+	result, err := s.callOllama(event, prompt)
 	if err != nil {
-		return FilterResult{Pass: true, Reason: "Error marshaling request"}, fmt.Errorf("error marshaling request: %v", err)
-	}
-
-	// Send request to Nest Feeder
-	resp, err := s.client.Post(s.apiURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return FilterResult{Pass: true, Reason: "API error"}, fmt.Errorf("error calling Nest Feeder API: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Parse response
-	var result FilterResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return FilterResult{Pass: true, Reason: "Error parsing response"}, fmt.Errorf("error parsing API response: %v", err)
+		return FilterResult{Pass: true, Reason: "API error"}, fmt.Errorf("error calling Ollama API: %v", err)
 	}
 
 	// Cache the result
@@ -114,7 +105,76 @@ func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterRe
 	return result, nil
 }
 
-// FilterEvents applies filtering to a batch of events based on custom instructions
+// callOllama sends a direct request to Ollama API and processes the response
+func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, error) {
+	// Prepare request payload
+	ollamaReq := OllamaRequest{
+		Model:     s.ollamaModel,
+		Prompt:    prompt,
+		Stream:    false,
+		MaxTokens: 100, // Limit token generation
+	}
+
+	jsonData, err := json.Marshal(ollamaReq)
+	if err != nil {
+		return FilterResult{Pass: true, Reason: "Error marshaling request"}, fmt.Errorf("error marshaling Ollama request: %v", err)
+	}
+
+	// Send request to Ollama
+	resp, err := s.client.Post(s.ollamaURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return FilterResult{Pass: true, Reason: "API error"}, fmt.Errorf("error calling Ollama API: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return FilterResult{Pass: true, Reason: "API error"}, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
+	}
+
+	// Parse response
+	var ollamaResp OllamaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
+		return FilterResult{Pass: true, Reason: "Error parsing response"}, fmt.Errorf("error parsing Ollama response: %v", err)
+	}
+
+	// Log the raw response
+	log.Printf("Ollama raw response: %s", ollamaResp.Response)
+
+	// Process the response to determine true/false
+	responseLower := strings.ToLower(strings.TrimSpace(ollamaResp.Response))
+
+	// Generate a more informative reason based on the content
+	// Take first 30 chars of content for context
+	contentPreview := event.Content
+	if len(contentPreview) > 30 {
+		contentPreview = contentPreview[:30] + "..."
+	}
+
+	// Look for "true" or "false" in the response
+	if strings.Contains(responseLower, "true") {
+		// For approved content
+		return FilterResult{
+			Pass:   true,
+			Reason: fmt.Sprintf("Included: Content about \"%s\" matches user preferences", contentPreview),
+		}, nil
+	} else if strings.Contains(responseLower, "false") {
+		// For filtered content
+		return FilterResult{
+			Pass:   false,
+			Reason: fmt.Sprintf("Filtered: Content about \"%s\" doesn't match user preferences", contentPreview),
+		}, nil
+	}
+
+	// If we couldn't find a clear true/false, default to false (safer)
+	log.Printf("Could not determine clear true/false from response: %s", ollamaResp.Response)
+	return FilterResult{
+		Pass:   false,
+		Reason: fmt.Sprintf("Default filter: Unclear model response for \"%s\"", contentPreview),
+	}, nil
+}
+
+// FilterEvents applies filtering to multiple events based on custom instructions
 func (s *Service) FilterEvents(events []*nostr.Event, instructions string) ([]*nostr.Event, error) {
 	if !s.enabled || instructions == "" {
 		return events, nil
@@ -179,7 +239,7 @@ func (s *Service) FilterEvents(events []*nostr.Event, instructions string) ([]*n
 	return filteredEvents, nil
 }
 
-// FilterEventsBatch sends a batch of events to be filtered with the same instructions
+// FilterEventsBatch efficiently processes multiple events in batches
 func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, batchSize int) ([]*nostr.Event, error) {
 	if !s.enabled || len(events) == 0 || instructions == "" {
 		return events, nil
@@ -236,40 +296,43 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 				}
 			}
 
-			// If we have uncached events, make a batch API call
+			// Process uncached events individually (no API batch endpoint with direct Ollama integration)
 			if len(uncachedEvents) > 0 {
-				log.Printf("Batch %d: Making API call for %d uncached events", index, len(uncachedEvents))
-				results, err := s.makeBatchAPICall(uncachedEvents, instructions)
-				if err != nil {
-					// On error, pass all events through
-					log.Printf("Error in batch API call for batch %d: %v", index, err)
-					mutex.Lock()
-					filteredEvents = append(filteredEvents, filteredBatch...)
-					mutex.Unlock()
-					return
-				}
+				log.Printf("Batch %d: Processing %d uncached events individually", index, len(uncachedEvents))
 
-				// Process results and update cache
-				for i, event := range uncachedEvents {
-					if i < len(results) {
-						// Store in cache
-						s.cache.Set(event.ID, instructionsHash, results[i])
+				// Create a semaphore to limit concurrent API calls
+				batchSemaphore := make(chan struct{}, 5)
 
-						// Add to filtered events if it passes
-						if results[i].Pass {
+				// Process each event in parallel
+				for _, event := range uncachedEvents {
+					wg.Add(1)
+					go func(e *nostr.Event) {
+						defer wg.Done()
+
+						// Acquire semaphore
+						batchSemaphore <- struct{}{}
+						defer func() { <-batchSemaphore }()
+
+						// Filter the event
+						result, err := s.FilterEvent(e, instructions)
+						if err != nil {
+							log.Printf("Error filtering event %s in batch %d: %v", e.ID, index, err)
+							// On error, pass the event through
 							mutex.Lock()
-							filteredEvents = append(filteredEvents, event)
+							filteredEvents = append(filteredEvents, e)
+							mutex.Unlock()
+							return
+						}
+
+						// Only include events that pass the filter
+						if result.Pass {
+							mutex.Lock()
+							filteredEvents = append(filteredEvents, e)
 							mutex.Unlock()
 						} else {
-							log.Printf("Filtered out event %s: %s", event.ID, results[i].Reason)
+							log.Printf("Filtered out event %s: %s", e.ID, result.Reason)
 						}
-					} else {
-						// If we got fewer results than events, pass the remaining events through
-						log.Printf("Missing result for event %s in batch response, passing through", event.ID)
-						mutex.Lock()
-						filteredEvents = append(filteredEvents, event)
-						mutex.Unlock()
-					}
+					}(event)
 				}
 			}
 
@@ -290,127 +353,6 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 
 	wg.Wait()
 	return filteredEvents, nil
-}
-
-// makeBatchAPICall sends a batch of events to the API
-func (s *Service) makeBatchAPICall(events []*nostr.Event, instructions string) ([]FilterResult, error) {
-	// Prepare batch request payload
-	payload := BatchFilterRequest{
-		CustomInstruction: instructions,
-		Events:            make([]interface{}, len(events)),
-	}
-
-	// Convert events to interface{} and log the events being sent
-	log.Printf("Preparing batch API call with %d events", len(events))
-	for i, event := range events {
-		payload.Events[i] = event
-		log.Printf("Batch event %d: ID=%s, Kind=%d, PubKey=%s", i, event.ID, event.Kind, event.PubKey)
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling batch request: %v", err)
-	}
-
-	// Log the API endpoint we're using
-	log.Printf("Sending batch request to: %s", s.apiURL+"/batch")
-
-	// Send request to Nest Feeder API
-	resp, err := s.client.Post(s.apiURL+"/batch", "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		// If batch endpoint fails, try falling back to processing events individually
-		log.Printf("Batch API call failed, falling back to individual processing: %v", err)
-		return s.fallbackToIndividualProcessing(events, instructions)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Batch API returned non-OK status: %d", resp.StatusCode)
-		// Try to read error message from response body
-		bodyBytes, readErr := io.ReadAll(resp.Body)
-		if readErr == nil {
-			log.Printf("Response body: %s", string(bodyBytes))
-		}
-		return s.fallbackToIndividualProcessing(events, instructions)
-	}
-
-	// Parse batch response
-	var batchResponse BatchFilterResponse
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	log.Printf("Raw API response: %s", string(bodyBytes))
-
-	if err := json.Unmarshal(bodyBytes, &batchResponse); err != nil {
-		return nil, fmt.Errorf("error parsing batch API response: %v", err)
-	}
-
-	// Log the results received
-	log.Printf("Received %d results from batch API", len(batchResponse.Results))
-	for i, result := range batchResponse.Results {
-		if i < len(events) {
-			log.Printf("Result for event %s: Pass=%v, Reason=%s",
-				events[i].ID, result.Pass, result.Reason)
-		} else {
-			log.Printf("Extra result %d: Pass=%v, Reason=%s",
-				i, result.Pass, result.Reason)
-		}
-	}
-
-	// Ensure we have results for all events
-	if len(batchResponse.Results) != len(events) {
-		log.Printf("Warning: Received %d results for %d events", len(batchResponse.Results), len(events))
-		// Pad the results if needed
-		for len(batchResponse.Results) < len(events) {
-			log.Printf("Adding missing result for index %d", len(batchResponse.Results))
-			batchResponse.Results = append(batchResponse.Results, FilterResult{
-				Pass:   true,
-				Reason: "Missing result in batch response",
-			})
-		}
-	}
-
-	return batchResponse.Results, nil
-}
-
-// fallbackToIndividualProcessing processes events individually when the batch API fails
-func (s *Service) fallbackToIndividualProcessing(events []*nostr.Event, instructions string) ([]FilterResult, error) {
-	var results []FilterResult
-	var wg sync.WaitGroup
-	var mutex sync.Mutex
-	semaphore := make(chan struct{}, 5) // Limit concurrency for fallback
-
-	// Process events in parallel
-	for _, event := range events {
-		wg.Add(1)
-		go func(e *nostr.Event) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			// Use single event processing
-			result, err := s.FilterEvent(e, instructions)
-			if err != nil {
-				log.Printf("Error in fallback processing for event %s: %v", e.ID, err)
-				// On error, let the event pass
-				mutex.Lock()
-				results = append(results, FilterResult{
-					Pass:   true,
-					Reason: "Error in fallback processing",
-				})
-				mutex.Unlock()
-				return
-			}
-
-			mutex.Lock()
-			results = append(results, result)
-			mutex.Unlock()
-		}(event)
-	}
-
-	wg.Wait()
-	return results, nil
 }
 
 // Helper function to split events into batches

@@ -12,21 +12,19 @@ type FilterResult struct {
 	Reason string `json:"reason"`
 }
 
-// FilterRequest represents the structured request format for Nest Feeder
-type FilterRequest struct {
-	CustomInstruction string      `json:"custom_instruction"`
-	EventData         interface{} `json:"event_data"`
+// OllamaRequest represents the request structure for Ollama API
+type OllamaRequest struct {
+	Model     string `json:"model"`
+	Prompt    string `json:"prompt"`
+	Stream    bool   `json:"stream"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
-// BatchFilterRequest represents a batch of events to be filtered with the same custom instruction
-type BatchFilterRequest struct {
-	CustomInstruction string        `json:"custom_instruction"`
-	Events            []interface{} `json:"events"`
-}
-
-// BatchFilterResponse represents the response for a batch filter request
-type BatchFilterResponse struct {
-	Results []FilterResult `json:"results"`
+// OllamaResponse represents the response structure from Ollama API
+type OllamaResponse struct {
+	Model     string `json:"model"`
+	CreatedAt string `json:"created_at"`
+	Response  string `json:"response"`
 }
 
 // CacheItem represents a cached filter result with expiration
@@ -45,4 +43,25 @@ Rule 3: Include thoughtful discussions, even if controversial, as long as they'r
 func GenerateInstructionsHash(instructions string) string {
 	hash := sha256.Sum256([]byte(instructions))
 	return hex.EncodeToString(hash[:])
+}
+
+// BuildPrompt creates a prompt that combines the custom instruction with clear guidance
+func BuildPrompt(content string, customInstruction string) string {
+	// If custom instruction is empty, use a default
+	if customInstruction == "" {
+		customInstruction = DefaultFilterInstructions
+	}
+
+	// Create the full prompt with clear instructions on how to respond
+	return `
+` + customInstruction + `
+
+Content to evaluate: "` + content + `"
+
+IMPORTANT RESPONSE INSTRUCTIONS:
+- Your response must be ONLY "true" or "false" without any additional text, explanation, or quotation marks.
+- Respond with "true" if the content should appear in the user's feed according to the instructions.
+- Respond with "false" if it should be filtered out.
+- Do not include any reasoning, explanations, or other text in your response.
+- The reason for your decision will be extracted separately, focus only on the true/false response.`
 }

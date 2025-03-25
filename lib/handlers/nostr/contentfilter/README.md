@@ -1,10 +1,10 @@
-# Nest Feeder Content Filtering for Nostr
+# Content Filtering for Nostr with Direct Ollama Integration
 
-This package implements personalized content filtering for Nostr events via integration with the Nest Feeder API. It provides users with the ability to create customized feeds based on their personal preferences, while maintaining the decentralized nature of Nostr.
+This package implements personalized content filtering for Nostr events via direct integration with Ollama LLMs. It provides users with the ability to create customized feeds based on their personal preferences, while maintaining the decentralized nature of Nostr.
 
 ## Overview
 
-Nest Feeder is a personalized content filter for Nostr events that enables users to create customized feeds based on their preferences. It uses local LLMs via Ollama to determine whether content matches a user's interests.
+The content filtering system enables users to create customized feeds based on their preferences by directly leveraging local Large Language Models (LLMs) via Ollama. This streamlined architecture eliminates the need for an intermediate API server.
 
 ```mermaid
 flowchart TD
@@ -12,8 +12,8 @@ flowchart TD
     User -->|REQ Filter| Relay
     Relay -->|Check Kind 10010| Store[(Event Store)]
     Relay -->|Query Events| Store
-    Relay -->|Filter Events| NestFeeder[Nest Feeder API]
-    NestFeeder -->|Response| Relay
+    Relay -->|Filter Events| Ollama[Ollama LLM]
+    Ollama -->|Response| Relay
     Relay -->|Filtered Events| User
 ```
 
@@ -85,7 +85,7 @@ This implementation includes several security measures:
 
 2. **No Content Leakage**: When content is filtered, the relay simply doesn't send it to you - there's no indication to other users that something was filtered.
 
-3. **Local Processing**: The Nest Feeder API uses local LLMs via Ollama, so your data isn't sent to large cloud providers.
+3. **Local Processing**: Direct integration with Ollama LLM means all content filtering happens locally, so your data isn't sent to large cloud providers.
 
 4. **Optional Usage**: Filtering is fully opt-in. If you never send a kind 10010 event, nothing changes in your Nostr experience.
 
@@ -95,19 +95,21 @@ The following settings can be configured in `config.json`:
 
 ```json
 {
-  "nest_feeder_url": "http://localhost:8080/moderate",
-  "nest_feeder_timeout": 500,
-  "nest_feeder_cache_size": 10000,
-  "nest_feeder_cache_ttl": 60,
-  "nest_feeder_enabled": true
+  "ollama_url": "http://localhost:11434/api/generate",
+  "ollama_model": "gemma3:1b",
+  "ollama_timeout": 10000,
+  "content_filter_cache_size": 10000,
+  "content_filter_cache_ttl": 60,
+  "content_filter_enabled": true
 }
 ```
 
-- `nest_feeder_url`: URL of the Nest Feeder API endpoint
-- `nest_feeder_timeout`: API request timeout in milliseconds
-- `nest_feeder_cache_size`: Maximum number of cached filter results
-- `nest_feeder_cache_ttl`: Cache time-to-live in minutes
-- `nest_feeder_enabled`: Master switch to enable/disable the feature
+- `ollama_url`: URL of the Ollama API endpoint
+- `ollama_model`: LLM model to use (e.g., gemma3:1b, llama3:8b, etc.)
+- `ollama_timeout`: API request timeout in milliseconds (recommended: 10000ms or more)
+- `content_filter_cache_size`: Maximum number of cached filter results
+- `content_filter_cache_ttl`: Cache time-to-live in minutes
+- `content_filter_enabled`: Master switch to enable/disable the feature
 
 ## Technical Details
 

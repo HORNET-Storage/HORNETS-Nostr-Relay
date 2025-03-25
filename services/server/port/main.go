@@ -140,12 +140,13 @@ func init() {
 	viper.SetDefault("freeTierEnabled", true)
 	viper.SetDefault("freeTierLimit", "100 MB per month")
 
-	// Nest Feeder API settings
-	viper.SetDefault("nest_feeder_url", "http://localhost:8080/moderate")
-	viper.SetDefault("nest_feeder_timeout", 10000)
-	viper.SetDefault("nest_feeder_cache_size", 10000)
-	viper.SetDefault("nest_feeder_cache_ttl", 60)
-	viper.SetDefault("nest_feeder_enabled", true)
+	// Content filtering settings (direct Ollama integration)
+	viper.SetDefault("ollama_url", "http://localhost:11434/api/generate")
+	viper.SetDefault("ollama_model", "gemma3:1b")
+	viper.SetDefault("ollama_timeout", 10000)
+	viper.SetDefault("content_filter_cache_size", 10000)
+	viper.SetDefault("content_filter_cache_ttl", 60)
+	viper.SetDefault("content_filter_enabled", true)
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")

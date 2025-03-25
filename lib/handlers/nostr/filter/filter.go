@@ -83,14 +83,15 @@ func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
 }
 
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
-	// Initialize content filter service
+	// Initialize content filter service with direct Ollama integration
 	filterConfig := contentfilter.ServiceConfig{
-		APIURL:     viper.GetString("nest_feeder_url"),
-		Timeout:    time.Duration(viper.GetInt("nest_feeder_timeout")) * time.Millisecond,
-		CacheSize:  viper.GetInt("nest_feeder_cache_size"),
-		CacheTTL:   time.Duration(viper.GetInt("nest_feeder_cache_ttl")) * time.Minute,
+		APIURL:     viper.GetString("ollama_url"),
+		Model:      viper.GetString("ollama_model"),
+		Timeout:    time.Duration(viper.GetInt("ollama_timeout")) * time.Millisecond,
+		CacheSize:  viper.GetInt("content_filter_cache_size"),
+		CacheTTL:   time.Duration(viper.GetInt("content_filter_cache_ttl")) * time.Minute,
 		FilterKind: []int{1}, // Default to filtering only kind 1 events (text notes)
-		Enabled:    viper.GetBool("nest_feeder_enabled"),
+		Enabled:    viper.GetBool("content_filter_enabled"),
 	}
 
 	// Create the filter service
