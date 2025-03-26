@@ -122,6 +122,28 @@ The following settings can be configured in `config.json`:
 - Parallel processing ensures high throughput even with large event volumes
 - The implementation includes graceful degradation if the API is unavailable
 
+## Colorized Logging
+
+The content filter implementation includes a colorized logging system that makes monitoring and debugging easier:
+
+```
+[CONTENT FILTER] APPLYING FILTER FOR USER: pubkey...
+[CONTENT FILTER] EXEMPT EVENT: ID=abc123... (non-filterable event kind)
+[CONTENT FILTER] EVENT TO FILTER: ID=def456..., Content: "This is the content to filter..."
+[CONTENT FILTER] OLLAMA RESPONSE: true
+[CONTENT FILTER] PASSED: ID=def456...
+[CONTENT FILTER] RESULTS: 2/7 filterable events passed filter, 1 exempt events
+```
+
+Color coding provides visual clarity in logs:
+- **Cyan**: General processing information and event listings
+- **Green**: Events that pass filtering and are included in the feed
+- **Red**: Events that are filtered out and excluded from the feed
+- **Yellow**: Summary results and statistics
+- **Purple**: Unusual or unclear responses from the LLM
+
+This makes it easy to quickly identify which events are being filtered and why, helping with both debugging and verifying that the filter is working correctly.
+
 ## Client Integration
 
 For client developers, no additional integration is required to use this feature. Simply:
