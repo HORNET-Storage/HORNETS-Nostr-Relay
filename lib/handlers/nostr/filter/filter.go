@@ -65,18 +65,39 @@ func getAuthenticatedPubkey() string {
 	return ""
 }
 
+// ANSI color codes for colorized logging
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorBlue   = "\033[34m"
+	ColorPurple = "\033[35m"
+	ColorCyan   = "\033[36m"
+	ColorWhite  = "\033[37m"
+
+	// Bold variants
+	ColorRedBold    = "\033[1;31m"
+	ColorGreenBold  = "\033[1;32m"
+	ColorYellowBold = "\033[1;33m"
+	ColorBlueBold   = "\033[1;34m"
+	ColorPurpleBold = "\033[1;35m"
+	ColorCyanBold   = "\033[1;36m"
+	ColorWhiteBold  = "\033[1;37m"
+)
+
 // addLogging adds detailed logging for debugging
 func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
-	log.Printf("Authenticated pubkey for filter request: %s", connPubkey)
+	log.Printf(ColorBlue+"Authenticated pubkey for filter request: %s"+ColorReset, connPubkey)
 
 	// Log the kinds being requested
 	for i, filter := range reqEnvelope.Filters {
-		log.Printf("Filter #%d requests kinds: %v", i+1, filter.Kinds)
+		log.Printf(ColorCyan+"Filter #%d requests kinds: %v"+ColorReset, i+1, filter.Kinds)
 
 		// Log any 'p' tags that might be filtering by pubkey
 		for tagName, tagValues := range filter.Tags {
 			if tagName == "p" {
-				log.Printf("Filter #%d requests events for pubkeys: %v", i+1, tagValues)
+				log.Printf(ColorCyan+"Filter #%d requests events for pubkeys: %v"+ColorReset, i+1, tagValues)
 			}
 		}
 	}
@@ -188,7 +209,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Get user's filter preferences
 			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
 			if err == nil && pref.Enabled && pref.Instructions != "" {
-				log.Printf("[CONTENT FILTER] APPLYING FILTER FOR USER: %s", connPubkey)
+				log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING FILTER FOR USER: %s"+ColorReset, connPubkey)
 
 				// Separate filterable (kind 1) and non-filterable events
 				var filterableEvents []*nostr.Event
@@ -199,7 +220,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						filterableEvents = append(filterableEvents, e)
 					} else {
 						nonFilterableEvents = append(nonFilterableEvents, e)
-						log.Printf("[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)",
+						log.Printf(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)"+ColorReset,
 							e.ID, e.Kind, e.PubKey)
 					}
 				}
@@ -208,9 +229,9 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				originalCount := len(filterableEvents)
 
 				// Log event details before filtering for diagnostics
-				log.Printf("[CONTENT FILTER] PROCESSING: %d filterable events for user %s", originalCount, connPubkey)
+				log.Printf(ColorCyanBold+"[CONTENT FILTER] PROCESSING: %d filterable events for user %s"+ColorReset, originalCount, connPubkey)
 				for _, e := range filterableEvents {
-					log.Printf("[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s",
+					log.Printf(ColorCyan+"[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s"+ColorReset,
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
@@ -224,23 +245,23 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
 					} else {
 						// Log which events passed filtering
-						log.Printf("[CONTENT FILTER] EVENTS THAT PASSED FILTERING:")
+						log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
 						for _, e := range filteredEvents {
-							log.Printf("[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s", e.ID, e.Kind, e.PubKey)
+							log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
 						}
 
 						// Combine filtered events with non-filterable events
 						uniqueEvents = append(nonFilterableEvents, filteredEvents...)
-						log.Printf("[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events",
+						log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
 							len(filteredEvents), originalCount, len(nonFilterableEvents))
 					}
 				} else {
 					// No filterable events, just use non-filterable ones
 					uniqueEvents = nonFilterableEvents
-					log.Printf("[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through", len(nonFilterableEvents))
+					log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
 				}
 			} else {
-				log.Printf("Content filtering not enabled for user %s", connPubkey)
+				log.Printf(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)
 			}
 		}
 

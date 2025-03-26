@@ -13,6 +13,27 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 )
 
+// ANSI color codes for colorized logging
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorBlue   = "\033[34m"
+	ColorPurple = "\033[35m"
+	ColorCyan   = "\033[36m"
+	ColorWhite  = "\033[37m"
+
+	// Bold variants
+	ColorRedBold    = "\033[1;31m"
+	ColorGreenBold  = "\033[1;32m"
+	ColorYellowBold = "\033[1;33m"
+	ColorBlueBold   = "\033[1;34m"
+	ColorPurpleBold = "\033[1;35m"
+	ColorCyanBold   = "\033[1;36m"
+	ColorWhiteBold  = "\033[1;37m"
+)
+
 // Service handles direct communication with Ollama for content filtering
 type Service struct {
 	ollamaURL   string
@@ -50,7 +71,7 @@ func NewService(config ServiceConfig) *Service {
 		config.FilterKind = []int{1} // Default to only filtering kind 1 (text notes)
 	}
 	if config.Model == "" {
-		config.Model = "gemma3:1b" // Default model
+		config.Model = "gemma3:4b" // Default model
 	}
 
 	return &Service{
@@ -85,7 +106,7 @@ func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterRe
 
 	// Check cache first
 	if result, found := s.cache.Get(event.ID, instructionsHash); found {
-		log.Printf("Cache hit for event %s", event.ID)
+		log.Printf(ColorCyan+"Cache hit for event %s"+ColorReset, event.ID)
 		return result, nil
 	}
 
@@ -100,7 +121,11 @@ func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterRe
 
 	// Cache the result
 	s.cache.Set(event.ID, instructionsHash, result)
-	log.Printf("Cached filter result for event %s, pass=%v, reason=%s", event.ID, result.Pass, result.Reason)
+	if result.Pass {
+		log.Printf(ColorGreen+"Cached filter result for event %s, pass=%v, reason=%s"+ColorReset, event.ID, result.Pass, result.Reason)
+	} else {
+		log.Printf(ColorRed+"Cached filter result for event %s, pass=%v, reason=%s"+ColorReset, event.ID, result.Pass, result.Reason)
+	}
 
 	return result, nil
 }
@@ -138,8 +163,8 @@ func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, e
 		return FilterResult{Pass: true, Reason: "Error parsing response"}, fmt.Errorf("error parsing Ollama response: %v", err)
 	}
 
-	// Log the raw response with distinctive formatting
-	log.Printf("[CONTENT FILTER] OLLAMA RESPONSE: %s", ollamaResp.Response)
+	// Log the raw response with distinctive formatting and color
+	log.Printf(ColorYellowBold+"[CONTENT FILTER] OLLAMA RESPONSE: %s"+ColorReset, ollamaResp.Response)
 
 	// Process the response to determine true/false
 	responseLower := strings.ToLower(strings.TrimSpace(ollamaResp.Response))
@@ -167,7 +192,7 @@ func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, e
 	}
 
 	// If we couldn't find a clear true/false, default to false (safer)
-	log.Printf("[CONTENT FILTER] UNCLEAR RESPONSE: %s", ollamaResp.Response)
+	log.Printf(ColorPurpleBold+"[CONTENT FILTER] UNCLEAR RESPONSE: %s"+ColorReset, ollamaResp.Response)
 	return FilterResult{
 		Pass:   false,
 		Reason: fmt.Sprintf("Default filter: Unclear model response for \"%s\"", contentPreview),
@@ -227,8 +252,9 @@ func (s *Service) FilterEvents(events []*nostr.Event, instructions string) ([]*n
 				mutex.Lock()
 				filteredEvents = append(filteredEvents, e)
 				mutex.Unlock()
+				log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: Event %s matches user preferences"+ColorReset, e.ID)
 			} else {
-				log.Printf("Filtered out event %s: %s", e.ID, result.Reason)
+				log.Printf(ColorRedBold+"[CONTENT FILTER] FILTERED: Event %s - %s"+ColorReset, e.ID, result.Reason)
 			}
 		}(event)
 	}
@@ -247,7 +273,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 
 	// Split events into batches
 	batches := splitIntoBatches(events, batchSize)
-	log.Printf("Processing %d events in %d batches", len(events), len(batches))
+	log.Printf(ColorCyanBold+"[CONTENT FILTER] BATCH PROCESSING: %d events in %d batches"+ColorReset, len(events), len(batches))
 
 	var filteredEvents []*nostr.Event
 	var mutex sync.Mutex
