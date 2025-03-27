@@ -198,6 +198,37 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
+		// Filter out blocked events
+		var filteredEvents []*nostr.Event
+		var blockedCount int
+
+		for _, event := range uniqueEvents {
+			isBlocked, err := store.IsEventBlocked(event.ID)
+			if err != nil {
+				log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
+				// If there's an error, assume not blocked
+				filteredEvents = append(filteredEvents, event)
+				continue
+			}
+
+			if isBlocked {
+				log.Printf(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
+					event.ID, event.Kind, event.PubKey)
+				blockedCount++
+				// Skip this event - it's blocked for moderation reasons
+				continue
+			}
+
+			// Not blocked, add to filtered events
+			filteredEvents = append(filteredEvents, event)
+		}
+
+		// Replace uniqueEvents with the filtered set
+		if blockedCount > 0 {
+			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events"+ColorReset, blockedCount)
+			uniqueEvents = filteredEvents
+		}
+
 		// Get the authenticated pubkey for the current connection
 		connPubkey := getAuthenticatedPubkey()
 
