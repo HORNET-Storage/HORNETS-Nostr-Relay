@@ -17,6 +17,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
@@ -147,6 +148,16 @@ func init() {
 	viper.SetDefault("content_filter_cache_size", 10000)
 	viper.SetDefault("content_filter_cache_ttl", 60)
 	viper.SetDefault("content_filter_enabled", true)
+
+	// Image moderation settings
+	viper.SetDefault("image_moderation_enabled", true)
+	viper.SetDefault("image_moderation_api", "http://localhost:8000/api/moderate")
+	viper.SetDefault("image_moderation_threshold", 0.4)
+	viper.SetDefault("image_moderation_mode", "full")
+	viper.SetDefault("image_moderation_temp_dir", "/tmp/hornets-moderation")
+	viper.SetDefault("image_moderation_check_interval", 30) // seconds
+	viper.SetDefault("image_moderation_timeout", 60)        // seconds
+	viper.SetDefault("image_moderation_concurrency", 5)
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -279,7 +290,52 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to cleanup temp database: %v", err)
 		}
+
+		// Shutdown moderation system if initialized
+		moderation.Shutdown()
 	}()
+
+	// Initialize image moderation system if enabled
+	if viper.GetBool("image_moderation_enabled") {
+		log.Println("Initializing image moderation system...")
+
+		// Get moderation configuration from viper
+		apiEndpoint := viper.GetString("image_moderation_api")
+		threshold := viper.GetFloat64("image_moderation_threshold")
+		mode := viper.GetString("image_moderation_mode")
+		timeout := time.Duration(viper.GetInt("image_moderation_timeout")) * time.Second
+		checkInterval := time.Duration(viper.GetInt("image_moderation_check_interval")) * time.Second
+		tempDir := viper.GetString("image_moderation_temp_dir")
+		concurrency := viper.GetInt("image_moderation_concurrency")
+
+		// Make sure temp directory exists
+		if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(tempDir, 0755); err != nil {
+				log.Printf("Failed to create moderation temp directory: %v", err)
+				tempDir = os.TempDir() // Fallback to system temp dir
+			}
+		}
+
+		// Initialize moderation system
+		err := moderation.InitModeration(
+			store,
+			apiEndpoint,
+			moderation.WithThreshold(threshold),
+			moderation.WithMode(mode),
+			moderation.WithTimeout(timeout),
+			moderation.WithCheckInterval(checkInterval),
+			moderation.WithTempDir(tempDir),
+			moderation.WithConcurrency(concurrency),
+		)
+
+		if err != nil {
+			log.Printf("Failed to initialize image moderation: %v", err)
+		} else {
+			log.Println("Image moderation system initialized successfully")
+		}
+	} else {
+		log.Println("Image moderation system is disabled")
+	}
 
 	// Initialize the global subscription manager
 	log.Println("Initializing global subscription manager...")
