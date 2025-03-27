@@ -55,6 +55,21 @@ type NostrEvent struct {
 	extra map[string]any
 }
 
+// PendingModeration represents an event waiting for image moderation
+type PendingModeration struct {
+	EventID   string    `json:"event_id"`   // Event ID as the primary identifier
+	ImageURLs []string  `json:"image_urls"` // URLs of images to moderate
+	AddedAt   time.Time `json:"added_at"`   // Timestamp when added to queue
+}
+
+// BlockedEvent represents an event that has been blocked due to moderation
+type BlockedEvent struct {
+	EventID     string    `json:"event_id"`     // Event ID as the primary identifier
+	Reason      string    `json:"reason"`       // Reason for blocking
+	BlockedAt   time.Time `json:"blocked_at"`   // Timestamp when it was blocked
+	RetainUntil time.Time `json:"retain_until"` // When to delete (typically 48hrs after blocking)
+}
+
 type DagLeafData struct {
 	PublicKey string
 	Signature string
