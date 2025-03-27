@@ -51,14 +51,15 @@ type NostrEvent struct {
 	Content   string
 	Sig       string
 
-	// anything here will be mashed together with the main event object when serializing
-	extra map[string]any
+	// Extra fields for serialization - this field is used indirectly during JSON serialization
+	// and shouldn't be removed even though it appears unused in static analysis
+	Extra map[string]any `json:"-"` // Fields will be added to the parent object during serialization
 }
 
-// PendingModeration represents an event waiting for image moderation
+// PendingModeration represents an event waiting for media moderation
 type PendingModeration struct {
 	EventID   string    `json:"event_id"`   // Event ID as the primary identifier
-	ImageURLs []string  `json:"image_urls"` // URLs of images to moderate
+	ImageURLs []string  `json:"image_urls"` // URLs of images or videos to moderate (kept as ImageURLs for backward compatibility)
 	AddedAt   time.Time `json:"added_at"`   // Timestamp when added to queue
 }
 

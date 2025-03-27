@@ -19,7 +19,7 @@ type ModerationService struct {
 	Threshold   float64      // Confidence threshold for moderation
 	Mode        string       // Moderation mode (full, fast, etc.)
 	Client      *http.Client // HTTP client for API requests
-	DownloadDir string       // Directory for temporarily downloading images
+	DownloadDir string       // Directory for temporarily downloading media files
 	Enabled     bool         // Whether moderation is enabled
 }
 
@@ -59,8 +59,8 @@ func NewModerationService(endpoint string, threshold float64, mode string, timeo
 	}
 }
 
-// ModerateURL sends an image URL to the moderation API
-func (s *ModerationService) ModerateURL(imageURL string) (*ModerationResponse, error) {
+// ModerateURL sends a media URL to the moderation API
+func (s *ModerationService) ModerateURL(mediaURL string) (*ModerationResponse, error) {
 	if !s.Enabled {
 		// Return default "allow" response if moderation is disabled
 		return &ModerationResponse{
@@ -75,8 +75,8 @@ func (s *ModerationService) ModerateURL(imageURL string) (*ModerationResponse, e
 	// 2. Send the URL directly to the API (depends on API capability)
 
 	// We'll implement option 1 here, as it's more reliable
-	// Download the image
-	imagePath, err := s.downloadImage(imageURL)
+	// Download the media file
+	imagePath, err := s.downloadImage(mediaURL)
 	if err != nil {
 		// If download fails, allow the content to avoid false positives
 		// but log the error
@@ -213,29 +213,46 @@ func (s *ModerationService) ModerateFile(filePath string) (*ModerationResponse, 
 	return &result, nil
 }
 
-// downloadImage downloads an image from a URL to a temporary file
-func (s *ModerationService) downloadImage(imageURL string) (string, error) {
+// downloadMedia downloads media (image or video) from a URL to a temporary file
+func (s *ModerationService) downloadImage(mediaURL string) (string, error) {
 	// Extract filename from URL and add proper extension if missing
-	urlBase := filepath.Base(imageURL)
+	urlBase := filepath.Base(mediaURL)
 	urlBase = strings.Split(urlBase, "?")[0] // Remove query parameters
 
 	// Make sure we have a valid file extension
 	ext := filepath.Ext(urlBase)
 	baseName := strings.TrimSuffix(urlBase, ext)
 
+	// Determine if this is likely a video based on URL
+	isVideoURL := IsVideo(mediaURL)
+
 	// If no extension or invalid, try to detect from URL
-	if ext == "" || (ext != ".jpg" && ext != ".jpeg" && ext != ".png" &&
-		ext != ".gif" && ext != ".webp" && ext != ".svg") {
-		// Try to guess extension from last part of URL
-		if strings.Contains(imageURL, ".jpg") || strings.Contains(imageURL, ".jpeg") {
-			ext = ".jpg"
-		} else if strings.Contains(imageURL, ".png") {
-			ext = ".png"
-		} else if strings.Contains(imageURL, ".gif") {
-			ext = ".gif"
+	if ext == "" || (!isValidImageExt(ext) && !isValidVideoExt(ext)) {
+		// Try to guess extension from URL
+		if isVideoURL {
+			// Check for common video extensions in the URL
+			if strings.Contains(mediaURL, ".mp4") {
+				ext = ".mp4"
+			} else if strings.Contains(mediaURL, ".webm") {
+				ext = ".webm"
+			} else if strings.Contains(mediaURL, ".mov") {
+				ext = ".mov"
+			} else {
+				// Default to .mp4 for videos if we can't determine
+				ext = ".mp4"
+			}
 		} else {
-			// Default to .jpg if we can't determine
-			ext = ".jpg"
+			// Try to guess image extension from URL
+			if strings.Contains(mediaURL, ".jpg") || strings.Contains(mediaURL, ".jpeg") {
+				ext = ".jpg"
+			} else if strings.Contains(mediaURL, ".png") {
+				ext = ".png"
+			} else if strings.Contains(mediaURL, ".gif") {
+				ext = ".gif"
+			} else {
+				// Default to .jpg if we can't determine
+				ext = ".jpg"
+			}
 		}
 	}
 
@@ -243,19 +260,19 @@ func (s *ModerationService) downloadImage(imageURL string) (string, error) {
 	filename := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), baseName, ext)
 	localPath := filepath.Join(s.DownloadDir, filename)
 
-	log.Printf("Downloading image %s to %s", imageURL, localPath)
+	log.Printf("Downloading media %s to %s", mediaURL, localPath)
 
-	// Create a file to save the image
+	// Create a file to save the media
 	file, err := os.Create(localPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create file: %w", err)
 	}
 	defer file.Close()
 
-	// Download the image
-	resp, err := http.Get(imageURL)
+	// Download the media
+	resp, err := http.Get(mediaURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to download image: %w", err)
+		return "", fmt.Errorf("failed to download media: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -266,12 +283,12 @@ func (s *ModerationService) downloadImage(imageURL string) (string, error) {
 
 	// Log content type for debugging
 	contentType := resp.Header.Get("Content-Type")
-	log.Printf("Image content type from server: %s", contentType)
+	log.Printf("Media content type from server: %s", contentType)
 
-	// Save the image to file
+	// Save the media to file
 	size, err := io.Copy(file, resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to save image: %w", err)
+		return "", fmt.Errorf("failed to save media: %w", err)
 	}
 
 	log.Printf("Successfully downloaded %d bytes to %s", size, localPath)
@@ -279,8 +296,22 @@ func (s *ModerationService) downloadImage(imageURL string) (string, error) {
 	return localPath, nil
 }
 
-// validateImageFile checks if a file is a valid image by examining its magic bytes
-// returns the image type as a string (jpg, png, gif, etc.)
+// Helper to check for valid image extensions
+func isValidImageExt(ext string) bool {
+	ext = strings.ToLower(ext)
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" ||
+		ext == ".gif" || ext == ".webp" || ext == ".bmp" || ext == ".svg" || ext == ".avif"
+}
+
+// Helper to check for valid video extensions
+func isValidVideoExt(ext string) bool {
+	ext = strings.ToLower(ext)
+	return ext == ".mp4" || ext == ".webm" || ext == ".mov" ||
+		ext == ".avi" || ext == ".mkv" || ext == ".m4v" || ext == ".ogv" || ext == ".mpg" || ext == ".mpeg"
+}
+
+// validateImageFile checks if a file is a valid media file by examining its magic bytes
+// returns the media type as a string (jpg, png, mp4, etc.)
 func validateImageFile(filePath string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -288,8 +319,9 @@ func validateImageFile(filePath string) (string, error) {
 	}
 	defer file.Close()
 
-	// Read the first few bytes to identify file type
-	header := make([]byte, 12)
+	// Read the first several bytes to identify file type
+	// Need more bytes for some video formats
+	header := make([]byte, 16)
 	_, err = file.Read(header)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file header: %w", err)
@@ -309,15 +341,36 @@ func validateImageFile(filePath string) (string, error) {
 		return "webp", nil // WebP
 	}
 
-	// If we can't identify it, but it has a known image extension, trust the extension
+	// Check for common video format signatures
+	if bytes.HasPrefix(header, []byte{0x00, 0x00, 0x00}) &&
+		(bytes.Equal(header[4:8], []byte{0x66, 0x74, 0x79, 0x70}) || // ftyp
+			bytes.Equal(header[4:8], []byte{0x6D, 0x6F, 0x6F, 0x76})) { // moov
+		return "mp4", nil // MP4 or MOV
+	} else if bytes.HasPrefix(header, []byte{0x1A, 0x45, 0xDF, 0xA3}) {
+		return "webm", nil // WebM or MKV
+	} else if bytes.HasPrefix(header, []byte{0x52, 0x49, 0x46, 0x46}) && // RIFF
+		bytes.Equal(header[8:12], []byte{0x41, 0x56, 0x49, 0x20}) { // AVI
+		return "avi", nil // AVI
+	} else if bytes.HasPrefix(header, []byte{0x00, 0x00, 0x01, 0xBA}) ||
+		bytes.HasPrefix(header, []byte{0x00, 0x00, 0x01, 0xB3}) {
+		return "mpeg", nil // MPEG
+	}
+
+	// If we can't identify it by magic bytes, trust the extension
 	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
-		ext == ".webp" || ext == ".bmp" || ext == ".svg" {
+
+	// Check for image extensions
+	if isValidImageExt(ext) {
 		return strings.TrimPrefix(ext, "."), nil
 	}
 
-	// File doesn't seem to be an image
-	return "", fmt.Errorf("file does not appear to be a valid image")
+	// Check for video extensions
+	if isValidVideoExt(ext) {
+		return strings.TrimPrefix(ext, "."), nil
+	}
+
+	// File doesn't seem to be a recognized media type
+	return "", fmt.Errorf("file does not appear to be a valid media file")
 }
 
 // IsEnabled returns whether the moderation service is enabled

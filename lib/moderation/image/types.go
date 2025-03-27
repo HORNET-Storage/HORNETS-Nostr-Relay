@@ -14,7 +14,7 @@ const (
 	DecisionBlock ModerationType = "BLOCK" // Content levels 4-5 (borderline or explicit)
 )
 
-// ContentLevel represents the severity level of image content
+// ContentLevel represents the severity level of media content
 type ContentLevel int
 
 const (
@@ -27,14 +27,14 @@ const (
 	Level5_Explicit             ContentLevel = 5 // Nudity, sexual activity, pornographic content
 )
 
-// PendingModeration represents an event waiting for image moderation
+// PendingModeration represents an event waiting for media moderation
 type PendingModeration struct {
 	EventID   string    `json:"event_id"`   // Event ID as the primary identifier
-	ImageURLs []string  `json:"image_urls"` // URLs of images to moderate
+	MediaURLs []string  `json:"media_urls"` // URLs of images or videos to moderate (renamed from ImageURLs)
 	AddedAt   time.Time `json:"added_at"`   // Timestamp when added to queue
 }
 
-// ModerationResponse represents the response from the image moderation API
+// ModerationResponse represents the response from the media moderation API
 type ModerationResponse struct {
 	ContentLevel        int      `json:"content_level"`         // 0-5 severity level
 	IsExplicit          bool     `json:"is_explicit"`           // Whether content is considered explicit

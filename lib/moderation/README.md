@@ -1,14 +1,14 @@
-# Image Moderation System
+# Media Moderation System
 
-The image moderation system in HORNETS-Nostr-Relay allows relay operators to automatically moderate image content shared through the relay. This document explains how the system works and how to configure it.
+The media moderation system in HORNETS-Nostr-Relay allows relay operators to automatically moderate image and video content shared through the relay. This document explains how the system works and how to configure it.
 
 ## Overview
 
-The image moderation system works as follows:
+The media moderation system works as follows:
 
-1. When Nostr events containing images are received, they are stored but marked as "pending moderation"
-2. Images are extracted from the event content (URLs, image tags, etc.)
-3. A background worker processes these pending events by sending image URLs to a moderation API
+1. When Nostr events containing images or videos are received, they are stored but marked as "pending moderation"
+2. Media URLs are extracted from the event content (URLs, imeta/vmeta tags, r tags, etc.)
+3. A background worker processes these pending events by sending media URLs to a moderation API
 4. Based on moderation results, the system either allows the event to be displayed or blocks it
 5. Blocked events are hidden from query results but retained for 48 hours for dispute resolution
 6. After the retention period, blocked events are permanently deleted

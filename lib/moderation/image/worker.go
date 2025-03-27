@@ -10,7 +10,7 @@ import (
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-// Worker handles the background processing of images pending moderation
+// Worker handles the background processing of media (images and videos) pending moderation
 //
 // The Worker is responsible for:
 // 1. Processing pending moderation events in a race-condition-free manner

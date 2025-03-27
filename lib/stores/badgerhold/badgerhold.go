@@ -568,18 +568,31 @@ func eventHasTag(event *nostr.Event, tagName string, tagValues []string) bool {
 	return false
 }
 
-// ExtractImageURLsFromEvent extracts all image URLs from a Nostr event
-func ExtractImageURLsFromEvent(event *nostr.Event) []string {
-	// Common image extensions
+// ExtractMediaURLsFromEvent extracts all media (image and video) URLs from a Nostr event
+func ExtractMediaURLsFromEvent(event *nostr.Event) []string {
+	// Common media file extensions
 	imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif"}
+	videoExtensions := []string{".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".ogv", ".mpg", ".mpeg"}
+	mediaExtensions := append(append([]string{}, imageExtensions...), videoExtensions...)
 
-	// Common image hosting services
-	imageHostingPatterns := []string{
+	// Common media hosting services
+	mediaHostingPatterns := []string{
+		// Image hosting services
 		"imgur.com",
 		"nostr.build/i/",
 		"nostr.build/p/",
 		"image.nostr.build",
 		"i.nostr.build",
+
+		// Video hosting services
+		"nostr.build/v/",
+		"v.nostr.build",
+		"video.nostr.build",
+		"youtube.com/watch",
+		"youtu.be/",
+		"vimeo.com/",
+
+		// Generic hosting
 		"void.cat",
 		"primal.net/",
 		"pbs.twimg.com",
@@ -598,7 +611,7 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 		urlLower := strings.ToLower(url)
 
 		// Check for file extensions
-		for _, ext := range imageExtensions {
+		for _, ext := range mediaExtensions {
 			if strings.HasSuffix(urlLower, ext) && !seen[url] {
 				urls = append(urls, url)
 				seen[url] = true
@@ -606,8 +619,8 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 			}
 		}
 
-		// Check for common image hosting services
-		for _, pattern := range imageHostingPatterns {
+		// Check for common media hosting services
+		for _, pattern := range mediaHostingPatterns {
 			if strings.Contains(urlLower, pattern) && !seen[url] {
 				urls = append(urls, url)
 				seen[url] = true
@@ -624,7 +637,7 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 			urlLower := strings.ToLower(url)
 
 			// Check extensions
-			for _, ext := range imageExtensions {
+			for _, ext := range mediaExtensions {
 				if strings.HasSuffix(urlLower, ext) && !seen[url] {
 					urls = append(urls, url)
 					seen[url] = true
@@ -633,7 +646,7 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 			}
 
 			// Check hosting services
-			for _, pattern := range imageHostingPatterns {
+			for _, pattern := range mediaHostingPatterns {
 				if strings.Contains(urlLower, pattern) && !seen[url] {
 					urls = append(urls, url)
 					seen[url] = true
@@ -643,15 +656,15 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 		}
 	}
 
-	// Extract from imeta tags
+	// Extract from imeta and vmeta tags
 	for _, tag := range event.Tags {
-		if len(tag) >= 2 && tag[0] == "imeta" {
+		if len(tag) >= 2 && (tag[0] == "imeta" || tag[0] == "vmeta") {
 			for _, value := range tag[1:] {
 				if strings.HasPrefix(value, "url ") {
-					imageURL := strings.TrimPrefix(value, "url ")
-					if !seen[imageURL] {
-						urls = append(urls, imageURL)
-						seen[imageURL] = true
+					mediaURL := strings.TrimPrefix(value, "url ")
+					if !seen[mediaURL] {
+						urls = append(urls, mediaURL)
+						seen[mediaURL] = true
 					}
 				}
 			}
@@ -659,6 +672,11 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 	}
 
 	return urls
+}
+
+// For backward compatibility
+func ExtractImageURLsFromEvent(event *nostr.Event) []string {
+	return ExtractMediaURLsFromEvent(event)
 }
 
 func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
