@@ -512,6 +512,44 @@ type ModerationStats struct {
 	RecentReasons     []string   `json:"recent_reasons"`      // Recent blocking reasons
 }
 
+// PaymentNotification represents a notification about a payment/subscription event
+type PaymentNotification struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	PubKey           string    `gorm:"size:128;index" json:"pubkey"`           // Subscriber's public key
+	TxID             string    `gorm:"size:128;index" json:"tx_id"`            // Transaction ID
+	Amount           int64     `gorm:"not null" json:"amount"`                 // Amount in satoshis
+	SubscriptionTier string    `gorm:"size:64" json:"subscription_tier"`       // Tier purchased (e.g. "5GB")
+	IsNewSubscriber  bool      `gorm:"default:false" json:"is_new_subscriber"` // First time subscriber?
+	ExpirationDate   time.Time `json:"expiration_date"`                        // When subscription expires
+	CreatedAt        time.Time `gorm:"autoCreateTime" json:"created_at"`       // When the notification was created
+	IsRead           bool      `gorm:"default:false" json:"is_read"`           // Whether notification is read
+}
+
+// PaymentStats represents statistics about payments and subscriptions
+type PaymentStats struct {
+	TotalRevenue        int64       `json:"total_revenue"`         // Total sats received
+	RevenueToday        int64       `json:"revenue_today"`         // Sats received today
+	ActiveSubscribers   int         `json:"active_subscribers"`    // Currently active subs
+	NewSubscribersToday int         `json:"new_subscribers_today"` // New subscribers today
+	ByTier              []TierStat  `json:"by_tier"`               // Breakdown by tier
+	RecentTransactions  []TxSummary `json:"recent_transactions"`   // Recent payments
+}
+
+// TierStat represents statistics for a specific subscription tier
+type TierStat struct {
+	Tier    string `json:"tier"`    // Subscription tier name
+	Count   int    `json:"count"`   // Number of subscribers
+	Revenue int64  `json:"revenue"` // Total revenue from this tier
+}
+
+// TxSummary represents a simplified transaction summary
+type TxSummary struct {
+	PubKey string    `json:"pubkey"` // Subscriber's public key
+	Amount int64     `json:"amount"` // Amount in satoshis
+	Tier   string    `json:"tier"`   // Tier purchased
+	Date   time.Time `json:"date"`   // Transaction date
+}
+
 // TypeStat represents statistics for a specific content type
 type TypeStat struct {
 	Type  string `json:"type"`  // Content type (image/video)
