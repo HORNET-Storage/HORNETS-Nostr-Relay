@@ -106,4 +106,22 @@ type StatisticsStore interface {
 	GetBlockedContentByType() ([]types.TypeStat, error)
 	GetBlockedContentByUser(limit int) ([]types.UserStat, error)
 	GetRecentBlockingReasons(limit int) ([]string, error)
+
+	// Payment notification management
+	CreatePaymentNotification(notification *types.PaymentNotification) error
+	GetAllPaymentNotifications(page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
+	GetUserPaymentNotifications(pubkey string, page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
+	GetUnreadPaymentNotifications(page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
+	MarkPaymentNotificationAsRead(id uint) error
+	MarkAllPaymentNotificationsAsRead(pubkey string) error
+	DeletePaymentNotification(id uint) error
+
+	// Payment statistics
+	GetPaymentStats() (*types.PaymentStats, error)
+	GetTotalRevenue() (int64, error)
+	GetTodayRevenue() (int64, error)
+	GetActiveSubscribersCount() (int, error)
+	GetNewSubscribersToday() (int, error)
+	GetRevenueByTier() ([]types.TierStat, error)
+	GetRecentTransactions(limit int) ([]types.TxSummary, error)
 }
