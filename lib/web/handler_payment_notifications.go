@@ -94,6 +94,17 @@ func getPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 			})
 		}
 		log.Printf("Raw result from GetAllPaymentNotifications: %+v", notifications)
+
+		// Detailed logging of database result
+		log.Printf("Result data type: %T", notifications)
+		log.Printf("Database response type: %+v", fetchErr)
+
+		// Inspect database connection
+		if store.GetStatsStore() == nil {
+			log.Printf("ERROR: Statistics store is nil")
+		} else {
+			log.Printf("Statistics store type: %T", store.GetStatsStore())
+		}
 	}
 
 	// Log detailed notification information
@@ -118,7 +129,11 @@ func getPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	log.Printf("Sending response with %d notifications", len(notifications))
-	return c.JSON(responseData)
+	log.Printf("Response data: %+v", responseData)
+
+	resp := c.JSON(responseData)
+	log.Printf("Response status: %d", c.Response().StatusCode())
+	return resp
 }
 
 // markPaymentNotificationAsRead marks a payment notification as read
@@ -224,11 +239,16 @@ func createPaymentNotification(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	// Create the notification
+	log.Printf("Creating payment notification: %+v", notification)
+
 	if err := store.GetStatsStore().CreatePaymentNotification(&notification); err != nil {
+		log.Printf("ERROR creating notification: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create notification: " + err.Error(),
 		})
 	}
+
+	log.Printf("Successfully created payment notification with ID: %d", notification.ID)
 
 	return c.JSON(fiber.Map{
 		"success": true,
