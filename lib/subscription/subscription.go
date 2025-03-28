@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -987,14 +988,20 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*lib.Subscript
 	return bestMatch, nil
 }
 
-// parseSats converts price string to satoshis
+// parseSats converts price string to satoshis with proper rounding
 func (m *SubscriptionManager) parseSats(price string) int64 {
-	var sats int64
-	if _, err := fmt.Sscanf(price, "%d", &sats); err != nil {
-		log.Printf("Warning: could not parse price '%s': %v", price, err)
-		return 0
+	var sats float64
+	if _, err := fmt.Sscanf(price, "%f", &sats); err != nil {
+		// Try parsing as integer if float parsing fails
+		var intSats int64
+		if _, err2 := fmt.Sscanf(price, "%d", &intSats); err2 != nil {
+			log.Printf("Warning: could not parse price '%s': %v", price, err)
+			return 0
+		}
+		return intSats
 	}
-	return sats
+	// Use proper rounding for floating point values
+	return int64(math.Round(sats))
 }
 
 // extractStorageInfo gets storage information from NIP-88 event
