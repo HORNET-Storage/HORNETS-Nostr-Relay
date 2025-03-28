@@ -138,6 +138,23 @@ func StartServer(store stores.Store) error {
 		return createModerationNotification(c, store)
 	})
 
+	// Payment notification routes
+	secured.Get("/payment/notifications", func(c *fiber.Ctx) error {
+		return getPaymentNotifications(c, store)
+	})
+	secured.Post("/payment/notifications/read", func(c *fiber.Ctx) error {
+		return markPaymentNotificationAsRead(c, store)
+	})
+	secured.Post("/payment/notifications/read-all", func(c *fiber.Ctx) error {
+		return markAllPaymentNotificationsAsRead(c, store)
+	})
+	secured.Get("/payment/stats", func(c *fiber.Ctx) error {
+		return getPaymentStats(c, store)
+	})
+	secured.Post("/payment/notifications", func(c *fiber.Ctx) error {
+		return createPaymentNotification(c, store)
+	})
+
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
 	if err != nil {
