@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -158,11 +159,63 @@ func processTransaction(store stores.Store, subManager *subscription.Subscriptio
 	}
 
 	// Convert BTC value to satoshis for subscription processing
-	satoshis := int64(txDetails.value * 100_000_000)
+	satoshis := int64(math.Round(txDetails.value * 100_000_000))
 
 	// Process the subscription payment
 	if err := subManager.ProcessPayment(*subscriber.Npub, txID, satoshis); err != nil {
 		return fmt.Errorf("failed to process subscription: %v", err)
+	}
+
+	// Determine if this is a new subscriber or a renewal
+	paidSubscriber, err := store.GetStatsStore().GetPaidSubscriberByNpub(*subscriber.Npub)
+	isNewSubscriber := err != nil || paidSubscriber == nil // If error or nil, it's a new subscriber
+
+	// Get the subscription tier
+	// We'll extract the tier from paid subscriber data or try to determine from amount
+	var tier string
+	expirationDate := time.Now().Add(30 * 24 * time.Hour) // Default to 30 days
+
+	if paidSubscriber != nil {
+		tier = paidSubscriber.Tier
+		expirationDate = paidSubscriber.ExpirationDate
+	} else {
+		// Try to determine the tier based on the payment amount
+		var relaySettings types.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err == nil {
+			for _, tierInfo := range relaySettings.SubscriptionTiers {
+				// Extract price in satoshis
+				if price, err := strconv.ParseInt(tierInfo.Price, 10, 64); err == nil {
+					// If payment amount is within 10% of the tier price, consider it that tier
+					if satoshis >= price*9/10 && satoshis <= price*11/10 {
+						tier = tierInfo.DataLimit
+						break
+					}
+				}
+			}
+		}
+
+		if tier == "" {
+			tier = "unknown" // Fallback if we couldn't determine the tier
+		}
+	}
+
+	// Create payment notification
+	notification := &types.PaymentNotification{
+		PubKey:           *subscriber.Npub,
+		TxID:             txID,
+		Amount:           satoshis,
+		SubscriptionTier: tier,
+		IsNewSubscriber:  isNewSubscriber,
+		ExpirationDate:   expirationDate,
+		// CreatedAt and IsRead will be set automatically
+	}
+
+	if err := store.GetStatsStore().CreatePaymentNotification(notification); err != nil {
+		log.Printf("Warning: failed to create payment notification: %v", err)
+		// Continue processing - non-fatal error
+	} else {
+		log.Printf("Created payment notification for %s: %d sats, tier: %s",
+			*subscriber.Npub, satoshis, tier)
 	}
 
 	log.Printf("Successfully processed subscription payment for %s: %s sats",
@@ -246,7 +299,7 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
 		return nil, fmt.Errorf("failed to load relay settings: %v", err)
 	}
-	
+
 	// Log the tiers for debugging
 	log.Printf("Loading subscription tiers from relay_settings: %+v", relaySettings.SubscriptionTiers)
 	for i, tier := range relaySettings.SubscriptionTiers {
