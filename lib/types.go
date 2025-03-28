@@ -489,3 +489,37 @@ type PaidSubscriber struct {
 	TimestampHornets time.Time `gorm:"autoCreateTime"`       // When the record was created
 	UpdatedAt        time.Time `gorm:"autoUpdateTime"`       // When the record was last updated
 }
+
+// ModerationNotification represents a notification about moderated content
+type ModerationNotification struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	PubKey       string    `gorm:"size:128;index" json:"pubkey"`         // User whose content was moderated
+	EventID      string    `gorm:"size:128;uniqueIndex" json:"event_id"` // ID of the moderated event
+	Reason       string    `gorm:"size:255" json:"reason"`               // Reason for blocking
+	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`     // When the notification was created
+	IsRead       bool      `gorm:"default:false" json:"is_read"`         // Whether the notification has been read
+	ContentType  string    `gorm:"size:64" json:"content_type"`          // Type of content (image/video)
+	MediaURL     string    `gorm:"size:512" json:"media_url"`            // URL of the media that triggered moderation
+	ThumbnailURL string    `gorm:"size:512" json:"thumbnail_url"`        // Optional URL for thumbnail
+}
+
+// ModerationStats represents statistics about moderated content
+type ModerationStats struct {
+	TotalBlocked      int        `json:"total_blocked"`       // Total number of blocked events
+	TotalBlockedToday int        `json:"total_blocked_today"` // Number of events blocked today
+	ByContentType     []TypeStat `json:"by_content_type"`     // Breakdown by content type
+	ByUser            []UserStat `json:"by_user"`             // Top users with blocked content
+	RecentReasons     []string   `json:"recent_reasons"`      // Recent blocking reasons
+}
+
+// TypeStat represents statistics for a specific content type
+type TypeStat struct {
+	Type  string `json:"type"`  // Content type (image/video)
+	Count int    `json:"count"` // Number of items
+}
+
+// UserStat represents moderation statistics for a specific user
+type UserStat struct {
+	PubKey string `json:"pubkey"` // User public key
+	Count  int    `json:"count"`  // Number of blocked items
+}

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 // Worker handles the background processing of media (images and videos) pending moderation
@@ -215,29 +217,60 @@ func (w *Worker) Stop() {
 	w.StopChan <- struct{}{}
 }
 
-// processEvent processes a single event with images for moderation
-func (w *Worker) processEvent(eventID string, imageURLs []string) {
-	log.Printf("Processing event %s with %d images", eventID, len(imageURLs))
+// processEvent processes a single event with media (images and videos) for moderation
+func (w *Worker) processEvent(eventID string, mediaURLs []string) {
+	log.Printf("Processing event %s with %d media URLs", eventID, len(mediaURLs))
 
 	var shouldBlock bool
+	var blockReason string
+	var blockedMediaURL string
+	var contentType string
+	var pubKey string
 
-	// Process each image URL
-	for _, imageURL := range imageURLs {
-		response, err := w.ModerationService.ModerateURL(imageURL)
+	// Get the event to extract the pubkey using QueryEvents with the event ID
+	events, err := w.Store.QueryEvents(nostr.Filter{
+		IDs: []string{eventID},
+	})
+	if err != nil {
+		log.Printf("Error retrieving event %s: %v", eventID, err)
+		return
+	}
+
+	// Check if we found the event
+	if len(events) == 0 {
+		log.Printf("Event %s not found", eventID)
+		return
+	}
+
+	// Get the pubkey from the event
+	pubKey = events[0].PubKey
+
+	// Process each media URL
+	for _, mediaURL := range mediaURLs {
+		// Determine the content type based on the URL
+		mediaType := "image"
+		if isVideoURL(mediaURL) {
+			mediaType = "video"
+		}
+
+		response, err := w.ModerationService.ModerateURL(mediaURL)
 		if err != nil {
-			log.Printf("Error moderating image %s: %v", imageURL, err)
+			log.Printf("Error moderating %s %s: %v", mediaType, mediaURL, err)
 			continue
 		}
 
 		// Log the moderation result
-		log.Printf("Image %s moderation result: level=%d decision=%s confidence=%.2f",
-			imageURL, response.ContentLevel, response.Decision, response.Confidence)
+		log.Printf("%s %s moderation result: level=%d decision=%s confidence=%.2f",
+			strings.Title(mediaType), mediaURL, response.ContentLevel, response.Decision, response.Confidence)
 
 		if response.ShouldBlock() {
 			shouldBlock = true
-			log.Printf("Event %s will be blocked due to image %s (reason: %s)",
-				eventID, imageURL, response.Explanation)
-			break // No need to check other images
+			blockReason = response.Explanation
+			blockedMediaURL = mediaURL
+			contentType = mediaType
+			log.Printf("Event %s will be blocked due to %s %s (reason: %s)",
+				eventID, mediaType, mediaURL, response.Explanation)
+			break // No need to check other media
 		}
 	}
 
@@ -252,6 +285,29 @@ func (w *Worker) processEvent(eventID string, imageURLs []string) {
 		} else {
 			log.Printf("Event %s marked as blocked - will be deleted after 48 hours", eventID)
 		}
+
+		// Create a moderation notification
+		notification := &lib.ModerationNotification{
+			PubKey:      pubKey,
+			EventID:     eventID,
+			Reason:      blockReason,
+			CreatedAt:   time.Now(),
+			IsRead:      false,
+			ContentType: contentType,
+			MediaURL:    blockedMediaURL,
+		}
+
+		statsStore := w.Store.GetStatsStore()
+		if statsStore != nil {
+			err = statsStore.CreateModerationNotification(notification)
+			if err != nil {
+				log.Printf("Error creating moderation notification: %v", err)
+			} else {
+				log.Printf("Created moderation notification for event %s", eventID)
+			}
+		} else {
+			log.Printf("Stats store not available, can't create notification for event %s", eventID)
+		}
 	} else {
 		log.Printf("Event %s passed moderation, available for queries", eventID)
 	}
@@ -259,13 +315,42 @@ func (w *Worker) processEvent(eventID string, imageURLs []string) {
 	// Remove from pending moderation queue regardless of result
 	// Since we're using GetAndRemovePendingModeration, the event might already be removed,
 	// but we'll try to remove it anyway to be safe
-	err := w.Store.RemoveFromPendingModeration(eventID)
+	err = w.Store.RemoveFromPendingModeration(eventID)
 	if err != nil {
 		// Only log the error if it's not a "not found" error
 		if !strings.Contains(err.Error(), "No data found for this key") {
 			log.Printf("Error removing event %s from pending moderation: %v", eventID, err)
 		}
 	}
+}
+
+// isVideoURL checks if a URL is likely to be a video based on extension or patterns
+func isVideoURL(url string) bool {
+	// Check file extensions
+	videoExtensions := []string{".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".ogv", ".mpg", ".mpeg"}
+	for _, ext := range videoExtensions {
+		if strings.HasSuffix(strings.ToLower(url), ext) {
+			return true
+		}
+	}
+
+	// Check for video hosting patterns
+	videoPatterns := []string{
+		"nostr.build/v/",
+		"v.nostr.build",
+		"video.nostr.build",
+		"youtube.com/watch",
+		"youtu.be/",
+		"vimeo.com/",
+	}
+
+	for _, pattern := range videoPatterns {
+		if strings.Contains(strings.ToLower(url), pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Note: Image downloading functionality is handled directly by the ModerationService,

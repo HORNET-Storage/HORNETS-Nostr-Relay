@@ -89,4 +89,21 @@ type StatisticsStore interface {
 	SavePaidSubscriber(subscriber *types.PaidSubscriber) error
 	UpdatePaidSubscriber(subscriber *types.PaidSubscriber) error
 	DeletePaidSubscriber(npub string) error
+
+	// Moderation notification management
+	CreateModerationNotification(notification *types.ModerationNotification) error
+	GetAllModerationNotifications(page, limit int) ([]types.ModerationNotification, *types.PaginationMetadata, error)
+	GetUserModerationNotifications(pubkey string, page, limit int) ([]types.ModerationNotification, *types.PaginationMetadata, error)
+	GetUnreadModerationNotifications(page, limit int) ([]types.ModerationNotification, *types.PaginationMetadata, error)
+	MarkNotificationAsRead(id uint) error
+	MarkAllNotificationsAsRead(pubkey string) error
+	DeleteModerationNotification(id uint) error
+
+	// Moderation statistics
+	GetModerationStats() (*types.ModerationStats, error)
+	GetBlockedContentCount() (int, error)
+	GetTodayBlockedContentCount() (int, error)
+	GetBlockedContentByType() ([]types.TypeStat, error)
+	GetBlockedContentByUser(limit int) ([]types.UserStat, error)
+	GetRecentBlockingReasons(limit int) ([]string, error)
 }

@@ -121,6 +121,23 @@ func StartServer(store stores.Store) error {
 		return HandleGetFilesByType(c, store)
 	})
 
+	// Moderation notification routes
+	secured.Get("/moderation/notifications", func(c *fiber.Ctx) error {
+		return getModerationNotifications(c, store)
+	})
+	secured.Post("/moderation/notifications/read", func(c *fiber.Ctx) error {
+		return markNotificationAsRead(c, store)
+	})
+	secured.Post("/moderation/notifications/read-all", func(c *fiber.Ctx) error {
+		return markAllNotificationsAsRead(c, store)
+	})
+	secured.Get("/moderation/stats", func(c *fiber.Ctx) error {
+		return getModerationStats(c, store)
+	})
+	secured.Post("/moderation/notifications", func(c *fiber.Ctx) error {
+		return createModerationNotification(c, store)
+	})
+
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
 	if err != nil {
