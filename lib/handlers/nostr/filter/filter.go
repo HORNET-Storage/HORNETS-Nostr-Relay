@@ -18,17 +18,25 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
 )
 
-// getAuthenticatedPubkey attempts to extract the authenticated pubkey from session state
-// This function looks for session information in the connection data
-func getAuthenticatedPubkey() string {
-	// In a real implementation, we would access the authenticated pubkey from the
-	// connection state that's stored in the websocket handler.
+// getAuthenticatedPubkey attempts to extract the authenticated pubkey from request data
+// This function first checks if the data contains an auth wrapper, then falls back to sessions
+func getAuthenticatedPubkey(data []byte) string {
+	// First, try to extract pubkey from the wrapper structure
+	var wrapper struct {
+		Request         *nostr.ReqEnvelope `json:"request"`
+		AuthPubkey      string             `json:"auth_pubkey"`
+		IsAuthenticated bool               `json:"is_authenticated"`
+	}
 
-	// For this implementation, we need to use a more direct approach since
-	// we don't have access to the connection state.
-	// Note: The read parameter is not used in this implementation but would be used
-	// in a more complete implementation to access connection-specific data
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if wrapper.IsAuthenticated && wrapper.AuthPubkey != "" {
+			log.Printf("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
+			return wrapper.AuthPubkey
+		}
+	}
 
+	// If we couldn't extract from wrapper, fall back to the old method
 	// Find currently authenticated pubkeys by scanning the session store
 	var authenticatedPubkeys []string
 	sessions.Sessions.Range(func(key, value interface{}) bool {
@@ -132,10 +140,21 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		}
 
 		var request nostr.ReqEnvelope
-		if err := json.Unmarshal(data, &request); err != nil {
-			log.Println("Error unmarshaling request:", err)
-			write("NOTICE", "Error unmarshaling request.")
-			return
+
+		// First try to extract from wrapper structure
+		var wrapper struct {
+			Request *nostr.ReqEnvelope `json:"request"`
+		}
+		if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Request != nil {
+			log.Println("Successfully extracted request from wrapper structure")
+			request = *wrapper.Request
+		} else {
+			// Fall back to direct unmarshal (for backward compatibility)
+			if err := json.Unmarshal(data, &request); err != nil {
+				log.Println("Error unmarshaling request:", err)
+				write("NOTICE", "Error unmarshaling request.")
+				return
+			}
 		}
 
 		// Initialize subscription manager if needed for kind 888 events
@@ -230,7 +249,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		}
 
 		// Get the authenticated pubkey for the current connection
-		connPubkey := getAuthenticatedPubkey()
+		connPubkey := getAuthenticatedPubkey(data)
 
 		// Add detailed logging
 		addLogging(&request, connPubkey)

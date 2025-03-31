@@ -28,7 +28,17 @@ func handleReqMessage(c *websocket.Conn, env *nostr.ReqEnvelope, state *connecti
 		setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
 
 		read := func() ([]byte, error) {
-			return json.Marshal(env)
+			// Create a wrapper structure that includes both the request and authentication info
+			wrapper := struct {
+				Request         *nostr.ReqEnvelope `json:"request"`
+				AuthPubkey      string             `json:"auth_pubkey"`
+				IsAuthenticated bool               `json:"is_authenticated"`
+			}{
+				Request:         env,
+				AuthPubkey:      state.pubkey,
+				IsAuthenticated: state.authenticated,
+			}
+			return json.Marshal(wrapper)
 		}
 
 		write := func(messageType string, params ...interface{}) {
