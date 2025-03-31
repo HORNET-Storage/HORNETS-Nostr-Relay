@@ -264,7 +264,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 
 	switch env := rawMessage.(type) {
 	case *nostr.EventEnvelope:
-		handleEventMessage(c, env)
+		handleEventMessage(c, env, store)
 	case *nostr.ReqEnvelope:
 		handleReqMessage(c, env)
 	case *nostr.AuthEnvelope:

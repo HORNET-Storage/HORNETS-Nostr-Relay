@@ -22,7 +22,7 @@ func StartServer(store stores.Store) error {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, OPTIONS",
+		AllowMethods: "GET, POST, DELETE, PUT, OPTIONS",
 	}))
 
 	// Rate limited routes
@@ -153,6 +153,17 @@ func StartServer(store stores.Store) error {
 	})
 	secured.Post("/payment/notifications", func(c *fiber.Ctx) error {
 		return createPaymentNotification(c, store)
+	})
+
+	// Blocked pubkeys routes
+	secured.Get("/blocked-pubkeys", func(c *fiber.Ctx) error {
+		return getBlockedPubkeys(c, store)
+	})
+	secured.Post("/blocked-pubkeys", func(c *fiber.Ctx) error {
+		return blockPubkey(c, store)
+	})
+	secured.Delete("/blocked-pubkeys/:pubkey", func(c *fiber.Ctx) error {
+		return unblockPubkey(c, store)
 	})
 
 	port := viper.GetString("port")

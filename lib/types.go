@@ -71,6 +71,13 @@ type BlockedEvent struct {
 	RetainUntil time.Time `json:"retain_until"` // When to delete (typically 48hrs after blocking)
 }
 
+// BlockedPubkey represents a pubkey that is blocked from connecting to the relay
+type BlockedPubkey struct {
+	Pubkey    string    `json:"pubkey" badgerhold:"key"`       // Pubkey as the primary identifier
+	Reason    string    `json:"reason"`                        // Reason for blocking
+	BlockedAt time.Time `json:"blocked_at" badgerhold:"index"` // Timestamp when it was blocked
+}
+
 type DagLeafData struct {
 	PublicKey string
 	Signature string

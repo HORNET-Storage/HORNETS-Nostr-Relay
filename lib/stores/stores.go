@@ -40,6 +40,12 @@ type Store interface {
 	DeleteBlockedEventsOlderThan(age int64) (int, error)
 	IsEventBlocked(eventID string) (bool, error)
 
+	// Pubkey Blocking
+	IsBlockedPubkey(pubkey string) (bool, error)
+	BlockPubkey(pubkey string, reason string) error
+	UnblockPubkey(pubkey string) error
+	ListBlockedPubkeys() ([]types.BlockedPubkey, error)
+
 	// Blossom
 	StoreBlob(data []byte, hash []byte, publicKey string) error
 	GetBlob(hash string) ([]byte, error)

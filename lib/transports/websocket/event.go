@@ -9,9 +9,28 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope) {
+func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, store stores.Store) {
+	// Check if the sender's pubkey is blocked before processing
+	if store != nil {
+		isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
+		if err != nil {
+			log.Printf("Error checking if pubkey is blocked: %v", err)
+		} else if isBlocked {
+			log.Printf("Rejected event from blocked pubkey: %s", env.Event.PubKey)
+			write := func(messageType string, params ...interface{}) {
+				response := lib_nostr.BuildResponse(messageType, params)
+				if len(response) > 0 {
+					handleIncomingMessage(c, response)
+				}
+			}
+			// Notify the client that their event was rejected
+			write("OK", env.Event.ID, false, "Event rejected: Pubkey is blocked")
+			return
+		}
+	}
 	settings, err := lib_nostr.LoadRelaySettings()
 	if err != nil {
 		log.Printf("Failed to load relay settings: %v", err)

@@ -20,7 +20,7 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, _ stores.Store) {
+func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, store stores.Store) {
 	write := func(messageType string, params ...interface{}) {
 		response := lib_nostr.BuildResponse(messageType, params)
 		if len(response) > 0 {
@@ -63,6 +63,17 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	if !verifyAuthTags(env.Event.Tags, challenge) {
 		log.Printf("Missing required tags for user %s", env.Event.PubKey)
 		write("OK", env.Event.ID, false, "Error event does not have required tags")
+		return
+	}
+
+	// Check if pubkey is blocked
+	isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
+	if err != nil {
+		log.Printf("Error checking if pubkey is blocked: %v", err)
+		// Continue processing as normal, don't block due to errors
+	} else if isBlocked {
+		log.Printf("Blocked pubkey attempted connection: %s", env.Event.PubKey)
+		write("OK", env.Event.ID, false, "Relay connection rejected: Pubkey is blocked")
 		return
 	}
 
