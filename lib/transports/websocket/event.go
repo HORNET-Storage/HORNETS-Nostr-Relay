@@ -12,8 +12,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, store stores.Store) {
-	// Check if the sender's pubkey is blocked before processing
+func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, state *connectionState, store stores.Store) {
+	// Always check if the event is from a blocked pubkey regardless of authentication
 	if store != nil {
 		isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
 		if err != nil {

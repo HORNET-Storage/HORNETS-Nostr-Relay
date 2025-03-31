@@ -9,9 +9,16 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-func handleReqMessage(c *websocket.Conn, env *nostr.ReqEnvelope) {
+func handleReqMessage(c *websocket.Conn, env *nostr.ReqEnvelope, state *connectionState, store stores.Store) {
+	// If the user is authenticated, check if they're blocked
+	if state.authenticated && terminateIfBlocked(c, state, store) {
+		return
+	}
+
+	// Anonymous read-only access is allowed (no authentication required)
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler("filter")
 

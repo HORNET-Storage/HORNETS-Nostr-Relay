@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
@@ -111,7 +112,10 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	log.Printf("Successfully initialized subscriber %s", env.Event.PubKey)
 	write("OK", env.Event.ID, true, "Subscriber successfully initialized")
 
+	// Store the pubkey in connection state for future block checks
+	state.pubkey = env.Event.PubKey
 	state.authenticated = true
+	state.blockedCheck = time.Now()
 
 	if !state.authenticated {
 		log.Printf("Session established but subscription inactive for %s", env.Event.PubKey)
