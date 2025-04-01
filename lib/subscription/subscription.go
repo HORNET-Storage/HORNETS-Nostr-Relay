@@ -27,9 +27,15 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
-// Global subscription manager instance
-var globalManager *SubscriptionManager
-var globalManagerMutex sync.RWMutex
+// Global subscription manager instance and update scheduling variables
+var (
+	globalManager      *SubscriptionManager
+	globalManagerMutex sync.RWMutex
+
+	// Variables for managing scheduled batch updates
+	scheduledUpdateMutex sync.Mutex
+	scheduledUpdateTimer *time.Timer
+)
 
 // InitGlobalManager initializes the global subscription manager instance
 func InitGlobalManager(
@@ -1413,6 +1419,326 @@ func (m *SubscriptionManager) checkAndApplyCredit(
 	}
 
 	return remainingCredit, nil
+}
+
+// ScheduleBatchUpdateAfter schedules a batch update of all kind 888 events after
+// the specified delay. If called multiple times, it cancels any previous scheduled update
+// and restarts the timer with a new delay (sliding window approach).
+func ScheduleBatchUpdateAfter(delay time.Duration) {
+	scheduledUpdateMutex.Lock()
+	defer scheduledUpdateMutex.Unlock()
+
+	// Cancel any existing scheduled update
+	if scheduledUpdateTimer != nil {
+		scheduledUpdateTimer.Stop()
+		log.Printf("Rescheduling batch update of kind 888 events (settings changed again)")
+	} else {
+		log.Printf("Scheduling batch update of kind 888 events in %v", delay)
+	}
+
+	// Schedule new update
+	scheduledUpdateTimer = time.AfterFunc(delay, func() {
+		scheduledUpdateMutex.Lock()
+		scheduledUpdateTimer = nil
+		scheduledUpdateMutex.Unlock()
+
+		log.Printf("Starting batch update of kind 888 events after %v cooldown", delay)
+		manager := GetGlobalManager()
+		if manager != nil {
+			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
+				log.Printf("Error in batch update: %v", err)
+			} else {
+				log.Printf("Successfully completed batch update of kind 888 events")
+			}
+		}
+	})
+}
+
+// BatchUpdateAllSubscriptionEvents processes all kind 888 events in batches
+// to update storage allocations after relay settings have changed
+func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
+	log.Printf("Starting batch update of all kind 888 subscription events")
+
+	// Get the current settings
+	var settings lib.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return fmt.Errorf("failed to load relay settings: %v", err)
+	}
+
+	// Process events in batches of 50
+	batchSize := 50
+	processed := 0
+
+	for {
+		// Query the next batch of events
+		filter := nostr.Filter{
+			Kinds: []int{888},
+			Limit: batchSize,
+		}
+
+		events, err := m.store.QueryEvents(filter)
+		if err != nil {
+			return fmt.Errorf("error querying events: %v", err)
+		}
+
+		// Exit if no more events
+		if len(events) == 0 {
+			break
+		}
+
+		// Process each event in the batch
+		for _, event := range events {
+			if err := m.processSingleSubscriptionEvent(event, settings); err != nil {
+				log.Printf("Error processing event %s: %v", event.ID, err)
+				// Continue with next event even if this one fails
+			}
+
+			processed++
+		}
+
+		log.Printf("Processed %d kind 888 events so far", processed)
+
+		// If we received fewer events than requested, we've reached the end of available events
+		if len(events) < batchSize {
+			break
+		}
+	}
+
+	log.Printf("Completed batch update, processed %d kind 888 events", processed)
+	return nil
+}
+
+// processSingleSubscriptionEvent handles the storage adjustment logic for a single kind 888 event
+// Only handling free tier adjustments, as paid tiers are automatically updated when users purchase them
+func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event, settings lib.RelaySettings) error {
+	// Extract pubkey
+	pubkey := getTagValue(event.Tags, "p")
+	if pubkey == "" {
+		return fmt.Errorf("no pubkey found in event")
+	}
+
+	// Get storage info
+	storageInfo, err := m.extractStorageInfo(event)
+	if err != nil {
+		return fmt.Errorf("failed to extract storage info: %v", err)
+	}
+
+	// Get subscription details
+	activeTier := getTagValue(event.Tags, "active_subscription")
+	expirationUnix := getTagUnixValue(event.Tags, "active_subscription")
+	expirationDate := time.Unix(expirationUnix, 0)
+	address := getTagValue(event.Tags, "relay_bitcoin_address")
+
+	needsUpdate := false
+
+	// ONLY handle free tier adjustments
+	// Paid tiers will be handled automatically when users pay for their next period
+	if activeTier == m.freeTierLimit {
+		// Calculate old and new storage limits
+		oldFreeTierLimit := m.calculateStorageLimit(m.freeTierLimit)
+		newFreeTierLimit := m.calculateStorageLimit(settings.FreeTierLimit)
+
+		if newFreeTierLimit > oldFreeTierLimit {
+			// Free tier INCREASED
+			// Calculate percentage of used storage
+			usedPercentage := float64(0)
+			if oldFreeTierLimit > 0 {
+				usedPercentage = float64(storageInfo.UsedBytes) / float64(oldFreeTierLimit)
+			}
+
+			// Apply same percentage to new limit to get remaining bytes
+			remainingBytes := int64(float64(newFreeTierLimit) * (1 - usedPercentage))
+
+			// Add the remaining bytes to currently used bytes
+			storageInfo.TotalBytes = storageInfo.UsedBytes + remainingBytes
+
+			log.Printf("Increasing free tier storage for %s from %d to %d bytes (used: %d, available: %d)",
+				pubkey, oldFreeTierLimit, storageInfo.TotalBytes, storageInfo.UsedBytes, remainingBytes)
+
+			needsUpdate = true
+		} else if newFreeTierLimit < oldFreeTierLimit {
+			// Free tier DECREASED
+			// Add pending adjustment to apply on renewal
+
+			// First, remove any existing pending adjustment
+			var updatedTags []nostr.Tag
+			for _, tag := range event.Tags {
+				if tag[0] != "storage_adjustment_pending" {
+					updatedTags = append(updatedTags, tag)
+				}
+			}
+
+			// Add the new pending adjustment
+			updatedTags = append(updatedTags, nostr.Tag{
+				"storage_adjustment_pending",
+				settings.FreeTierLimit,
+				fmt.Sprintf("%d", expirationDate.Unix()),
+			})
+
+			event.Tags = updatedTags
+			log.Printf("Added pending storage adjustment for %s (will apply on renewal): %s",
+				pubkey, settings.FreeTierLimit)
+
+			needsUpdate = true
+		}
+	}
+
+	// Update the event if needed
+	if needsUpdate {
+		return m.createOrUpdateNIP88Event(&lib.Subscriber{
+			Npub:    pubkey,
+			Address: address,
+		}, activeTier, expirationDate, &storageInfo)
+	}
+
+	return nil
+}
+
+// InitDailyFreeSubscriptionRenewal sets up a daily job to refresh expired free tier subscriptions
+// This should be called once when the application starts
+func InitDailyFreeSubscriptionRenewal() {
+	go func() {
+		for {
+			now := time.Now()
+			nextRun := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 1, 0, 0, now.Location())
+			delay := nextRun.Sub(now)
+
+			log.Printf("Scheduled free tier renewal in %v (at %s)",
+				delay, nextRun.Format("2006-01-02 15:04:05"))
+
+			time.Sleep(delay)
+
+			// Run the renewal
+			manager := GetGlobalManager()
+			if manager != nil {
+				log.Printf("Starting daily free tier renewal process")
+				if err := manager.RefreshExpiredFreeTierSubscriptions(); err != nil {
+					log.Printf("Error in free tier renewal: %v", err)
+				} else {
+					log.Printf("Successfully completed daily free tier renewal")
+				}
+			}
+		}
+	}()
+}
+
+// RefreshExpiredFreeTierSubscriptions finds and refreshes all expired free tier subscriptions
+func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
+	// Skip if free tier isn't enabled
+	if !m.freeTierEnabled {
+		return nil
+	}
+
+	log.Printf("Checking for expired free tier subscriptions to refresh")
+
+	now := time.Now()
+	batchSize := 50
+	processed := 0
+	refreshed := 0
+
+	for {
+		// Query all kind 888 events in batches
+		filter := nostr.Filter{
+			Kinds: []int{888},
+			Limit: batchSize,
+		}
+
+		events, err := m.store.QueryEvents(filter)
+		if err != nil {
+			return fmt.Errorf("error querying events: %v", err)
+		}
+
+		// Exit if no more events
+		if len(events) == 0 {
+			break
+		}
+
+		for _, event := range events {
+			processed++
+
+			// Get user pubkey
+			pubkey := getTagValue(event.Tags, "p")
+			if pubkey == "" {
+				continue
+			}
+
+			// Check if it's a free tier subscription
+			activeTier := getTagValue(event.Tags, "active_subscription")
+			if activeTier != m.freeTierLimit {
+				continue
+			}
+
+			// Get Bitcoin address
+			address := getTagValue(event.Tags, "relay_bitcoin_address")
+
+			// Check expiration date
+			expirationUnix := getTagUnixValue(event.Tags, "active_subscription")
+			expirationDate := time.Unix(expirationUnix, 0)
+
+			// Skip if not expired
+			if !now.After(expirationDate) {
+				continue
+			}
+
+			// Get current storage info
+			storageInfo, err := m.extractStorageInfo(event)
+			if err != nil {
+				log.Printf("Warning: could not extract storage info for %s: %v", pubkey, err)
+				continue
+			}
+
+			// Reset used storage to zero
+			storageInfo.UsedBytes = 0
+
+			// Set new expiration date
+			newExpiration := now.AddDate(0, 1, 0)
+
+			// Look for pending storage adjustments
+			pendingTierLimit := ""
+			for _, tag := range event.Tags {
+				if tag[0] == "storage_adjustment_pending" && len(tag) > 1 {
+					pendingTierLimit = tag[1]
+					break
+				}
+			}
+
+			// Apply pending adjustment if found
+			if pendingTierLimit != "" {
+				storageInfo.TotalBytes = m.calculateStorageLimit(pendingTierLimit)
+				log.Printf("Applying pending adjustment for %s: new limit %s",
+					pubkey, pendingTierLimit)
+			}
+
+			// Determine which tier to use
+			tierToUse := m.freeTierLimit
+			if pendingTierLimit != "" {
+				tierToUse = pendingTierLimit
+			}
+
+			// Update the NIP-88 event
+			err = m.createOrUpdateNIP88Event(&lib.Subscriber{
+				Npub:    pubkey,
+				Address: address,
+			}, tierToUse, newExpiration, &storageInfo)
+
+			if err != nil {
+				log.Printf("Error refreshing free tier: %v", err)
+			} else {
+				refreshed++
+				log.Printf("Refreshed free tier for %s until %s",
+					pubkey, newExpiration.Format("2006-01-02"))
+			}
+		}
+
+		// If we got fewer events than requested, we've reached the end
+		if len(events) < batchSize {
+			break
+		}
+	}
+
+	log.Printf("Free tier refresh complete: processed %d events, refreshed %d subscriptions",
+		processed, refreshed)
+	return nil
 }
 
 // updatePaidSubscriberRecord is a helper method to update the PaidSubscriber table

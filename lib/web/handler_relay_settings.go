@@ -8,6 +8,7 @@ import (
 	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/gofiber/fiber/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/viper"
@@ -72,8 +73,12 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to update settings")
 	}
 
-	// Compare existing tiers with the new tiers
+	// Update events if tier settings have changed
 	if needsKind411Update {
+		// Schedule batch update for all kind 888 events with 30-minute cooldown
+		subscription.ScheduleBatchUpdateAfter(time.Minute * 30)
+		log.Println("Scheduled batch update of kind 888 events with 30-minute cooldown")
+
 		log.Println("Subscription tiers have changed, creating a new kind 411 event")
 
 		serializedPrivateKey := viper.GetString("private_key")
