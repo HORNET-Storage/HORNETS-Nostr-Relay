@@ -171,6 +171,9 @@ func StartServer(store stores.Store) error {
 	secured.Get("/reports/event/:id", func(c *fiber.Ctx) error {
 		return getReportedEvent(c, store)
 	})
+	secured.Delete("/reports/event/:id", func(c *fiber.Ctx) error {
+		return deleteReportedEvent(c, store)
+	})
 
 	// Blocked pubkeys routes
 	secured.Get("/blocked-pubkeys", func(c *fiber.Ctx) error {

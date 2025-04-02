@@ -155,3 +155,50 @@ func getReportedEvent(c *fiber.Ctx, store stores.Store) error {
 		"event": events[0],
 	})
 }
+
+// DeleteReportedEvent permanently deletes a reported event from the relay
+func deleteReportedEvent(c *fiber.Ctx, store stores.Store) error {
+	// Get event ID from the URL parameters
+	eventID := c.Params("id")
+	if eventID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event ID is required",
+		})
+	}
+
+	// Verify the event exists before deleting
+	filter := nostr.Filter{
+		IDs: []string{eventID},
+	}
+	events, err := store.QueryEvents(filter)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve event: " + err.Error(),
+		})
+	}
+
+	if len(events) == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Event not found",
+		})
+	}
+
+	// Delete the event from the database
+	if err := store.DeleteEvent(eventID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to delete event: " + err.Error(),
+		})
+	}
+
+	// Also delete any report notifications for this event
+	if err := store.GetStatsStore().DeleteReportNotificationByEventID(eventID); err != nil {
+		// Log but don't fail - the main deletion was successful
+		log.Printf("Failed to delete report notification: %v", err)
+	}
+
+	// Return success response
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Event successfully deleted",
+	})
+}

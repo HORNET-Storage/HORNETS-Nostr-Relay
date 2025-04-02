@@ -258,3 +258,54 @@ Retrieves the original event that was reported.
 {
   "error": "Failed to retrieve event: [error message]"
 }
+```
+
+## Delete Reported Event
+
+Permanently deletes a reported event from the relay.
+
+**URL**: `/api/reports/event/:id`
+**Method**: `DELETE`
+**Auth required**: Yes
+**URL Parameters**:
+- `id`: The ID of the event to delete
+
+### Success Response
+
+**Code**: `200 OK`
+**Content example**:
+
+```json
+{
+  "success": true,
+  "message": "Event successfully deleted"
+}
+```
+
+### Error Responses
+
+**Condition**: Event ID not provided
+**Code**: `400 Bad Request`
+**Content**:
+```json
+{
+  "error": "Event ID is required"
+}
+```
+
+**Condition**: Event not found
+**Code**: `404 Not Found`
+**Content**:
+```json
+{
+  "error": "Event not found"
+}
+```
+
+**Condition**: Server error
+**Code**: `500 Internal Server Error`
+**Content**:
+```json
+{
+  "error": "Failed to delete event: [error message]"
+}
