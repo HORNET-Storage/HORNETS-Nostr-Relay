@@ -61,7 +61,8 @@ func (store *GormStatisticsStore) Init() error {
 		&types.FileTag{},
 		&types.PaidSubscriber{},
 		&types.ModerationNotification{},
-		&types.PaymentNotification{}, // Add PaymentNotification to be migrated
+		&types.PaymentNotification{},
+		&types.ReportNotification{}, // Add ReportNotification to be migrated
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
