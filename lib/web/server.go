@@ -155,6 +155,23 @@ func StartServer(store stores.Store) error {
 		return createPaymentNotification(c, store)
 	})
 
+	// Report notification routes
+	secured.Get("/reports/notifications", func(c *fiber.Ctx) error {
+		return getReportNotifications(c, store)
+	})
+	secured.Post("/reports/notifications/read", func(c *fiber.Ctx) error {
+		return markReportNotificationAsRead(c, store)
+	})
+	secured.Post("/reports/notifications/read-all", func(c *fiber.Ctx) error {
+		return markAllReportNotificationsAsRead(c, store)
+	})
+	secured.Get("/reports/stats", func(c *fiber.Ctx) error {
+		return getReportStats(c, store)
+	})
+	secured.Get("/reports/event/:id", func(c *fiber.Ctx) error {
+		return getReportedEvent(c, store)
+	})
+
 	// Blocked pubkeys routes
 	secured.Get("/blocked-pubkeys", func(c *fiber.Ctx) error {
 		return getBlockedPubkeys(c, store)
