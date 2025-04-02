@@ -542,6 +542,37 @@ type PaymentStats struct {
 	RecentTransactions  []TxSummary `json:"recent_transactions"`   // Recent payments
 }
 
+// ReportNotification represents a notification about content reported by users (kind 1984)
+type ReportNotification struct {
+	ID             uint      `gorm:"primaryKey" json:"id"`
+	PubKey         string    `gorm:"size:128;index" json:"pubkey"`         // User whose content was reported
+	EventID        string    `gorm:"size:128;uniqueIndex" json:"event_id"` // ID of the reported event
+	ReportType     string    `gorm:"size:64" json:"report_type"`           // Type from NIP-56 (nudity, malware, etc.)
+	ReportContent  string    `gorm:"size:512" json:"report_content"`       // Content field from the report event
+	ReporterPubKey string    `gorm:"size:128" json:"reporter_pubkey"`      // First reporter's public key
+	ReportCount    int       `gorm:"default:1" json:"report_count"`        // Number of reports for this content
+	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`     // When the report was first received
+	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`     // When the report was last updated
+	IsRead         bool      `gorm:"default:false" json:"is_read"`         // Whether the notification has been read
+}
+
+// ReportStats represents statistics about reported content
+type ReportStats struct {
+	TotalReported      int             `json:"total_reported"`       // Total number of reported events
+	TotalReportedToday int             `json:"total_reported_today"` // Number of events reported today
+	ByReportType       []TypeStat      `json:"by_report_type"`       // Breakdown by report type
+	MostReported       []ReportSummary `json:"most_reported"`        // Most frequently reported content
+}
+
+// ReportSummary represents a summary of a reported event
+type ReportSummary struct {
+	EventID     string    `json:"event_id"`     // ID of the reported event
+	PubKey      string    `json:"pubkey"`       // Author of the reported content
+	ReportCount int       `json:"report_count"` // Number of times reported
+	ReportType  string    `json:"report_type"`  // Type of report
+	CreatedAt   time.Time `json:"created_at"`   // When first reported
+}
+
 // TierStat represents statistics for a specific subscription tier
 type TierStat struct {
 	Tier    string `json:"tier"`    // Subscription tier name
