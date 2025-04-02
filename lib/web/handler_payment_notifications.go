@@ -22,9 +22,6 @@ func getPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 		c.Query("filter", "all"),
 		c.Query("pubkey", ""))
 
-	// Log headers for debugging auth issues
-	log.Printf("Auth header: %s", c.Get("Authorization"))
-
 	// Log request body if present
 	if len(c.Body()) > 0 {
 		log.Printf("Request body: %s", string(c.Body()))
