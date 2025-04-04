@@ -3,7 +3,6 @@ package web
 import (
 	"encoding/json"
 	"log"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
@@ -15,16 +14,23 @@ import (
 
 // UserMetadata represents the content of kind 0 events
 type UserMetadata struct {
-	Name    string `json:"name,omitempty"`
-	About   string `json:"about,omitempty"`
-	Picture string `json:"picture,omitempty"`
+	Name        string `json:"name,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	About       string `json:"about,omitempty"`
+	Picture     string `json:"picture,omitempty"`
 }
 
 // PaidSubscriberProfile represents the response structure
 type PaidSubscriberProfile struct {
 	Pubkey  string `json:"pubkey"`
 	Picture string `json:"picture"`
+	Name    string `json:"name,omitempty"`
+	About   string `json:"about,omitempty"`
 }
+
+// TODO: Update this URL once Blossom blob images are implemented, as we will have migrated away from using links
+// Placeholder avatar URL to use when a subscriber doesn't have a picture
+const placeholderAvatarURL = "http://localhost:3000/placeholder-avatar.png"
 
 // HandleGetPaidSubscriberProfiles gets profile pictures of paid subscribers
 func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
@@ -59,6 +65,11 @@ func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
 		}
 
 		log.Printf("Returning %d profiles with pictures", len(profiles))
+		// Log the response structure to help with panel-side implementation
+		if len(profiles) > 0 {
+			exampleJSON, _ := json.MarshalIndent(profiles[0], "", "  ")
+			log.Printf("Example profile response structure: %s", exampleJSON)
+		}
 		return c.JSON(profiles)
 	}
 
@@ -70,17 +81,25 @@ func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
 // getProfilesForPubkeys gets profile pictures for a list of public keys
 func getProfilesForPubkeys(store stores.Store, pubkeys []string) ([]PaidSubscriberProfile, error) {
 	profiles := make([]PaidSubscriberProfile, 0)
-	timestamp := nostr.Timestamp(time.Now().Unix())
 
 	for _, pubkey := range pubkeys {
+		// Create a profile entry for this subscriber with default values
+		profile := PaidSubscriberProfile{
+			Pubkey:  pubkey,
+			Picture: placeholderAvatarURL, // Default to placeholder
+			Name:    "",                   // Empty by default
+			About:   "",                   // Empty by default
+		}
+
 		metadataEvents, err := store.QueryEvents(nostr.Filter{
 			Kinds:   []int{0},
 			Authors: []string{pubkey},
-			Until:   &timestamp,
 			Limit:   1, // We only need the latest one
 		})
 		if err != nil {
 			log.Printf("Error querying metadata for pubkey %s: %v", pubkey, err)
+			// Still include the profile with the placeholder avatar
+			profiles = append(profiles, profile)
 			continue
 		}
 
@@ -88,16 +107,30 @@ func getProfilesForPubkeys(store stores.Store, pubkeys []string) ([]PaidSubscrib
 			var metadata UserMetadata
 			if err := json.Unmarshal([]byte(metadataEvents[0].Content), &metadata); err != nil {
 				log.Printf("Error unmarshaling metadata for pubkey %s: %v", pubkey, err)
+				// Still include the profile with the placeholder avatar
+				profiles = append(profiles, profile)
 				continue
 			}
 
+			// Populate fields from metadata
 			if metadata.Picture != "" {
-				profiles = append(profiles, PaidSubscriberProfile{
-					Pubkey:  pubkey,
-					Picture: metadata.Picture,
-				})
+				profile.Picture = metadata.Picture
+			}
+
+			// Check for display_name first, then fall back to name if not present
+			if metadata.DisplayName != "" {
+				profile.Name = metadata.DisplayName
+			} else if metadata.Name != "" {
+				profile.Name = metadata.Name
+			}
+
+			if metadata.About != "" {
+				profile.About = metadata.About
 			}
 		}
+
+		// Always add the profile
+		profiles = append(profiles, profile)
 	}
 
 	return profiles, nil
@@ -171,5 +204,10 @@ func getSubscribersFromEvents(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	log.Printf("Returning %d profiles with pictures", len(profiles))
+	// Log the response structure to help with panel-side implementation
+	if len(profiles) > 0 {
+		exampleJSON, _ := json.MarshalIndent(profiles[0], "", "  ")
+		log.Printf("Profile response structure: %s", exampleJSON)
+	}
 	return c.JSON(profiles)
 }
