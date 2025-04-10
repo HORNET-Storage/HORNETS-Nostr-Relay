@@ -2,6 +2,7 @@ package filter
 
 import (
 	"log"
+	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
@@ -13,19 +14,29 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/contentfilter"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
 )
 
-// getAuthenticatedPubkey attempts to extract the authenticated pubkey from session state
-// This function looks for session information in the connection data
-func getAuthenticatedPubkey() string {
-	// In a real implementation, we would access the authenticated pubkey from the
-	// connection state that's stored in the websocket handler.
+// getAuthenticatedPubkey attempts to extract the authenticated pubkey from request data
+// This function first checks if the data contains an auth wrapper, then falls back to sessions
+func getAuthenticatedPubkey(data []byte) string {
+	// First, try to extract pubkey from the wrapper structure
+	var wrapper struct {
+		Request         *nostr.ReqEnvelope `json:"request"`
+		AuthPubkey      string             `json:"auth_pubkey"`
+		IsAuthenticated bool               `json:"is_authenticated"`
+	}
 
-	// For this implementation, we need to use a more direct approach since
-	// we don't have access to the connection state.
-	// Note: The read parameter is not used in this implementation but would be used
-	// in a more complete implementation to access connection-specific data
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if wrapper.IsAuthenticated && wrapper.AuthPubkey != "" {
+			log.Printf("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
+			return wrapper.AuthPubkey
+		}
+	}
 
+	// If we couldn't extract from wrapper, fall back to the old method
 	// Find currently authenticated pubkeys by scanning the session store
 	var authenticatedPubkeys []string
 	sessions.Sessions.Range(func(key, value interface{}) bool {
@@ -62,24 +73,62 @@ func getAuthenticatedPubkey() string {
 	return ""
 }
 
+// ANSI color codes for colorized logging
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorBlue   = "\033[34m"
+	ColorPurple = "\033[35m"
+	ColorCyan   = "\033[36m"
+	ColorWhite  = "\033[37m"
+
+	// Bold variants
+	ColorRedBold    = "\033[1;31m"
+	ColorGreenBold  = "\033[1;32m"
+	ColorYellowBold = "\033[1;33m"
+	ColorBlueBold   = "\033[1;34m"
+	ColorPurpleBold = "\033[1;35m"
+	ColorCyanBold   = "\033[1;36m"
+	ColorWhiteBold  = "\033[1;37m"
+)
+
 // addLogging adds detailed logging for debugging
 func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
-	log.Printf("Authenticated pubkey for filter request: %s", connPubkey)
+	log.Printf(ColorBlue+"Authenticated pubkey for filter request: %s"+ColorReset, connPubkey)
 
 	// Log the kinds being requested
 	for i, filter := range reqEnvelope.Filters {
-		log.Printf("Filter #%d requests kinds: %v", i+1, filter.Kinds)
+		log.Printf(ColorCyan+"Filter #%d requests kinds: %v"+ColorReset, i+1, filter.Kinds)
 
 		// Log any 'p' tags that might be filtering by pubkey
 		for tagName, tagValues := range filter.Tags {
 			if tagName == "p" {
-				log.Printf("Filter #%d requests events for pubkeys: %v", i+1, tagValues)
+				log.Printf(ColorCyan+"Filter #%d requests events for pubkeys: %v"+ColorReset, i+1, tagValues)
 			}
 		}
 	}
 }
 
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+	// Initialize content filter service with direct Ollama integration
+	filterConfig := contentfilter.ServiceConfig{
+		APIURL:     viper.GetString("ollama_url"),
+		Model:      viper.GetString("ollama_model"),
+		Timeout:    time.Duration(viper.GetInt("ollama_timeout")) * time.Millisecond,
+		CacheSize:  viper.GetInt("content_filter_cache_size"),
+		CacheTTL:   time.Duration(viper.GetInt("content_filter_cache_ttl")) * time.Minute,
+		FilterKind: []int{1}, // Default to filtering only kind 1 events (text notes)
+		Enabled:    viper.GetBool("content_filter_enabled"),
+	}
+
+	// Create the filter service
+	filterService := contentfilter.NewService(filterConfig)
+
+	// Start a background goroutine to periodically clean up the cache
+	filterService.RunPeriodicCacheCleanup(15 * time.Minute)
+
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -91,10 +140,21 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		}
 
 		var request nostr.ReqEnvelope
-		if err := json.Unmarshal(data, &request); err != nil {
-			log.Println("Error unmarshaling request:", err)
-			write("NOTICE", "Error unmarshaling request.")
-			return
+
+		// First try to extract from wrapper structure
+		var wrapper struct {
+			Request *nostr.ReqEnvelope `json:"request"`
+		}
+		if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Request != nil {
+			log.Println("Successfully extracted request from wrapper structure")
+			request = *wrapper.Request
+		} else {
+			// Fall back to direct unmarshal (for backward compatibility)
+			if err := json.Unmarshal(data, &request); err != nil {
+				log.Println("Error unmarshaling request:", err)
+				write("NOTICE", "Error unmarshaling request.")
+				return
+			}
 		}
 
 		// Initialize subscription manager if needed for kind 888 events
@@ -157,14 +217,120 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
+		// Filter out blocked events
+		var filteredEvents []*nostr.Event
+		var blockedCount int
+
+		for _, event := range uniqueEvents {
+			isBlocked, err := store.IsEventBlocked(event.ID)
+			if err != nil {
+				log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
+				// If there's an error, assume not blocked
+				filteredEvents = append(filteredEvents, event)
+				continue
+			}
+
+			if isBlocked {
+				log.Printf(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
+					event.ID, event.Kind, event.PubKey)
+				blockedCount++
+				// Skip this event - it's blocked for moderation reasons
+				continue
+			}
+
+			// Not blocked, add to filtered events
+			filteredEvents = append(filteredEvents, event)
+		}
+
+		// Replace uniqueEvents with the filtered set
+		if blockedCount > 0 {
+			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events"+ColorReset, blockedCount)
+			uniqueEvents = filteredEvents
+		}
+
 		// Get the authenticated pubkey for the current connection
-		connPubkey := getAuthenticatedPubkey()
+		connPubkey := getAuthenticatedPubkey(data)
 
 		// Add detailed logging
 		addLogging(&request, connPubkey)
 
+		// Apply content filtering if the user is authenticated
+		if connPubkey != "" && filterService.ShouldFilterKind(1) {
+			// Get user's filter preferences
+			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
+			if err == nil && pref.Enabled && pref.Instructions != "" {
+				log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING FILTER FOR USER: %s"+ColorReset, connPubkey)
+
+				// Separate filterable (kind 1) and non-filterable events
+				var filterableEvents []*nostr.Event
+				var nonFilterableEvents []*nostr.Event
+
+				for _, e := range uniqueEvents {
+					if filterService.ShouldFilterKind(e.Kind) {
+						filterableEvents = append(filterableEvents, e)
+					} else {
+						nonFilterableEvents = append(nonFilterableEvents, e)
+						log.Printf(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)"+ColorReset,
+							e.ID, e.Kind, e.PubKey)
+					}
+				}
+
+				// Store the original count for proper logging
+				originalCount := len(filterableEvents)
+
+				// Log event details before filtering for diagnostics
+				log.Printf(ColorCyanBold+"[CONTENT FILTER] PROCESSING: %d filterable events for user %s"+ColorReset, originalCount, connPubkey)
+				for _, e := range filterableEvents {
+					log.Printf(ColorCyan+"[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s"+ColorReset,
+						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
+				}
+
+				// Only filter the filterable events
+				if len(filterableEvents) > 0 {
+					filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
+					if err != nil {
+						log.Printf("Error filtering events: %v", err)
+						// On error, use the original filterable events
+						// Combine with non-filterable events
+						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+					} else {
+						// Log which events passed filtering
+						log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
+						for _, e := range filteredEvents {
+							log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+						}
+
+						// Combine filtered events with non-filterable events
+						uniqueEvents = append(nonFilterableEvents, filteredEvents...)
+						log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
+							len(filteredEvents), originalCount, len(nonFilterableEvents))
+					}
+				} else {
+					// No filterable events, just use non-filterable ones
+					uniqueEvents = nonFilterableEvents
+					log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
+				}
+			} else {
+				log.Printf(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)
+			}
+		}
+
 		// Send each unique event to the client
 		for _, event := range uniqueEvents {
+			// Special handling for kind 10010 events - only visible to the author
+			if event.Kind == 10010 {
+				// Extract the pubkey the event is about (the author)
+				eventPubkey := event.PubKey
+
+				// If the authenticated user doesn't match the author
+				if connPubkey != "" && connPubkey != eventPubkey {
+					// Skip this event - user is not authorized to see filter preferences for other users
+					log.Printf("DENIED: Skipping kind 10010 event for pubkey %s - requested by different pubkey %s",
+						eventPubkey, connPubkey)
+					continue
+				}
+			}
+
 			// Special handling for kind 888 events
 			if event.Kind == 888 {
 				log.Printf("Processing kind 888 event with ID: %s", event.ID)
@@ -221,6 +387,14 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 	}
 
 	return handler
+}
+
+// truncateString limits the length of a string for logging purposes
+func truncateString(s string, maxLength int) string {
+	if len(s) <= maxLength {
+		return s
+	}
+	return s[:maxLength] + "..."
 }
 
 func deduplicateEvents(events []*nostr.Event) []*nostr.Event {

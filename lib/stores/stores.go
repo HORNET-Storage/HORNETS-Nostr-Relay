@@ -30,6 +30,22 @@ type Store interface {
 	DeleteEvent(eventID string) error
 	QueryBlobs(mimeType string) ([]string, error)
 
+	// Moderation
+	AddToPendingModeration(eventID string, imageURLs []string) error
+	RemoveFromPendingModeration(eventID string) error
+	IsPendingModeration(eventID string) (bool, error)
+	GetPendingModerationEvents() ([]types.PendingModeration, error)
+	GetAndRemovePendingModeration(batchSize int) ([]types.PendingModeration, error)
+	MarkEventBlocked(eventID string, timestamp int64) error
+	DeleteBlockedEventsOlderThan(age int64) (int, error)
+	IsEventBlocked(eventID string) (bool, error)
+
+	// Pubkey Blocking
+	IsBlockedPubkey(pubkey string) (bool, error)
+	BlockPubkey(pubkey string, reason string) error
+	UnblockPubkey(pubkey string) error
+	ListBlockedPubkeys() ([]types.BlockedPubkey, error)
+
 	// Blossom
 	StoreBlob(data []byte, hash []byte, publicKey string) error
 	GetBlob(hash string) ([]byte, error)

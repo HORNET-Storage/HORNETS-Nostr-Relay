@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -27,6 +28,42 @@ import (
 
 type connectionState struct {
 	authenticated bool
+	pubkey        string    // Store the pubkey to know who owns this connection
+	blockedCheck  time.Time // When we last checked if this pubkey is blocked
+}
+
+// isConnectionBlocked checks if a connection's pubkey is blocked
+func isConnectionBlocked(state *connectionState, store stores.Store) (bool, error) {
+	// Skip if no pubkey (not authenticated yet)
+	if state.pubkey == "" {
+		return false, nil
+	}
+
+	// Only check once per minute to avoid excessive database lookups
+	if time.Since(state.blockedCheck) < time.Minute {
+		return false, nil
+	}
+
+	// Check if pubkey is blocked
+	state.blockedCheck = time.Now()
+	return store.IsBlockedPubkey(state.pubkey)
+}
+
+// terminateIfBlocked checks if a connection is blocked and terminates it if so
+func terminateIfBlocked(c *websocket.Conn, state *connectionState, store stores.Store) bool {
+	isBlocked, err := isConnectionBlocked(state, store)
+	if err != nil {
+		log.Printf("Error checking if pubkey is blocked: %v", err)
+		return false
+	}
+
+	if isBlocked {
+		log.Printf("Terminating connection from blocked pubkey: %s", state.pubkey)
+		c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4403, "Blocked pubkey"))
+		c.Close()
+		return true
+	}
+	return false
 }
 
 func BuildServer(store stores.Store) *fiber.App {
@@ -41,7 +78,12 @@ func BuildServer(store stores.Store) *fiber.App {
 		challenge := getGlobalChallenge()
 		log.Printf("Using global challenge for connection: %s", challenge)
 
-		state := &connectionState{authenticated: false}
+		// Initialize state with empty pubkey and current time for blocked check
+		state := &connectionState{
+			authenticated: false,
+			pubkey:        "",
+			blockedCheck:  time.Now(),
+		}
 
 		// Send the AUTH challenge immediately upon connection
 		authChallenge := []interface{}{"AUTH", challenge}
@@ -51,6 +93,38 @@ func BuildServer(store stores.Store) *fiber.App {
 		}
 
 		handleIncomingMessage(c, jsonAuth)
+
+		// Start a background goroutine to periodically check if the pubkey becomes blocked
+		connClosed := make(chan struct{})
+		defer close(connClosed)
+
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					if state.pubkey != "" {
+						isBlocked, err := store.IsBlockedPubkey(state.pubkey)
+						if err != nil {
+							log.Printf("Error checking if pubkey is blocked: %v", err)
+							continue
+						}
+
+						if isBlocked {
+							log.Printf("Terminating connection from newly blocked pubkey: %s", state.pubkey)
+							c.WriteMessage(websocket.CloseMessage,
+								websocket.FormatCloseMessage(4403, "Blocked pubkey"))
+							c.Close()
+							return
+						}
+					}
+				case <-connClosed:
+					return
+				}
+			}
+		}()
 
 		for {
 			if err := processWebSocketMessage(c, challenge, state, store); err != nil {
@@ -259,14 +333,20 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		}
 	}
 
-	// Rest of the code remains the same...
+	// For all non-AUTH messages from authenticated users, check if blocked
+	if state.authenticated && state.pubkey != "" && terminateIfBlocked(c, state, store) {
+		return fmt.Errorf("connection terminated: blocked pubkey")
+	}
+
+	// Parse the message
 	rawMessage := nostr.ParseMessage(message)
 
+	// Handle different message types
 	switch env := rawMessage.(type) {
 	case *nostr.EventEnvelope:
-		handleEventMessage(c, env)
+		handleEventMessage(c, env, state, store)
 	case *nostr.ReqEnvelope:
-		handleReqMessage(c, env)
+		handleReqMessage(c, env, state, store)
 	case *nostr.AuthEnvelope:
 		log.Printf("Handling AUTH message")
 		handleAuthMessage(c, env, challenge, state, store)

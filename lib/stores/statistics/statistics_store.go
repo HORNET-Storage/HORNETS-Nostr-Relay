@@ -89,4 +89,56 @@ type StatisticsStore interface {
 	SavePaidSubscriber(subscriber *types.PaidSubscriber) error
 	UpdatePaidSubscriber(subscriber *types.PaidSubscriber) error
 	DeletePaidSubscriber(npub string) error
+
+	// Moderation notification management
+	CreateModerationNotification(notification *types.ModerationNotification) error
+	GetAllModerationNotifications(page, limit int) ([]types.ModerationNotification, *types.PaginationMetadata, error)
+	GetUserModerationNotifications(pubkey string, page, limit int) ([]types.ModerationNotification, *types.PaginationMetadata, error)
+	GetUnreadModerationNotifications(page, limit int) ([]types.ModerationNotification, *types.PaginationMetadata, error)
+	MarkNotificationAsRead(id uint) error
+	MarkAllNotificationsAsRead(pubkey string) error
+	DeleteModerationNotification(id uint) error
+
+	// Moderation statistics
+	GetModerationStats() (*types.ModerationStats, error)
+	GetBlockedContentCount() (int, error)
+	GetTodayBlockedContentCount() (int, error)
+	GetBlockedContentByType() ([]types.TypeStat, error)
+	GetBlockedContentByUser(limit int) ([]types.UserStat, error)
+	GetRecentBlockingReasons(limit int) ([]string, error)
+
+	// Payment notification management
+	CreatePaymentNotification(notification *types.PaymentNotification) error
+	GetAllPaymentNotifications(page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
+	GetUserPaymentNotifications(pubkey string, page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
+	GetUnreadPaymentNotifications(page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
+	MarkPaymentNotificationAsRead(id uint) error
+	MarkAllPaymentNotificationsAsRead(pubkey string) error
+	DeletePaymentNotification(id uint) error
+
+	// Payment statistics
+	GetPaymentStats() (*types.PaymentStats, error)
+	GetTotalRevenue() (int64, error)
+	GetTodayRevenue() (int64, error)
+	GetActiveSubscribersCount() (int, error)
+	GetNewSubscribersToday() (int, error)
+	GetRevenueByTier() ([]types.TierStat, error)
+	GetRecentTransactions(limit int) ([]types.TxSummary, error)
+
+	// Report notification management
+	CreateReportNotification(notification *types.ReportNotification) error
+	GetReportNotificationByEventID(eventID string) (*types.ReportNotification, error)
+	UpdateReportCount(eventID string) error
+	GetAllReportNotifications(page, limit int) ([]types.ReportNotification, *types.PaginationMetadata, error)
+	GetUnreadReportNotifications(page, limit int) ([]types.ReportNotification, *types.PaginationMetadata, error)
+	MarkReportNotificationAsRead(id uint) error
+	MarkAllReportNotificationsAsRead() error
+	DeleteReportNotificationByEventID(eventID string) error
+
+	// Report statistics
+	GetReportStats() (*types.ReportStats, error)
+	GetTotalReported() (int, error)
+	GetTodayReportedCount() (int, error)
+	GetReportsByType() ([]types.TypeStat, error)
+	GetMostReportedContent(limit int) ([]types.ReportSummary, error)
 }

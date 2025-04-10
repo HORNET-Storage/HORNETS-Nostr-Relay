@@ -100,6 +100,17 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 			return
 		}
 
+		// Check if pubkey is blocked
+		isBlocked, err := store.IsBlockedPubkey(request.Event.PubKey)
+		if err != nil {
+			log.Printf("Error checking if pubkey is blocked: %v", err)
+			// Continue processing as normal, don't block due to errors
+		} else if isBlocked {
+			log.Printf("Blocked pubkey attempted connection: %s", request.Event.PubKey)
+			write("OK", request.Event.ID, false, "Relay connection rejected: Pubkey is blocked")
+			return
+		}
+
 		// Create user session
 		if err := createUserSession(request.Event.PubKey, request.Event.Sig); err != nil {
 			log.Printf("Failed to create session for %s: %v", request.Event.PubKey, err)

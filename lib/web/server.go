@@ -22,7 +22,7 @@ func StartServer(store stores.Store) error {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, OPTIONS",
+		AllowMethods: "GET, POST, DELETE, PUT, OPTIONS",
 	}))
 
 	// Rate limited routes
@@ -119,6 +119,71 @@ func StartServer(store stores.Store) error {
 
 	secured.Get("/files", func(c *fiber.Ctx) error {
 		return HandleGetFilesByType(c, store)
+	})
+
+	// Moderation notification routes
+	secured.Get("/moderation/notifications", func(c *fiber.Ctx) error {
+		return getModerationNotifications(c, store)
+	})
+	secured.Post("/moderation/notifications/read", func(c *fiber.Ctx) error {
+		return markNotificationAsRead(c, store)
+	})
+	secured.Post("/moderation/notifications/read-all", func(c *fiber.Ctx) error {
+		return markAllNotificationsAsRead(c, store)
+	})
+	secured.Get("/moderation/stats", func(c *fiber.Ctx) error {
+		return getModerationStats(c, store)
+	})
+	secured.Post("/moderation/notifications", func(c *fiber.Ctx) error {
+		return createModerationNotification(c, store)
+	})
+
+	// Payment notification routes
+	secured.Get("/payment/notifications", func(c *fiber.Ctx) error {
+		return getPaymentNotifications(c, store)
+	})
+	secured.Post("/payment/notifications/read", func(c *fiber.Ctx) error {
+		return markPaymentNotificationAsRead(c, store)
+	})
+	secured.Post("/payment/notifications/read-all", func(c *fiber.Ctx) error {
+		return markAllPaymentNotificationsAsRead(c, store)
+	})
+	secured.Get("/payment/stats", func(c *fiber.Ctx) error {
+		return getPaymentStats(c, store)
+	})
+	secured.Post("/payment/notifications", func(c *fiber.Ctx) error {
+		return createPaymentNotification(c, store)
+	})
+
+	// Report notification routes
+	secured.Get("/reports/notifications", func(c *fiber.Ctx) error {
+		return getReportNotifications(c, store)
+	})
+	secured.Post("/reports/notifications/read", func(c *fiber.Ctx) error {
+		return markReportNotificationAsRead(c, store)
+	})
+	secured.Post("/reports/notifications/read-all", func(c *fiber.Ctx) error {
+		return markAllReportNotificationsAsRead(c, store)
+	})
+	secured.Get("/reports/stats", func(c *fiber.Ctx) error {
+		return getReportStats(c, store)
+	})
+	secured.Get("/reports/event/:id", func(c *fiber.Ctx) error {
+		return getReportedEvent(c, store)
+	})
+	secured.Delete("/reports/event/:id", func(c *fiber.Ctx) error {
+		return deleteReportedEvent(c, store)
+	})
+
+	// Blocked pubkeys routes
+	secured.Get("/blocked-pubkeys", func(c *fiber.Ctx) error {
+		return getBlockedPubkeys(c, store)
+	})
+	secured.Post("/blocked-pubkeys", func(c *fiber.Ctx) error {
+		return blockPubkey(c, store)
+	})
+	secured.Delete("/blocked-pubkeys/:pubkey", func(c *fiber.Ctx) error {
+		return unblockPubkey(c, store)
 	})
 
 	port := viper.GetString("port")

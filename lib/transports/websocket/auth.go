@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
@@ -20,7 +21,7 @@ const (
 	AddressStatusUsed      = "used"
 )
 
-func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, _ stores.Store) {
+func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge string, state *connectionState, store stores.Store) {
 	write := func(messageType string, params ...interface{}) {
 		response := lib_nostr.BuildResponse(messageType, params)
 		if len(response) > 0 {
@@ -66,6 +67,17 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
+	// Check if pubkey is blocked
+	isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
+	if err != nil {
+		log.Printf("Error checking if pubkey is blocked: %v", err)
+		// Continue processing as normal, don't block due to errors
+	} else if isBlocked {
+		log.Printf("Blocked pubkey attempted connection: %s", env.Event.PubKey)
+		write("OK", env.Event.ID, false, "Relay connection rejected: Pubkey is blocked")
+		return
+	}
+
 	// Create user session
 	if err := createUserSession(env.Event.PubKey, env.Event.Sig); err != nil {
 		log.Printf("Failed to create session for %s: %v", env.Event.PubKey, err)
@@ -100,7 +112,10 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	log.Printf("Successfully initialized subscriber %s", env.Event.PubKey)
 	write("OK", env.Event.ID, true, "Subscriber successfully initialized")
 
+	// Store the pubkey in connection state for future block checks
+	state.pubkey = env.Event.PubKey
 	state.authenticated = true
+	state.blockedCheck = time.Now()
 
 	if !state.authenticated {
 		log.Printf("Session established but subscription inactive for %s", env.Event.PubKey)

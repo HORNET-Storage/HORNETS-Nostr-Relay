@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -20,11 +21,10 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	types "github.com/HORNET-Storage/hornet-storage/lib"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
-
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 
 	"github.com/timshannon/badgerhold/v4"
 )
@@ -239,11 +239,11 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 	if leafData.Leaf.Content != nil {
 		contentHash := hex.EncodeToString(leafData.Leaf.ContentHash)
 		contentSize = int64(len(leafData.Leaf.Content))
-		
+
 		// Detect MIME type if content is available
 		mtype := mimetype.Detect(leafData.Leaf.Content)
 		mimeType = mtype.String()
-		
+
 		err = store.StoreContent(contentHash, leafData.Leaf.Content, temp)
 		if err != nil {
 			return err
@@ -474,12 +474,29 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		filteredEvents = filteredEvents[:filter.Limit]
 	}
 
+	// Step 11: Filter out events pending moderation
+	var finalEvents []*nostr.Event
+	for _, event := range filteredEvents {
+		isPending, err := store.IsPendingModeration(event.ID)
+		if err != nil {
+			log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
+			// On error, include the event anyway
+			finalEvents = append(finalEvents, event)
+			continue
+		}
+
+		// Only include events that are not pending moderation
+		if !isPending {
+			finalEvents = append(finalEvents, event)
+		}
+	}
+
 	fmt.Println("Last check")
-	for _, ev := range events {
+	for _, ev := range finalEvents {
 		fmt.Printf("Found event of kind: %d\n", ev.Kind)
 	}
 
-	return filteredEvents, nil
+	return finalEvents, nil
 }
 
 func sortEventsByCreatedAt(events []*nostr.Event) {
@@ -551,6 +568,117 @@ func eventHasTag(event *nostr.Event, tagName string, tagValues []string) bool {
 	return false
 }
 
+// ExtractMediaURLsFromEvent extracts all media (image and video) URLs from a Nostr event
+func ExtractMediaURLsFromEvent(event *nostr.Event) []string {
+	// Common media file extensions
+	imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif"}
+	videoExtensions := []string{".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".ogv", ".mpg", ".mpeg"}
+	mediaExtensions := append(append([]string{}, imageExtensions...), videoExtensions...)
+
+	// Common media hosting services
+	mediaHostingPatterns := []string{
+		// Image hosting services
+		"imgur.com",
+		"nostr.build/i/",
+		"nostr.build/p/",
+		"image.nostr.build",
+		"i.nostr.build",
+
+		// Video hosting services
+		"nostr.build/v/",
+		"v.nostr.build",
+		"video.nostr.build",
+		"youtube.com/watch",
+		"youtu.be/",
+		"vimeo.com/",
+
+		// Generic hosting
+		"void.cat",
+		"primal.net/",
+		"pbs.twimg.com",
+	}
+
+	// URL extraction regex
+	urlRegex := regexp.MustCompile(`https?://[^\s<>"']+`)
+
+	var urls []string
+	seen := make(map[string]bool) // Track seen URLs to avoid duplicates
+
+	// Extract from content text
+	contentURLs := urlRegex.FindAllString(event.Content, -1)
+	for _, url := range contentURLs {
+		url = strings.Split(url, "?")[0] // Remove query parameters
+		urlLower := strings.ToLower(url)
+
+		// Check for file extensions
+		for _, ext := range mediaExtensions {
+			if strings.HasSuffix(urlLower, ext) && !seen[url] {
+				urls = append(urls, url)
+				seen[url] = true
+				break
+			}
+		}
+
+		// Check for common media hosting services
+		for _, pattern := range mediaHostingPatterns {
+			if strings.Contains(urlLower, pattern) && !seen[url] {
+				urls = append(urls, url)
+				seen[url] = true
+				break
+			}
+		}
+	}
+
+	// Extract from r tags (common in Nostr Build)
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "r" {
+			url := tag[1]
+			url = strings.Split(url, "?")[0] // Remove query parameters
+			urlLower := strings.ToLower(url)
+
+			// Check extensions
+			for _, ext := range mediaExtensions {
+				if strings.HasSuffix(urlLower, ext) && !seen[url] {
+					urls = append(urls, url)
+					seen[url] = true
+					break
+				}
+			}
+
+			// Check hosting services
+			for _, pattern := range mediaHostingPatterns {
+				if strings.Contains(urlLower, pattern) && !seen[url] {
+					urls = append(urls, url)
+					seen[url] = true
+					break
+				}
+			}
+		}
+	}
+
+	// Extract from imeta and vmeta tags
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && (tag[0] == "imeta" || tag[0] == "vmeta") {
+			for _, value := range tag[1:] {
+				if strings.HasPrefix(value, "url ") {
+					mediaURL := strings.TrimPrefix(value, "url ")
+					if !seen[mediaURL] {
+						urls = append(urls, mediaURL)
+						seen[mediaURL] = true
+					}
+				}
+			}
+		}
+	}
+
+	return urls
+}
+
+// For backward compatibility
+func ExtractImageURLsFromEvent(event *nostr.Event) []string {
+	return ExtractMediaURLsFromEvent(event)
+}
+
 func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 	event := WrapEvent(ev)
 
@@ -588,6 +716,19 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		if err != nil {
 			// Log the error but don't fail the operation
 			fmt.Printf("Failed to record event statistics: %v\n", err)
+		}
+	}
+
+	// Check for images that need moderation
+	// Extract image URLs from the event using our image extractor
+	imageURLs := ExtractImageURLsFromEvent(ev)
+	if len(imageURLs) > 0 {
+		// This event contains images, add it to the pending moderation queue
+		log.Printf("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
+		err = store.AddToPendingModeration(ev.ID, imageURLs)
+		if err != nil {
+			// Log the error but don't fail the operation
+			log.Printf("Failed to add event %s to pending moderation: %v", ev.ID, err)
 		}
 	}
 
@@ -632,12 +773,12 @@ func (store *BadgerholdStore) StoreBlob(data []byte, hash []byte, publicKey stri
 	// Record file statistics
 	if store.StatsDatabase != nil {
 		err = store.StatsDatabase.SaveFile(
-			encodedHash,         // Using hash as root
-			encodedHash,         // Using hash as hash too
-			"",                  // No filename available for blobs
-			mtype.String(),      // MIME type
-			1,                   // Leaf count is 1 for blobs
-			int64(len(data)),    // Size in bytes
+			encodedHash,      // Using hash as root
+			encodedHash,      // Using hash as hash too
+			"",               // No filename available for blobs
+			mtype.String(),   // MIME type
+			1,                // Leaf count is 1 for blobs
+			int64(len(data)), // Size in bytes
 		)
 		if err != nil {
 			// Log the error but don't fail the operation
