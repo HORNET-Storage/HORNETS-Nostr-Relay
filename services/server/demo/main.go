@@ -50,9 +50,21 @@ func main() {
 	log.Println("========================================")
 
 	// Use a separate data directory for the demo server to avoid conflicts
+	// Initialize BadgerHold store with a separate data directory for demo mode
 	store, err := badgerhold.InitStore("demo-data")
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Switch to using a separate statistics database for demo mode
+	// This ensures we don't mix demo data with production statistics
+	if err := store.UseDemoStatisticsDB(); err != nil {
+		log.Printf("Warning: Failed to switch to demo statistics database: %v", err)
+		log.Println("Continuing with standard statistics database...")
+		// Continue anyway as this is not a critical failure
+	} else {
+		log.Println("Demo server is using a separate statistics database (demo_statistics.db)")
+		log.Println("You can pre-populate this database with dummy data for demonstration purposes")
 	}
 
 	// Set up cleanup on exit
