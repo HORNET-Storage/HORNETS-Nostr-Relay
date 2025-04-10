@@ -9,9 +9,19 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/spf13/viper"
 )
 
 func jwtMiddleware(c *fiber.Ctx, store stores.Store) error {
+	// In demo mode, skip authentication and set a mock user
+	if viper.GetBool("demo_mode") {
+		// Set a demo user in context
+		c.Locals("user", &types.JWTClaims{
+			Email:  "demo@example.com",
+			UserID: 1,
+		})
+		return c.Next()
+	}
 
 	// Get the Authorization header
 	authHeader := c.Get("Authorization")

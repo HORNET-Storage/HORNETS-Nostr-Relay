@@ -6,10 +6,18 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
+	"github.com/spf13/viper"
 )
 
 // Refactored logoutUser function
 func logoutUser(c *fiber.Ctx, store stores.Store) error {
+	// In demo mode, just return success without checking tokens
+	if viper.GetBool("demo_mode") {
+		return c.JSON(fiber.Map{
+			"message": "Successfully logged out from demo mode",
+		})
+	}
+
 	// Get the Authorization token
 	token := c.Get("Authorization")
 	if token == "" {
