@@ -47,7 +47,14 @@ func StartServer(store stores.Store) error {
 
 	// Wallet-specific routes with API key authentication
 	walletRoutes := app.Group("/api/wallet")
-	walletRoutes.Use(apiKeyMiddleware)
+
+	// Only apply API key middleware if not in demo mode
+	if !viper.GetBool("demo_mode") {
+		walletRoutes.Use(apiKeyMiddleware)
+		log.Println("API key authentication enabled for wallet routes")
+	} else {
+		log.Println("WARNING: Running in demo mode - wallet API routes are UNSECURED!")
+	}
 	walletRoutes.Post("/balance", func(c *fiber.Ctx) error {
 		return updateWalletBalance(c, store)
 	})
@@ -59,9 +66,16 @@ func StartServer(store stores.Store) error {
 	})
 
 	secured := app.Group("/api")
-	secured.Use(func(c *fiber.Ctx) error {
-		return jwtMiddleware(c, store)
-	})
+
+	// Only apply JWT middleware if not in demo mode
+	if !viper.GetBool("demo_mode") {
+		secured.Use(func(c *fiber.Ctx) error {
+			return jwtMiddleware(c, store)
+		})
+		log.Println("JWT authentication enabled for API routes")
+	} else {
+		log.Println("WARNING: Running in demo mode - API routes are UNSECURED!")
+	}
 
 	// Dedicated routes for each handler
 	secured.Get("/relaycount", func(c *fiber.Ctx) error {

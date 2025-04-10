@@ -81,6 +81,7 @@ func init() {
 	viper.SetDefault("web", true)
 	viper.SetDefault("proxy", true)
 	viper.SetDefault("port", "9000")
+	viper.SetDefault("demo_mode", false)
 	viper.SetDefault("full_Text_kinds", []int{1})
 	viper.SetDefault("relay_stats_db", "relay_stats.db")
 	viper.SetDefault("query_cache", map[string]string{})
@@ -167,6 +168,10 @@ func init() {
 			viper.SafeWriteConfig()
 		}
 	}
+
+	// Always force demo mode to false for the production server
+	// This ensures authentication is enabled regardless of config.json settings
+	viper.Set("demo_mode", false)
 
 	viper.OnConfigChange(func(e fsnotify.Event) {
 		log.Println("Config file changed:", e.Name)

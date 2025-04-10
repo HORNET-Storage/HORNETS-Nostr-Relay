@@ -26,6 +26,7 @@ temp
 /hornet-storage
 
 config.json
+demo-config.json
 
 
 **/.DS_Store
