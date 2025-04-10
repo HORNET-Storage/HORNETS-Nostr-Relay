@@ -35,6 +35,10 @@ func init() {
 			viper.SafeWriteConfig()
 		}
 	}
+
+	// Always force demo mode to true for the demo server
+	// This ensures demo mode is enabled regardless of config.json settings
+	viper.Set("demo_mode", true)
 }
 
 func main() {

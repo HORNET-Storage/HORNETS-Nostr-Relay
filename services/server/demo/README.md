@@ -1,54 +1,54 @@
 # HORNETS Relay Demo Server
 
-This is a special version of the HORNETS relay designed for demonstration purposes only. It runs just the admin panel portion of the relay with authentication bypassed, allowing easy demonstration of the relay's administration interface without requiring login.
-
-## Important Security Note
-
-**NEVER** run this demo server in a production environment or on a public-facing server. This version bypasses all authentication which makes it unsuitable for any real-world deployment.
+This is a dedicated server for running the HORNETS admin panel in demo mode, with authentication bypassed to allow easy access for demonstration purposes.
 
 ## Features
 
-- **Authentication Bypass**: All panel routes are open without requiring login
-- **Isolated Environment**: Uses separate data directory and database files
-- **Port Management**: Automatically runs on a different port than the main relay
-- **Simplified**: Runs only the web panel without the full relay functionality
+- **Always Runs in Demo Mode**: Authentication is always bypassed regardless of config settings
+- **Separate Data Directory**: Uses "demo-data" instead of "data" to avoid conflicts with the production relay
+- **Different Port**: Runs on port 10000 by default (web panel on 10002)
+- **Simplified Setup**: Only runs the web panel, not the full relay functionality
+- **Clear Warning Logs**: Shows prominent warnings that this is a demo version
 
-## How to Run
+## Usage
 
-1. Copy the demo configuration:
-   ```
-   cp demo-config.json config.json
-   ```
-   Or create a configuration file with `"demo_mode": true`
+Simply run:
 
-2. Run the demo server:
-   ```
-   go run services/server/demo/main.go
-   ```
+```bash
+go run services/server/demo/main.go
+```
 
-3. Access the admin panel at:
-   ```
-   http://localhost:10002
-   ```
-   (Default port is 10000 for the demo server, and the web panel runs on port+2)
+Then access the admin panel at:
 
-## Configuration
+```
+http://localhost:10002
+```
 
-The demo server uses these key settings:
+## How It Works
 
-- `demo_mode: true` - Enables authentication bypass
-- `port: 10000` - Uses a different port than the main relay (9000)
-- `proxy: false` - Disables the websocket proxy since it's not needed for panel demo
-- Various feature settings (content filtering, moderation) disabled for simplicity
-
-## Implementation Details
-
-The demo server implementation:
-
-1. Sets up a dedicated data directory to avoid conflicts with the main relay
-2. Loads same configuration but with demo mode enabled by default
-3. Utilizes the security bypass code in the web server component
-4. Properly cleans up resources on exit
+The demo server:
+1. Sets default `demo_mode` to true
+2. Forces `demo_mode` to true after loading config (ignoring any config file settings)
+3. Uses the authentication bypass logic in the web server component
+4. Disables unnecessary features for a cleaner demo experience
 5. Shows clear console warnings about running in demo mode
 
-This implementation allows you to demonstrate the admin panel UI and functionality without needing to run the full relay infrastructure.
+## Security Warning
+
+**NEVER** run this server in production or on a public-facing server. It deliberately bypasses security features to make demonstration easier.
+
+This should only be used for:
+- Feature demonstrations
+- UI testing
+- Training sessions
+- Local development
+
+## Production Use
+
+For production deployment, always use the regular server:
+
+```bash
+go run services/server/port/main.go
+```
+
+Which enforces authentication regardless of config settings.

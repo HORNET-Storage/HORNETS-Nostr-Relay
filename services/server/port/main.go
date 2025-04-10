@@ -169,6 +169,10 @@ func init() {
 		}
 	}
 
+	// Always force demo mode to false for the production server
+	// This ensures authentication is enabled regardless of config.json settings
+	viper.Set("demo_mode", false)
+
 	viper.OnConfigChange(func(e fsnotify.Event) {
 		log.Println("Config file changed:", e.Name)
 	})
