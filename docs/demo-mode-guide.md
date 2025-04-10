@@ -1,6 +1,6 @@
 # HORNETS Relay Demo Mode
 
-This branch contains modifications to run the HORNETS Relay in a demonstration mode with authentication bypassed for the admin panel.
+HORNETS Relay includes a demonstration mode where authentication is bypassed for the admin panel, making it easier to showcase the admin interface without requiring login credentials.
 
 ## Purpose
 
@@ -19,22 +19,14 @@ The demo mode allows you to run a version of the relay where admin panel routes 
 
 The recommended way to run the demo mode is using the dedicated demo server:
 
-1. Checkout the `demo-mode` branch:
-   ```
-   git checkout demo-mode
-   ```
-
-2. Copy the demo configuration if needed (though the demo server has defaults):
-   ```
-   cp demo-config.json config.json
-   ```
-
-3. Run the dedicated demo server:
+1. Run the dedicated demo server:
    ```
    go run services/server/demo/main.go
    ```
 
-4. Access the admin panel at:
+   This server has demo mode enabled by default and runs with separate configuration.
+
+2. Access the admin panel at:
    ```
    http://localhost:10002
    ```
