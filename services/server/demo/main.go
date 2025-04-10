@@ -17,10 +17,15 @@ import (
 func init() {
 	viper.SetDefault("key", "")
 	viper.SetDefault("web", true)
-	viper.SetDefault("proxy", true)
+	viper.SetDefault("proxy", false) // No need for websocket proxy in demo mode
 	viper.SetDefault("port", "9000")
-	viper.SetDefault("relay_stats_db", "relay_stats.db")
-	viper.SetDefault("service_tag", "hornet-storage-service")
+	viper.SetDefault("demo_mode", true) // Enable demo mode by default for the demo server
+	viper.SetDefault("relay_stats_db", "demo_relay_stats.db")
+	viper.SetDefault("service_tag", "hornet-storage-service-demo")
+	viper.SetDefault("RelayName", "HORNETS DEMO")
+	viper.SetDefault("RelayDescription", "DEMO RELAY - For demonstration purposes only")
+	viper.SetDefault("RelayContact", "demo@hornets.net")
+	viper.SetDefault("RelayVersion", "0.0.1-demo")
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
@@ -33,14 +38,45 @@ func init() {
 }
 
 func main() {
-	store, err := badgerhold.InitStore("data")
+	log.Println("========================================")
+	log.Println("  HORNETS RELAY DEMO MODE")
+	log.Println("  Authentication bypassed for admin panel")
+	log.Println("  For demonstration purposes only")
+	log.Println("  NOT FOR PRODUCTION USE")
+	log.Println("========================================")
+
+	// Use a separate data directory for the demo server to avoid conflicts
+	store, err := badgerhold.InitStore("demo-data")
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Set up cleanup on exit
+	defer func() {
+		log.Println("Cleaning up demo relay resources...")
+		err := store.Cleanup()
+		if err != nil {
+			log.Printf("Failed to cleanup demo data: %v", err)
+		} else {
+			log.Println("Demo data cleanup successful")
+		}
+	}()
+
+	// Use a different port for the demo server to avoid conflicts
+	demoPortStr := viper.GetString("port")
+	var portNum int
+	_, err = fmt.Sscanf(demoPortStr, "%d", &portNum)
+	if err == nil && portNum > 0 {
+		// If we got a port number successfully, add 1000 to avoid conflicting with main relay
+		newPort := portNum + 1000
+		viper.Set("port", fmt.Sprintf("%d", newPort))
+		log.Printf("Demo server will use port %d (web panel on port %d)", newPort, newPort+2)
+	}
+
+	log.Println("Starting demo web server...")
 	err = web.StartServer(store)
 
 	if err != nil {
-		fmt.Println("Fatal error occurred in web server")
+		log.Fatalf("Fatal error occurred in demo web server: %v", err)
 	}
 }
