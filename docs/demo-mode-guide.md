@@ -15,28 +15,46 @@ The demo mode allows you to run a version of the relay where admin panel routes 
 
 **NEVER** run this mode in production or on a public-facing server. The demo mode bypasses authentication which makes it unsuitable for any real-world deployment.
 
-## How to Use Demo Mode
+## How to Use Demo Mode (Preferred Method)
+
+The recommended way to run the demo mode is using the dedicated demo server:
 
 1. Checkout the `demo-mode` branch:
    ```
    git checkout demo-mode
    ```
 
-2. Use the provided demo configuration:
+2. Copy the demo configuration if needed (though the demo server has defaults):
    ```
    cp demo-config.json config.json
    ```
-   Or modify your existing `config.json` by adding:
+
+3. Run the dedicated demo server:
+   ```
+   go run services/server/demo/main.go
+   ```
+
+4. Access the admin panel at:
+   ```
+   http://localhost:10002
+   ```
+   (The demo server uses port 10000 by default, making the web panel available at port 10002)
+
+## Alternative: Full Relay with Demo Mode
+
+You can also run the full relay with demo mode enabled:
+
+1. Modify your existing `config.json` by adding:
    ```json
    "demo_mode": true
    ```
 
-3. Start the relay as usual:
+2. Start the relay as usual:
    ```
    go run services/server/port/main.go
    ```
 
-4. Access the admin panel at:
+3. Access the admin panel at:
    ```
    http://localhost:[PORT+2]
    ```
