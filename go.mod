@@ -2,19 +2,14 @@ module github.com/HORNET-Storage/hornet-storage
 
 go 1.22.1
 
-//replace github.com/codenotary/immugorm => D:\organizations\akashic_record\merge\immugorm
-
-//replace github.com/HORNET-Storage/Scionic-Merkle-Tree => D:/organizations/akashic_record/relevant/golang/scionic-merkletree
-
 require (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.1
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250310130615-f4b83d0723b6
+	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.2
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250410002150-60b72f8f2859
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/codenotary/immudb v1.9.5
-	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.6.0
 	github.com/gabriel-vasile/mimetype v1.4.6
@@ -34,7 +29,6 @@ require (
 )
 
 require (
-	github.com/HORNET-Storage/scionic-merkletree v0.0.0-20240616071419-536181913a36 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/aead/chacha20poly1305 v0.0.0-20201124145622-1a5aba2a8b29 // indirect
 	github.com/aead/poly1305 v0.0.0-20180717145839-3fee0db0b635 // indirect
@@ -177,7 +171,6 @@ require (
 	golang.org/x/text v0.19.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
-	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	google.golang.org/genproto v0.0.0-20240213162025-012b6fc9bca9 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240311132316-a219d84964c2 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240314234333-6e1732d8331c // indirect

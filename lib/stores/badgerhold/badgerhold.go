@@ -26,6 +26,8 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 
 	"github.com/timshannon/badgerhold/v4"
+
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 )
 
 const (
@@ -130,7 +132,7 @@ func (store *BadgerholdStore) RetrieveLeafContent(contentHash []byte, temp bool)
 	return content.Content, err
 }
 
-func (store *BadgerholdStore) QueryDag(filter types.QueryFilter, temp bool) ([]string, error) {
+func (store *BadgerholdStore) QueryDag(filter lib_types.QueryFilter, temp bool) ([]string, error) {
 	var results []types.WrappedLeaf
 
 	fmt.Println("Searching for dags with filter: ")

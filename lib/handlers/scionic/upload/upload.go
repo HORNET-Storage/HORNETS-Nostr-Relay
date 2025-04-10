@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gabriel-vasile/mimetype"
@@ -13,11 +12,15 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
+
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
+	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
 )
 
 type CanUploadDagFunc func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool
@@ -27,20 +30,16 @@ func AddUploadHandlerForLibp2p(ctx context.Context, libp2phost host.Host, store 
 	handler := BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag)
 
 	wrapper := func(stream network.Stream) {
-		read := func() (*types.UploadMessage, error) {
-			libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: ctx}
+		read := func() (*lib_types.UploadMessage, error) {
+			libp2pStream := libp2p_stream.New(stream, ctx)
 
-			log.Println("[libp2p] Waiting for message")
-
-			return utils.WaitForUploadMessage(libp2pStream)
+			return lib_stream.WaitForUploadMessage(libp2pStream)
 		}
 
 		write := func(message interface{}) error {
-			libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: ctx}
+			libp2pStream := libp2p_stream.New(stream, ctx)
 
-			log.Println("[libp2p] Writing message")
-
-			return utils.WriteMessageToStream(libp2pStream, message)
+			return lib_stream.WriteMessageToStream(libp2pStream, message)
 		}
 
 		handler(read, write)
@@ -57,20 +56,16 @@ func AddUploadHandlerForWebsockets(store stores.Store, canUploadDag CanUploadDag
 	handler := BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag)
 
 	wrapper := func(conn *websocket.Conn) {
-		read := func() (*types.UploadMessage, error) {
+		read := func() (*lib_types.UploadMessage, error) {
 			wsStream := &types.WebSocketStream{Conn: conn, Ctx: ctx}
 
-			log.Println("[websocket] Waiting for message")
-
-			return utils.WaitForUploadMessage(wsStream)
+			return lib_stream.WaitForUploadMessage(wsStream)
 		}
 
 		write := func(message interface{}) error {
 			wsStream := &types.WebSocketStream{Conn: conn, Ctx: ctx}
 
-			log.Println("[websocket] Writing message")
-
-			return utils.WriteMessageToStream(wsStream, message)
+			return lib_stream.WriteMessageToStream(wsStream, message)
 		}
 
 		handler(read, write)
@@ -83,33 +78,35 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 	handler := func(read utils.UploadDagReader, write utils.DagWriter) {
 		message, err := read()
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to recieve upload message", err))
+			write(lib_stream.BuildErrorMessage("Failed to recieve upload message", err))
 			return
 		}
 
 		publicKey, err := signing.DeserializePublicKey(message.PublicKey)
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to deserialize public key", err))
+			write(lib_stream.BuildErrorMessage("Failed to deserialize public key", err))
 			return
 		}
 
 		signatureBytes, err := hex.DecodeString(message.Signature)
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to deserialize signature", err))
+			write(lib_stream.BuildErrorMessage("Failed to deserialize signature", err))
 			return
 		}
 
 		signature, err := schnorr.ParseSignature(signatureBytes)
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to deserialize signature", err))
+			write(lib_stream.BuildErrorMessage("Failed to deserialize signature", err))
 			return
 		}
 
-		err = signing.VerifySignature(signature, []byte(message.Root), publicKey)
+		err = signing.VerifySerializedCIDSignature(signature, message.Root, publicKey)
 		if err != nil {
-			write(utils.BuildErrorMessage("Signature failed to verify", err))
+			write(lib_stream.BuildErrorMessage("Signature failed to verify", err))
 			return
 		}
+
+		fmt.Println("Dag uploading: " + message.Root)
 
 		dag := &merkle_dag.Dag{
 			Root:  message.Root,
@@ -120,7 +117,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		err = packet.Leaf.VerifyRootLeaf()
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to verify root leaf", err))
+			write(lib_stream.BuildErrorMessage("Failed to verify root leaf", err))
 			return
 		}
 
@@ -128,18 +125,18 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		err = dag.Verify()
 		if err != nil {
-			write(utils.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
+			write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
 			return
 		}
 
 		if !canUploadDag(packet.Leaf, &message.PublicKey, &message.Signature) {
-			write(utils.BuildErrorMessage("Not allowed to upload this", nil))
+			write(lib_stream.BuildErrorMessage("Not allowed to upload this", nil))
 			return
 		}
 
-		err = write(utils.BuildResponseMessage(true))
+		err = write(lib_stream.BuildResponseMessage(true))
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to write response to stream", err))
+			write(lib_stream.BuildErrorMessage("Failed to write response to stream", err))
 			return
 		}
 
@@ -151,7 +148,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 		for {
 			message, err := read()
 			if err != nil {
-				write(utils.BuildErrorMessage("Failed to recieve upload message in time", nil))
+				write(lib_stream.BuildErrorMessage("Failed to recieve upload message in time", nil))
 				return
 			}
 
@@ -159,7 +156,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 			err = packet.Leaf.VerifyLeaf()
 			if err != nil {
-				write(utils.BuildErrorMessage("Failed to verify leaf", err))
+				write(lib_stream.BuildErrorMessage("Failed to verify leaf", err))
 				return
 			}
 
@@ -167,13 +164,13 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 			err = dag.Verify()
 			if err != nil {
-				write(utils.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
+				write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
 				return
 			}
 
-			err = write(utils.BuildResponseMessage(true))
+			err = write(lib_stream.BuildResponseMessage(true))
 			if err != nil {
-				write(utils.BuildErrorMessage("Failed to write response to stream", err))
+				write(lib_stream.BuildErrorMessage("Failed to write response to stream", err))
 				break
 			}
 
@@ -186,7 +183,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 		// Verify the dag
 		err = dag.Verify()
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to verify dag", err))
+			write(lib_stream.BuildErrorMessage("Failed to verify dag", err))
 			fmt.Println("Failed to verify dag???")
 			return
 		}
@@ -198,14 +195,14 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			if leaf.Type == "File" {
 				data, err := dag.GetContentFromLeaf(leaf)
 				if err != nil {
-					write(utils.BuildErrorMessage("Failed to extract content from file leaf", err))
+					write(lib_stream.BuildErrorMessage("Failed to extract content from file leaf", err))
 					return
 				}
 
 				mimeType := mimetype.Detect(data)
 
 				if !utils.IsMimeTypePermitted(mimeType.String()) {
-					write(utils.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", err))
+					write(lib_stream.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", err))
 					return
 				}
 
@@ -219,10 +216,11 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 
 		err = store.StoreDag(&dagData, false)
 		if err != nil {
-			write(utils.BuildErrorMessage("Failed to commit dag to long term store", err))
-			fmt.Println("Fuck sake")
+			write(lib_stream.BuildErrorMessage("Failed to commit dag to long term store", err))
 			return
 		}
+
+		fmt.Println("Dag Uploaded: " + message.Root)
 
 		handleRecievedDag(&dagData.Dag, &message.PublicKey)
 	}

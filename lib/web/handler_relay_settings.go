@@ -3,9 +3,9 @@ package web
 import (
 	"log"
 
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	jsoniter "github.com/json-iterator/go"
