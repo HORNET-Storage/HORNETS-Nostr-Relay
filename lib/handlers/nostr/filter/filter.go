@@ -2,6 +2,7 @@ package filter
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
@@ -258,7 +259,9 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		if connPubkey != "" && filterService.ShouldFilterKind(1) {
 			// Get user's filter preferences
 			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
-			if err == nil && pref.Enabled && pref.Instructions != "" {
+
+			// Check if filtering is enabled and either instructions or mute words are present
+			if err == nil && pref.Enabled && (pref.Instructions != "" || len(pref.MuteWords) > 0) {
 				log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING FILTER FOR USER: %s"+ColorReset, connPubkey)
 
 				// Separate filterable (kind 1) and non-filterable events
@@ -289,30 +292,69 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
-				// Only filter the filterable events
-				if len(filterableEvents) > 0 {
-					filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
-					if err != nil {
-						log.Printf("Error filtering events: %v", err)
-						// On error, use the original filterable events
-						// Combine with non-filterable events
-						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-					} else {
-						// Log which events passed filtering
-						log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
-						for _, e := range filteredEvents {
-							log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+				// Step 1: Apply mute word filtering if mute words are present
+				if len(pref.MuteWords) > 0 {
+					// Create a filtered list that excludes events with muted words
+					var muteFilteredEvents []*nostr.Event
+
+					for _, e := range filterableEvents {
+						containsMutedWord := false
+
+						// Check if event content contains any muted word
+						for _, muteWord := range pref.MuteWords {
+							if muteWord != "" && strings.Contains(strings.ToLower(e.Content), strings.ToLower(muteWord)) {
+								log.Printf(ColorRedBold+"[CONTENT FILTER] MUTED WORD: '%s' found in event ID=%s"+ColorReset,
+									muteWord, e.ID)
+								containsMutedWord = true
+								break
+							}
 						}
 
-						// Combine filtered events with non-filterable events
-						uniqueEvents = append(nonFilterableEvents, filteredEvents...)
-						log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
-							len(filteredEvents), originalCount, len(nonFilterableEvents))
+						// Only keep events that don't contain muted words
+						if !containsMutedWord {
+							muteFilteredEvents = append(muteFilteredEvents, e)
+						}
+					}
+
+					// Replace the filterable events with the mute-filtered list
+					filterableEvents = muteFilteredEvents
+
+					log.Printf(ColorYellowBold+"[CONTENT FILTER] MUTE FILTER: %d/%d events passed mute word filtering"+ColorReset,
+						len(filterableEvents), originalCount)
+				}
+
+				// Step 2: Apply instruction-based filtering if instructions exist
+				if pref.Instructions != "" {
+					// Only filter the filterable events if there are any left after mute filtering
+					if len(filterableEvents) > 0 {
+						filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
+						if err != nil {
+							log.Printf("Error filtering events: %v", err)
+							// On error, use the events that passed mute filtering
+							// Combine with non-filterable events
+							uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+						} else {
+							// Log which events passed filtering
+							log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
+							for _, e := range filteredEvents {
+								log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+							}
+
+							// Combine filtered events with non-filterable events
+							uniqueEvents = append(nonFilterableEvents, filteredEvents...)
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
+								len(filteredEvents), originalCount, len(nonFilterableEvents))
+						}
+					} else {
+						// No filterable events left after mute filtering, just use non-filterable ones
+						uniqueEvents = nonFilterableEvents
+						log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
 					}
 				} else {
-					// No filterable events, just use non-filterable ones
-					uniqueEvents = nonFilterableEvents
-					log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
+					// No instructions but we've filtered by mute words, use the mute-filtered events
+					uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+					log.Printf(ColorYellowBold+"[CONTENT FILTER] MUTE-ONLY FILTER: %d events passed mute filtering, %d exempt events"+ColorReset,
+						len(filterableEvents), len(nonFilterableEvents))
 				}
 			} else {
 				log.Printf(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)

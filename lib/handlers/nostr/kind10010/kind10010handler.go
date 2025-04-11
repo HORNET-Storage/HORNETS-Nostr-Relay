@@ -1,8 +1,8 @@
 package kind10010
 
 import (
-	"encoding/json"
 	"log"
+	"strings"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -12,9 +12,14 @@ import (
 )
 
 // FilterPreference represents a user's content filtering preferences
+// In the new structure:
+// - Instructions are stored directly in the event content
+// - Enabled status is stored in a tag ["enabled", "true/false"]
+// - Mute words are stored in a tag ["mute", "word1,word2,word3"]
 type FilterPreference struct {
-	Enabled      bool   `json:"enabled"`
-	Instructions string `json:"instructions"`
+	Instructions string   `json:"instructions"` // Filtering instructions
+	Enabled      bool     `json:"enabled"`      // Whether filtering is enabled
+	MuteWords    []string `json:"mute_words"`   // List of words to mute
 }
 
 // BuildKind10010Handler creates a handler for kind 10010 filter preference events
@@ -41,6 +46,27 @@ func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		success := lib_nostr.ValidateEvent(write, env, 10010)
 		if !success {
 			return
+		}
+
+		// Parse tags to check for enabled status and mute words
+		// The content is now directly the instructions
+
+		// Log the content for debugging
+		log.Printf("Filter instructions: %s", env.Event.Content)
+
+		// Check for enabled tag and mute words tag
+		for _, tag := range env.Event.Tags {
+			if len(tag) >= 2 {
+				// Check for enabled tag
+				if tag[0] == "enabled" {
+					enabled := tag[1] == "true"
+					log.Printf("Found enabled tag: %v", enabled)
+				} else if tag[0] == "mute" && len(tag) >= 2 { // Check for mute words tag
+					// Parse comma-separated mute words
+					muteWords := strings.Split(tag[1], ",")
+					log.Printf("Found mute words: %v", muteWords)
+				}
+			}
 		}
 
 		// Verify and store the event
@@ -93,15 +119,25 @@ func GetUserFilterPreference(store stores.Store, pubkey string) (*FilterPreferen
 		return &FilterPreference{Enabled: false}, nil
 	}
 
-	// Parse the content as JSON
-	var pref FilterPreference
-	if err := json.Unmarshal([]byte(events[0].Content), &pref); err != nil {
-		// If we can't parse as JSON, assume it's just instructions
-		return &FilterPreference{
-			Enabled:      true,
-			Instructions: events[0].Content,
-		}, nil
+	// Create a new preference with default values
+	pref := &FilterPreference{
+		Enabled:      false,             // Default to disabled
+		Instructions: events[0].Content, // Content is now directly the instructions
+		MuteWords:    []string{},        // Default to empty mute words list
 	}
 
-	return &pref, nil
+	// Parse tags for enabled status and mute words
+	for _, tag := range events[0].Tags {
+		if len(tag) >= 2 {
+			// Check for enabled tag
+			if tag[0] == "enabled" {
+				pref.Enabled = tag[1] == "true"
+			} else if tag[0] == "mute" && len(tag) >= 2 { // Check for mute words tag
+				// Parse comma-separated mute words
+				pref.MuteWords = strings.Split(tag[1], ",")
+			}
+		}
+	}
+
+	return pref, nil
 }
