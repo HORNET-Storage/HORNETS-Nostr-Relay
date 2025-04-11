@@ -266,7 +266,11 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				var nonFilterableEvents []*nostr.Event
 
 				for _, e := range uniqueEvents {
-					if filterService.ShouldFilterKind(e.Kind) {
+					if e.PubKey == connPubkey {
+						nonFilterableEvents = append(nonFilterableEvents, e)
+						log.Printf(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (authored by requester)"+ColorReset,
+							e.ID, e.Kind, e.PubKey)
+					} else if filterService.ShouldFilterKind(e.Kind) {
 						filterableEvents = append(filterableEvents, e)
 					} else {
 						nonFilterableEvents = append(nonFilterableEvents, e)
