@@ -153,8 +153,8 @@ func GetHostOnPort(serializedPrivateKey string, port string) host.Host {
 		log.Fatal(err)
 	}
 
-	listenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", port)
-	webtransportListenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", port)
+	listenAddress := fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic-v1", port)
+	webtransportListenAddress := fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic/webtransport", port)
 	log.Printf("Starting server on %s\n", listenAddress)
 
 	connManager, err := connmgr.NewConnManager(
