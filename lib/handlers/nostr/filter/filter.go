@@ -2,6 +2,7 @@ package filter
 
 import (
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -260,10 +261,8 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Get user's filter preferences
 			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
 
-			// Check if filtering is enabled and either instructions or mute words are present
-			if err == nil && pref.Enabled && (pref.Instructions != "" || len(pref.MuteWords) > 0) {
-				log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING FILTER FOR USER: %s"+ColorReset, connPubkey)
-
+			// Check if filtering is enabled
+			if err == nil && pref.Enabled {
 				// Separate filterable (kind 1) and non-filterable events
 				var filterableEvents []*nostr.Event
 				var nonFilterableEvents []*nostr.Event
@@ -294,6 +293,8 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 				// Step 1: Apply mute word filtering if mute words are present
 				if len(pref.MuteWords) > 0 {
+					log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING MUTE WORD FILTER FOR USER: %s"+ColorReset, connPubkey)
+
 					// Create a filtered list that excludes events with muted words
 					var muteFilteredEvents []*nostr.Event
 
@@ -323,32 +324,108 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						len(filterableEvents), originalCount)
 				}
 
-				// Step 2: Apply instruction-based filtering if instructions exist
+				// Step 2: Apply instruction-based filtering if instructions exist, but only for paid users
 				if pref.Instructions != "" {
-					// Only filter the filterable events if there are any left after mute filtering
-					if len(filterableEvents) > 0 {
-						filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
-						if err != nil {
-							log.Printf("Error filtering events: %v", err)
-							// On error, use the events that passed mute filtering
-							// Combine with non-filterable events
-							uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-						} else {
-							// Log which events passed filtering
-							log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
-							for _, e := range filteredEvents {
-								log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
-							}
+					// Check if user is a paid subscriber
+					isPaidUser := false
 
-							// Combine filtered events with non-filterable events
-							uniqueEvents = append(nonFilterableEvents, filteredEvents...)
-							log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
-								len(filteredEvents), originalCount, len(nonFilterableEvents))
+					// First try to get from PaidSubscriber table (most direct method)
+					paidSubscriber, err := store.GetStatsStore().GetPaidSubscriberByNpub(connPubkey)
+					if err == nil && paidSubscriber != nil {
+						// Check if subscription is still active (not expired)
+						if time.Now().Before(paidSubscriber.ExpirationDate) {
+							isPaidUser = true
+							log.Printf(ColorCyanBold+"[CONTENT FILTER] USER %s IS A PAID SUBSCRIBER (VALID UNTIL %s), APPLYING AI FILTERING"+ColorReset,
+								connPubkey, paidSubscriber.ExpirationDate.Format("2006-01-02"))
+						} else {
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS EXPIRED PAID SUBSCRIPTION (EXPIRED ON %s), SKIPPING AI FILTERING"+ColorReset,
+								connPubkey, paidSubscriber.ExpirationDate.Format("2006-01-02"))
 						}
 					} else {
-						// No filterable events left after mute filtering, just use non-filterable ones
-						uniqueEvents = nonFilterableEvents
-						log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
+						// Fall back to checking NIP-888 events
+						events, err := store.QueryEvents(nostr.Filter{
+							Kinds: []int{888},
+							Tags:  nostr.TagMap{"p": []string{connPubkey}},
+							Limit: 1,
+						})
+
+						if err == nil && len(events) > 0 {
+							// Get relay settings to determine free tier limit
+							var relaySettings lib.RelaySettings
+							if err := viper.UnmarshalKey("relay_settings", &relaySettings); err == nil {
+								// Extract subscription tier from event
+								var subscriptionTier string
+								var expirationUnix int64
+
+								// Get tier and expiration date
+								for _, tag := range events[0].Tags {
+									if tag[0] == "active_subscription" {
+										if len(tag) > 1 {
+											subscriptionTier = tag[1]
+										}
+										if len(tag) > 2 {
+											expirationUnix, _ = strconv.ParseInt(tag[2], 10, 64)
+										}
+										break
+									}
+								}
+
+								// Check if tier is NOT the free tier AND subscription is not expired
+								if subscriptionTier != "" &&
+									(!relaySettings.FreeTierEnabled ||
+										subscriptionTier != relaySettings.FreeTierLimit) {
+
+									// Check expiration date
+									if expirationUnix > 0 && time.Now().Before(time.Unix(expirationUnix, 0)) {
+										isPaidUser = true
+										expirationDate := time.Unix(expirationUnix, 0)
+										log.Printf(ColorCyanBold+"[CONTENT FILTER] USER %s HAS VALID PAID TIER '%s' (UNTIL %s), APPLYING AI FILTERING"+ColorReset,
+											connPubkey, subscriptionTier, expirationDate.Format("2006-01-02"))
+									} else {
+										log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS EXPIRED PAID TIER '%s', SKIPPING AI FILTERING"+ColorReset,
+											connPubkey, subscriptionTier)
+									}
+								} else {
+									log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS FREE TIER, SKIPPING AI FILTERING"+ColorReset, connPubkey)
+								}
+							}
+						} else {
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS NO SUBSCRIPTION, SKIPPING AI FILTERING"+ColorReset, connPubkey)
+						}
+					}
+
+					// Only apply AI filtering for paid users
+					if isPaidUser {
+						// Only filter the filterable events if there are any left after mute filtering
+						if len(filterableEvents) > 0 {
+							filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
+							if err != nil {
+								log.Printf("Error filtering events: %v", err)
+								// On error, use the events that passed mute filtering
+								// Combine with non-filterable events
+								uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+							} else {
+								// Log which events passed filtering
+								log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
+								for _, e := range filteredEvents {
+									log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+								}
+
+								// Combine filtered events with non-filterable events
+								uniqueEvents = append(nonFilterableEvents, filteredEvents...)
+								log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
+									len(filteredEvents), originalCount, len(nonFilterableEvents))
+							}
+						} else {
+							// No filterable events left after mute filtering, just use non-filterable ones
+							uniqueEvents = nonFilterableEvents
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
+						}
+					} else {
+						// Non-paid user with instructions - skip AI filtering but keep mute word filtering results
+						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+						log.Printf(ColorYellowBold+"[CONTENT FILTER] NON-PAID USER: Skipping AI filtering, %d events passed mute filtering, %d exempt events"+ColorReset,
+							len(filterableEvents), len(nonFilterableEvents))
 					}
 				} else {
 					// No instructions but we've filtered by mute words, use the mute-filtered events
