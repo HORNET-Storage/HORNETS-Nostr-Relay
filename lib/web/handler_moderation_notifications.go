@@ -310,3 +310,59 @@ func unblockEvent(c *fiber.Ctx, store stores.Store) error {
 		"event_id": req.EventID,
 	})
 }
+
+// DeleteModeratedEvent permanently deletes a moderated event from the relay
+func deleteModeratedEvent(c *fiber.Ctx, store stores.Store) error {
+	// Get event ID from the URL parameters
+	eventID := c.Params("id")
+	if eventID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event ID is required",
+		})
+	}
+
+	// Check if the event is actually blocked
+	isBlocked, err := store.IsEventBlocked(eventID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to check event status: " + err.Error(),
+		})
+	}
+
+	if !isBlocked {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event is not currently blocked",
+		})
+	}
+
+	// Delete the event from the database
+	if err := store.DeleteEvent(eventID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to delete event: " + err.Error(),
+		})
+	}
+
+	// Remove from blocked list
+	if err := store.UnmarkEventBlocked(eventID); err != nil {
+		// Log but don't fail - the main deletion was successful
+		log.Printf("Error removing event %s from blocked list: %v", eventID, err)
+	}
+
+	// Find and delete the corresponding moderation notification
+	notifications, _, err := store.GetStatsStore().GetAllModerationNotifications(1, 100)
+	if err == nil {
+		for _, notification := range notifications {
+			if notification.EventID == eventID {
+				store.GetStatsStore().DeleteModerationNotification(notification.ID)
+				break
+			}
+		}
+	}
+
+	// Return success response
+	return c.JSON(fiber.Map{
+		"success":  true,
+		"message":  "Event permanently deleted",
+		"event_id": eventID,
+	})
+}

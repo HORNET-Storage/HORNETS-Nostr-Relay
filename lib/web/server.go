@@ -157,6 +157,9 @@ func StartServer(store stores.Store) error {
 	secured.Post("/moderation/unblock", func(c *fiber.Ctx) error {
 		return unblockEvent(c, store)
 	})
+	secured.Delete("/moderation/event/:id", func(c *fiber.Ctx) error {
+		return deleteModeratedEvent(c, store)
+	})
 
 	// Payment notification routes
 	secured.Get("/payment/notifications", func(c *fiber.Ctx) error {
