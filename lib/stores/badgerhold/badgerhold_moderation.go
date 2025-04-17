@@ -127,6 +127,12 @@ func (store *BadgerholdStore) IsEventBlocked(eventID string) (bool, error) {
 	return true, nil
 }
 
+// UnmarkEventBlocked removes an event from the blocked list
+func (store *BadgerholdStore) UnmarkEventBlocked(eventID string) error {
+	key := fmt.Sprintf("blocked:%s", eventID)
+	return store.Database.Delete(key, lib.BlockedEvent{})
+}
+
 // DeleteBlockedEventsOlderThan deletes events that have been blocked for longer than the specified age (in seconds)
 func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, error) {
 	var blockedEvents []lib.BlockedEvent
