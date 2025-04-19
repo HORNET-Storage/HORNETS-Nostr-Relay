@@ -219,11 +219,21 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
-		// Filter out blocked events
+		// Get the authenticated pubkey for the current connection
+		connPubkey := getAuthenticatedPubkey(data)
+
+		// Get moderation mode from config (default to strict if not specified)
+		moderationMode := viper.GetString("moderation_mode")
+		isStrict := moderationMode == "strict" || moderationMode == "" // Default to strict
+
+		// Filter out blocked events and handle pending moderation events based on mode
 		var filteredEvents []*nostr.Event
 		var blockedCount int
+		var pendingCount int
+		var pendingAllowedCount int
 
 		for _, event := range uniqueEvents {
+			// First check if event is blocked (blocked events are always filtered out)
 			isBlocked, err := store.IsEventBlocked(event.ID)
 			if err != nil {
 				log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
@@ -240,18 +250,51 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				continue
 			}
 
-			// Not blocked, add to filtered events
-			filteredEvents = append(filteredEvents, event)
+			// Then check if event is pending moderation
+			isPending, err := store.IsPendingModeration(event.ID)
+			if err != nil {
+				log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
+				// If there's an error, assume not pending
+				filteredEvents = append(filteredEvents, event)
+				continue
+			}
+
+			if isPending {
+				pendingCount++
+
+				// Handle based on moderation mode
+				if !isStrict {
+					// Passive mode: include all pending events
+					log.Printf(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
+					filteredEvents = append(filteredEvents, event)
+					pendingAllowedCount++
+				} else if connPubkey != "" && connPubkey == event.PubKey {
+					// Strict mode: only include if requester is author
+					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
+						event.ID, connPubkey)
+					filteredEvents = append(filteredEvents, event)
+					pendingAllowedCount++
+				} else {
+					// Strict mode: exclude if requester is not author
+					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
+					// Skip this event in strict mode if requester is not the author
+					continue
+				}
+			} else {
+				// Not blocked or pending, add to filtered events
+				filteredEvents = append(filteredEvents, event)
+			}
 		}
 
 		// Replace uniqueEvents with the filtered set
-		if blockedCount > 0 {
-			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events"+ColorReset, blockedCount)
+		if blockedCount > 0 || pendingCount > 0 {
+			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events, %d/%d pending events allowed"+ColorReset,
+				blockedCount, pendingAllowedCount, pendingCount)
 			uniqueEvents = filteredEvents
 		}
 
 		// Get the authenticated pubkey for the current connection
-		connPubkey := getAuthenticatedPubkey(data)
+		connPubkey = getAuthenticatedPubkey(data)
 
 		// Add detailed logging
 		addLogging(&request, connPubkey)

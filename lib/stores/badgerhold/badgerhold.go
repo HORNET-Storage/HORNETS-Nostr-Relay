@@ -19,6 +19,7 @@ import (
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/uuid"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -56,6 +57,11 @@ func cborDecode(data []byte, value interface{}) error {
 }
 
 func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
+	// Set default moderation mode if not specified
+	if viper.GetString("moderation_mode") == "" {
+		viper.SetDefault("moderation_mode", "strict")
+	}
+
 	store := &BadgerholdStore{}
 
 	var err error
@@ -458,10 +464,10 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		events = append(events, UnwrapEvent(&event))
 	}
 
-	fmt.Println("First check")
-	for _, ev := range events {
-		fmt.Printf("Found event of kind: %d\n", ev.Kind)
-	}
+	// fmt.Println("First check")
+	// for _, ev := range events {
+	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	// }
 
 	// Step 8: Apply additional filters (search term, etc.)
 	filteredEvents := postFilterEvents(events, filter)
@@ -474,8 +480,23 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		filteredEvents = filteredEvents[:filter.Limit]
 	}
 
-	// Step 11: Filter out events pending moderation
+	// Step 11: Filter events based on moderation status and mode
 	var finalEvents []*nostr.Event
+
+	// Get moderation mode from config (default to strict if not specified)
+	moderationMode := viper.GetString("moderation_mode")
+	isStrict := moderationMode == "strict" || moderationMode == "" // Default to strict
+
+	// Get the authenticated pubkey for the current request (if any)
+	// This is needed to allow authors to see their own pending events in strict mode
+	authPubkey := ""
+	for _, event := range filteredEvents {
+		if event.PubKey != "" {
+			authPubkey = event.PubKey
+			break
+		}
+	}
+
 	for _, event := range filteredEvents {
 		isPending, err := store.IsPendingModeration(event.ID)
 		if err != nil {
@@ -485,16 +506,30 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 			continue
 		}
 
-		// Only include events that are not pending moderation
-		if !isPending {
+		// Check if event is pending moderation
+		if isPending {
+			if !isStrict {
+				// Passive mode: include all pending events
+				log.Printf("Passive mode: Including pending event %s for all users", event.ID)
+				finalEvents = append(finalEvents, event)
+			} else if authPubkey != "" && authPubkey == event.PubKey {
+				// Strict mode: only include if requester is author
+				log.Printf("Strict mode: Including pending event %s for author %s", event.ID, authPubkey)
+				finalEvents = append(finalEvents, event)
+			} else {
+				log.Printf("Strict mode: Excluding pending event %s (not author)", event.ID)
+				// In strict mode, exclude the pending event if requester is not the author
+			}
+		} else {
+			// Not pending moderation, include it
 			finalEvents = append(finalEvents, event)
 		}
 	}
 
-	fmt.Println("Last check")
-	for _, ev := range finalEvents {
-		fmt.Printf("Found event of kind: %d\n", ev.Kind)
-	}
+	// fmt.Println("Last check")
+	// for _, ev := range finalEvents {
+	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	// }
 
 	return finalEvents, nil
 }

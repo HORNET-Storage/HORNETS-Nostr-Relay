@@ -160,6 +160,9 @@ func init() {
 	viper.SetDefault("image_moderation_timeout", 60)        // seconds
 	viper.SetDefault("image_moderation_concurrency", 5)
 
+	// Moderation mode for event visibility during moderation
+	viper.SetDefault("moderation_mode", "strict") // Options: "strict" or "passive"
+
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
 
