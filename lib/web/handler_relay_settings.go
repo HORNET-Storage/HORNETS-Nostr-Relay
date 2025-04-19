@@ -151,6 +151,11 @@ func getRelaySettings(c *fiber.Ctx) error {
 		relaySettings.FreeTierLimit = "100 MB per month"
 	}
 
+	// Initialize moderation mode if not set
+	if relaySettings.ModerationMode == "" {
+		relaySettings.ModerationMode = "strict" // Default to strict mode
+	}
+
 	log.Printf("Fetched relay settings: %+v", relaySettings) // Using %+v for more detailed output
 
 	return c.JSON(fiber.Map{
