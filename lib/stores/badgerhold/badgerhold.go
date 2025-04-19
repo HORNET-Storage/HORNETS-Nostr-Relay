@@ -57,10 +57,7 @@ func cborDecode(data []byte, value interface{}) error {
 }
 
 func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
-	// Set default moderation mode if not specified
-	if viper.GetString("moderation_mode") == "" {
-		viper.SetDefault("moderation_mode", "strict")
-	}
+	// We no longer need to set the top-level moderation_mode as we're using the one in relay_settings
 
 	store := &BadgerholdStore{}
 
@@ -483,9 +480,16 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 	// Step 11: Filter events based on moderation status and mode
 	var finalEvents []*nostr.Event
 
-	// Get moderation mode from config (default to strict if not specified)
-	moderationMode := viper.GetString("moderation_mode")
-	isStrict := moderationMode == "strict" || moderationMode == "" // Default to strict
+	// Get moderation mode from relay_settings (default to strict if not specified)
+	var isStrict bool = true // Default to strict mode
+	var relaySettings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		log.Printf("Error loading relay settings: %v", err)
+		// Keep default strict mode if there's an error
+	} else {
+		// Use the moderation mode from relay settings
+		isStrict = relaySettings.ModerationMode == "strict" || relaySettings.ModerationMode == "" // Default to strict
+	}
 
 	// Get the authenticated pubkey for the current request (if any)
 	// This is needed to allow authors to see their own pending events in strict mode

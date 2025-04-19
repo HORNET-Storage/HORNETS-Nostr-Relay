@@ -222,9 +222,16 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Get the authenticated pubkey for the current connection
 		connPubkey := getAuthenticatedPubkey(data)
 
-		// Get moderation mode from config (default to strict if not specified)
-		moderationMode := viper.GetString("moderation_mode")
-		isStrict := moderationMode == "strict" || moderationMode == "" // Default to strict
+		// Get moderation mode from relay_settings (default to strict if not specified)
+		var isStrict bool = true // Default to strict mode
+		var relaySettings lib.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+			log.Printf("Error loading relay settings: %v", err)
+			// Keep default strict mode if there's an error
+		} else {
+			// Use the moderation mode from relay settings
+			isStrict = relaySettings.ModerationMode == "strict" || relaySettings.ModerationMode == "" // Default to strict
+		}
 
 		// Filter out blocked events and handle pending moderation events based on mode
 		var filteredEvents []*nostr.Event

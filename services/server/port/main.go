@@ -115,6 +115,7 @@ func init() {
 		"KindWhitelist":    []string{"kind0", "kind1", "kind22242", "kind10010"}, // Essential kinds always enabled
 		"FreeTierEnabled":  true,
 		"FreeTierLimit":    "100 MB per month",
+		"ModerationMode":   "strict", // Default moderation mode to "strict"
 		"subscription_tiers": []map[string]interface{}{
 			{
 				"DataLimit": "1 GB per month",
@@ -160,8 +161,7 @@ func init() {
 	viper.SetDefault("image_moderation_timeout", 60)        // seconds
 	viper.SetDefault("image_moderation_concurrency", 5)
 
-	// Moderation mode for event visibility during moderation
-	viper.SetDefault("moderation_mode", "strict") // Options: "strict" or "passive"
+	// We no longer need to set the top-level moderation_mode as we're using the one in relay_settings
 
 	viper.AddConfigPath(".")
 	viper.SetConfigType("json")
