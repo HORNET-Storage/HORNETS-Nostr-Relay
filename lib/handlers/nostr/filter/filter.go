@@ -2,6 +2,8 @@ package filter
 
 import (
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
@@ -217,11 +219,28 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
-		// Filter out blocked events
+		// Get the authenticated pubkey for the current connection
+		connPubkey := getAuthenticatedPubkey(data)
+
+		// Get moderation mode from relay_settings (default to strict if not specified)
+		var isStrict bool = true // Default to strict mode
+		var relaySettings lib.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+			log.Printf("Error loading relay settings: %v", err)
+			// Keep default strict mode if there's an error
+		} else {
+			// Use the moderation mode from relay settings
+			isStrict = relaySettings.ModerationMode == "strict" || relaySettings.ModerationMode == "" // Default to strict
+		}
+
+		// Filter out blocked events and handle pending moderation events based on mode
 		var filteredEvents []*nostr.Event
 		var blockedCount int
+		var pendingCount int
+		var pendingAllowedCount int
 
 		for _, event := range uniqueEvents {
+			// First check if event is blocked (blocked events are always filtered out)
 			isBlocked, err := store.IsEventBlocked(event.ID)
 			if err != nil {
 				log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
@@ -238,18 +257,51 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				continue
 			}
 
-			// Not blocked, add to filtered events
-			filteredEvents = append(filteredEvents, event)
+			// Then check if event is pending moderation
+			isPending, err := store.IsPendingModeration(event.ID)
+			if err != nil {
+				log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
+				// If there's an error, assume not pending
+				filteredEvents = append(filteredEvents, event)
+				continue
+			}
+
+			if isPending {
+				pendingCount++
+
+				// Handle based on moderation mode
+				if !isStrict {
+					// Passive mode: include all pending events
+					log.Printf(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
+					filteredEvents = append(filteredEvents, event)
+					pendingAllowedCount++
+				} else if connPubkey != "" && connPubkey == event.PubKey {
+					// Strict mode: only include if requester is author
+					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
+						event.ID, connPubkey)
+					filteredEvents = append(filteredEvents, event)
+					pendingAllowedCount++
+				} else {
+					// Strict mode: exclude if requester is not author
+					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
+					// Skip this event in strict mode if requester is not the author
+					continue
+				}
+			} else {
+				// Not blocked or pending, add to filtered events
+				filteredEvents = append(filteredEvents, event)
+			}
 		}
 
 		// Replace uniqueEvents with the filtered set
-		if blockedCount > 0 {
-			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events"+ColorReset, blockedCount)
+		if blockedCount > 0 || pendingCount > 0 {
+			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events, %d/%d pending events allowed"+ColorReset,
+				blockedCount, pendingAllowedCount, pendingCount)
 			uniqueEvents = filteredEvents
 		}
 
 		// Get the authenticated pubkey for the current connection
-		connPubkey := getAuthenticatedPubkey(data)
+		connPubkey = getAuthenticatedPubkey(data)
 
 		// Add detailed logging
 		addLogging(&request, connPubkey)
@@ -258,15 +310,19 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		if connPubkey != "" && filterService.ShouldFilterKind(1) {
 			// Get user's filter preferences
 			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
-			if err == nil && pref.Enabled && pref.Instructions != "" {
-				log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING FILTER FOR USER: %s"+ColorReset, connPubkey)
 
+			// Check if filtering is enabled
+			if err == nil && pref.Enabled {
 				// Separate filterable (kind 1) and non-filterable events
 				var filterableEvents []*nostr.Event
 				var nonFilterableEvents []*nostr.Event
 
 				for _, e := range uniqueEvents {
-					if filterService.ShouldFilterKind(e.Kind) {
+					if e.PubKey == connPubkey {
+						nonFilterableEvents = append(nonFilterableEvents, e)
+						log.Printf(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (authored by requester)"+ColorReset,
+							e.ID, e.Kind, e.PubKey)
+					} else if filterService.ShouldFilterKind(e.Kind) {
 						filterableEvents = append(filterableEvents, e)
 					} else {
 						nonFilterableEvents = append(nonFilterableEvents, e)
@@ -285,30 +341,147 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
-				// Only filter the filterable events
-				if len(filterableEvents) > 0 {
-					filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
-					if err != nil {
-						log.Printf("Error filtering events: %v", err)
-						// On error, use the original filterable events
-						// Combine with non-filterable events
-						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-					} else {
-						// Log which events passed filtering
-						log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
-						for _, e := range filteredEvents {
-							log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+				// Step 1: Apply mute word filtering if mute words are present
+				if len(pref.MuteWords) > 0 {
+					log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING MUTE WORD FILTER FOR USER: %s"+ColorReset, connPubkey)
+
+					// Create a filtered list that excludes events with muted words
+					var muteFilteredEvents []*nostr.Event
+
+					for _, e := range filterableEvents {
+						containsMutedWord := false
+
+						// Check if event content contains any muted word
+						for _, muteWord := range pref.MuteWords {
+							if muteWord != "" && strings.Contains(strings.ToLower(e.Content), strings.ToLower(muteWord)) {
+								log.Printf(ColorRedBold+"[CONTENT FILTER] MUTED WORD: '%s' found in event ID=%s"+ColorReset,
+									muteWord, e.ID)
+								containsMutedWord = true
+								break
+							}
 						}
 
-						// Combine filtered events with non-filterable events
-						uniqueEvents = append(nonFilterableEvents, filteredEvents...)
-						log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
-							len(filteredEvents), originalCount, len(nonFilterableEvents))
+						// Only keep events that don't contain muted words
+						if !containsMutedWord {
+							muteFilteredEvents = append(muteFilteredEvents, e)
+						}
+					}
+
+					// Replace the filterable events with the mute-filtered list
+					filterableEvents = muteFilteredEvents
+
+					log.Printf(ColorYellowBold+"[CONTENT FILTER] MUTE FILTER: %d/%d events passed mute word filtering"+ColorReset,
+						len(filterableEvents), originalCount)
+				}
+
+				// Step 2: Apply instruction-based filtering if instructions exist, but only for paid users
+				if pref.Instructions != "" {
+					// Check if user is a paid subscriber
+					isPaidUser := false
+
+					// First try to get from PaidSubscriber table (most direct method)
+					paidSubscriber, err := store.GetStatsStore().GetPaidSubscriberByNpub(connPubkey)
+					if err == nil && paidSubscriber != nil {
+						// Check if subscription is still active (not expired)
+						if time.Now().Before(paidSubscriber.ExpirationDate) {
+							isPaidUser = true
+							log.Printf(ColorCyanBold+"[CONTENT FILTER] USER %s IS A PAID SUBSCRIBER (VALID UNTIL %s), APPLYING AI FILTERING"+ColorReset,
+								connPubkey, paidSubscriber.ExpirationDate.Format("2006-01-02"))
+						} else {
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS EXPIRED PAID SUBSCRIPTION (EXPIRED ON %s), SKIPPING AI FILTERING"+ColorReset,
+								connPubkey, paidSubscriber.ExpirationDate.Format("2006-01-02"))
+						}
+					} else {
+						// Fall back to checking NIP-888 events
+						events, err := store.QueryEvents(nostr.Filter{
+							Kinds: []int{888},
+							Tags:  nostr.TagMap{"p": []string{connPubkey}},
+							Limit: 1,
+						})
+
+						if err == nil && len(events) > 0 {
+							// Get relay settings to determine free tier limit
+							var relaySettings lib.RelaySettings
+							if err := viper.UnmarshalKey("relay_settings", &relaySettings); err == nil {
+								// Extract subscription tier from event
+								var subscriptionTier string
+								var expirationUnix int64
+
+								// Get tier and expiration date
+								for _, tag := range events[0].Tags {
+									if tag[0] == "active_subscription" {
+										if len(tag) > 1 {
+											subscriptionTier = tag[1]
+										}
+										if len(tag) > 2 {
+											expirationUnix, _ = strconv.ParseInt(tag[2], 10, 64)
+										}
+										break
+									}
+								}
+
+								// Check if tier is NOT the free tier AND subscription is not expired
+								if subscriptionTier != "" &&
+									(!relaySettings.FreeTierEnabled ||
+										subscriptionTier != relaySettings.FreeTierLimit) {
+
+									// Check expiration date
+									if expirationUnix > 0 && time.Now().Before(time.Unix(expirationUnix, 0)) {
+										isPaidUser = true
+										expirationDate := time.Unix(expirationUnix, 0)
+										log.Printf(ColorCyanBold+"[CONTENT FILTER] USER %s HAS VALID PAID TIER '%s' (UNTIL %s), APPLYING AI FILTERING"+ColorReset,
+											connPubkey, subscriptionTier, expirationDate.Format("2006-01-02"))
+									} else {
+										log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS EXPIRED PAID TIER '%s', SKIPPING AI FILTERING"+ColorReset,
+											connPubkey, subscriptionTier)
+									}
+								} else {
+									log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS FREE TIER, SKIPPING AI FILTERING"+ColorReset, connPubkey)
+								}
+							}
+						} else {
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] USER %s HAS NO SUBSCRIPTION, SKIPPING AI FILTERING"+ColorReset, connPubkey)
+						}
+					}
+
+					// Only apply AI filtering for paid users
+					if isPaidUser {
+						// Only filter the filterable events if there are any left after mute filtering
+						if len(filterableEvents) > 0 {
+							filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
+							if err != nil {
+								log.Printf("Error filtering events: %v", err)
+								// On error, use the events that passed mute filtering
+								// Combine with non-filterable events
+								uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+							} else {
+								// Log which events passed filtering
+								log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
+								for _, e := range filteredEvents {
+									log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+								}
+
+								// Combine filtered events with non-filterable events
+								uniqueEvents = append(nonFilterableEvents, filteredEvents...)
+								log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
+									len(filteredEvents), originalCount, len(nonFilterableEvents))
+							}
+						} else {
+							// No filterable events left after mute filtering, just use non-filterable ones
+							uniqueEvents = nonFilterableEvents
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
+						}
+					} else {
+						// Non-paid user with instructions - skip AI filtering but keep mute word filtering results
+						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+						log.Printf(ColorYellowBold+"[CONTENT FILTER] NON-PAID USER: Skipping AI filtering, %d events passed mute filtering, %d exempt events"+ColorReset,
+							len(filterableEvents), len(nonFilterableEvents))
 					}
 				} else {
-					// No filterable events, just use non-filterable ones
-					uniqueEvents = nonFilterableEvents
-					log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
+					// No instructions but we've filtered by mute words, use the mute-filtered events
+					uniqueEvents = append(nonFilterableEvents, filterableEvents...)
+					log.Printf(ColorYellowBold+"[CONTENT FILTER] MUTE-ONLY FILTER: %d events passed mute filtering, %d exempt events"+ColorReset,
+						len(filterableEvents), len(nonFilterableEvents))
 				}
 			} else {
 				log.Printf(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)

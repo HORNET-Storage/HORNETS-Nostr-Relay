@@ -71,7 +71,7 @@ func NewService(config ServiceConfig) *Service {
 		config.FilterKind = []int{1} // Default to only filtering kind 1 (text notes)
 	}
 	if config.Model == "" {
-		config.Model = "gemma3:4b" // Default model
+		config.Model = "gemma3:1b" // Default model - smaller and more efficient
 	}
 
 	return &Service{

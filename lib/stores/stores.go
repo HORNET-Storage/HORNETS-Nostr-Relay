@@ -39,6 +39,7 @@ type Store interface {
 	MarkEventBlocked(eventID string, timestamp int64) error
 	DeleteBlockedEventsOlderThan(age int64) (int, error)
 	IsEventBlocked(eventID string) (bool, error)
+	UnmarkEventBlocked(eventID string) error
 
 	// Pubkey Blocking
 	IsBlockedPubkey(pubkey string) (bool, error)
