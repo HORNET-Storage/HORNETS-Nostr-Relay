@@ -226,6 +226,7 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 	var blockedMediaURL string
 	var contentType string
 	var pubKey string
+	var lastResponse *ModerationResponse
 
 	// Get the event to extract the pubkey using QueryEvents with the event ID
 	events, err := w.Store.QueryEvents(nostr.Filter{
@@ -268,6 +269,7 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 			blockReason = response.Explanation
 			blockedMediaURL = mediaURL
 			contentType = mediaType
+			lastResponse = response // Store the response that triggered the block
 			log.Printf("Event %s will be blocked due to %s %s (reason: %s)",
 				eventID, mediaType, mediaURL, response.Explanation)
 			break // No need to check other media
@@ -276,10 +278,17 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 
 	// Take action based on moderation results
 	if shouldBlock {
-		// Mark the event as blocked with current timestamp
-		// This will retain it for 48 hours before deletion
+		// Mark the event as blocked with current timestamp and details
+		// This will retain it for 48 hours before deletion and create a moderation ticket
 		timestamp := time.Now().Unix()
-		err := w.Store.MarkEventBlocked(eventID, timestamp)
+		contentLevel := 0
+
+		// Get content level from lastResponse if available
+		if lastResponse != nil {
+			contentLevel = lastResponse.ContentLevel
+		}
+
+		err := w.Store.MarkEventBlockedWithDetails(eventID, timestamp, blockReason, contentLevel, blockedMediaURL)
 		if err != nil {
 			log.Printf("Error marking event %s as blocked: %v", eventID, err)
 		} else {

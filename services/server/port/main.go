@@ -17,6 +17,9 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
@@ -469,6 +472,9 @@ func main() {
 		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
 		nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
 		nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))
+		nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
+		nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
+		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
 	} else {
 		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
 	}

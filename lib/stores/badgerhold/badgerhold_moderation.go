@@ -2,9 +2,13 @@ package badgerhold
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
+	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 	"github.com/timshannon/badgerhold/v4"
 )
 
@@ -93,20 +97,60 @@ func (store *BadgerholdStore) GetAndRemovePendingModeration(batchSize int) ([]li
 
 // MarkEventBlocked marks an event as blocked with a timestamp
 func (store *BadgerholdStore) MarkEventBlocked(eventID string, timestamp int64) error {
+	// Call the detailed version with default values
+	return store.MarkEventBlockedWithDetails(eventID, timestamp, "Failed image moderation", 0, "")
+}
+
+// MarkEventBlockedWithDetails marks an event as blocked with additional details and creates a moderation ticket
+func (store *BadgerholdStore) MarkEventBlockedWithDetails(eventID string, timestamp int64, reason string, contentLevel int, mediaURL string) error {
 	// Create retention time - 48 hours from the blocked timestamp
 	blockedAt := time.Unix(timestamp, 0)
 	retainUntil := blockedAt.Add(48 * time.Hour)
 
 	blocked := lib.BlockedEvent{
 		EventID:     eventID,
-		Reason:      "Failed image moderation",
+		Reason:      reason,
 		BlockedAt:   blockedAt,
 		RetainUntil: retainUntil,
 	}
 
 	// Key format: "blocked:{eventID}" for easy querying
 	key := fmt.Sprintf("blocked:%s", eventID)
-	return store.Database.Upsert(key, blocked)
+	if err := store.Database.Upsert(key, blocked); err != nil {
+		return err
+	}
+
+	// Get the original event to create a ticket
+	filter := nostr.Filter{
+		IDs: []string{eventID},
+	}
+	events, err := store.QueryEvents(filter)
+	if err != nil || len(events) == 0 {
+		return fmt.Errorf("failed to retrieve event for ticket creation: %v", err)
+	}
+
+	// Get relay public key and private key for signing
+	relayPubKey := viper.GetString("relaypubkey")
+	relayPrivKey := viper.GetString("private_key")
+
+	// Create a moderation ticket for this blocked event
+	_, err = kind19841.CreateModerationTicket(
+		store,
+		eventID,
+		events[0].PubKey,
+		reason,
+		contentLevel,
+		mediaURL,
+		relayPubKey,
+		relayPrivKey,
+	)
+
+	if err != nil {
+		log.Printf("Error creating moderation ticket: %v", err)
+		// Continue anyway as the event is already marked as blocked
+	}
+
+	return nil
 }
 
 // IsEventBlocked checks if an event is blocked

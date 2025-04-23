@@ -37,6 +37,7 @@ type Store interface {
 	GetPendingModerationEvents() ([]types.PendingModeration, error)
 	GetAndRemovePendingModeration(batchSize int) ([]types.PendingModeration, error)
 	MarkEventBlocked(eventID string, timestamp int64) error
+	MarkEventBlockedWithDetails(eventID string, timestamp int64, reason string, contentLevel int, mediaURL string) error
 	DeleteBlockedEventsOlderThan(age int64) (int, error)
 	IsEventBlocked(eventID string) (bool, error)
 	UnmarkEventBlocked(eventID string) error
