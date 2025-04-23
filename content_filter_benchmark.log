@@ -1,0 +1,323 @@
+2025/04/22 11:13:26 Starting content filter benchmark
+2025/04/22 11:13:37 Event ID=a7bf5996bb21fbf4c0e011e1a474390d2f38ecb68b4ea118b5868dd892210c9e, Processing time=1.364408834s, Result=true, Error=false
+2025/04/22 11:13:37 Event ID=5fda63661efba45631df33bfced2f41f01d585d5e0bb36a96f6c7c427cccb229, Processing time=137.625417ms, Result=true, Error=false
+2025/04/22 11:13:37 Event ID=92bef56df7cc2e24372caa39b1884fbbdd0e24a0321d8ca18ca10129ab8703f8, Processing time=190.236917ms, Result=true, Error=false
+2025/04/22 11:13:37 Event ID=b1dfcd2d08c31084e0eaa5a1666bd5813c89879865ead86e171aebc699d93e4e, Processing time=148.942125ms, Result=true, Error=false
+2025/04/22 11:13:37 Event ID=91e75052e38c4e484bfe07b53cbdf48cd652cd3faf7d290ae7711fa9c9728e99, Processing time=146.689958ms, Result=true, Error=false
+2025/04/22 11:13:37 Event ID=29e0fa8157e13c098871d9395a1b9dc2dc10b1494a84bdb3ea01452bc7d0b8fd, Processing time=232.844625ms, Result=true, Error=false
+2025/04/22 11:13:38 Event ID=d4abe5e9f2e487daae7085d83892f3572928631b9f83b16052ba0d1198ea4871, Processing time=355.014708ms, Result=true, Error=false
+2025/04/22 11:13:38 Event ID=330bcfb274e80eb0db87cf6e630477731bee122628ef779bda57306fbda55fc3, Processing time=233.02375ms, Result=true, Error=false
+2025/04/22 11:13:38 Event ID=11625865b4de2676ceac39edab0e1064e227b21ce9bfafd9dbfc5c598847a46e, Processing time=287.393791ms, Result=false, Error=false
+2025/04/22 11:13:38 Event ID=9375fd6fd81e3b0ab7908ad1c22e913b738255504f734a3b9d7cf6fedf381a46, Processing time=133.127458ms, Result=true, Error=false
+2025/04/22 11:13:39 Event ID=757c72180849914369ab98543eb90570d3e6112343458fbac29b71c484972ae0, Processing time=131.810417ms, Result=false, Error=false
+2025/04/22 11:13:39 Event ID=6bd44ac01d1282a8a8c680312bc4a294525cd13755b7e499a2671965dd6b9823, Processing time=132.621333ms, Result=true, Error=false
+2025/04/22 11:13:39 Event ID=faad11776c47aa0b188f850ba4e10928b0e3fd62921194d0600e0657b4fd403d, Processing time=168.297291ms, Result=true, Error=false
+2025/04/22 11:13:39 Event ID=4ba07fd0fc6282c50e4d4e485d2c54b9d192dc596380db8d5f282dedb47b3417, Processing time=132.555333ms, Result=true, Error=false
+2025/04/22 11:13:39 Event ID=cc5a1f9897086d283c89b760ba434af2001814f33ca3f4cbb2a9cff9f88770e3, Processing time=135.223ms, Result=true, Error=false
+2025/04/22 11:13:39 Event ID=478ab7e0f26d08895c57263369c614867c39a2ef8c199f782763d24944c06c50, Processing time=188.572ms, Result=true, Error=false
+2025/04/22 11:13:40 Event ID=b38ed72744dabc05c63037fab353cb88599b33741284f0497a1e511ac934cae6, Processing time=169.592375ms, Result=false, Error=false
+2025/04/22 11:13:40 
+===== BENCHMARK RESULTS =====
+2025/04/22 11:13:40 Total events processed: 17
+2025/04/22 11:13:40 Fastest processing time: 131.810417ms
+2025/04/22 11:13:40 Slowest processing time: 1.364408834s
+2025/04/22 11:13:40 Average processing time: 252.234078ms
+2025/04/22 11:13:40 Total processing time: 4.287979332s
+2025/04/22 11:13:40 =============================
+2025/04/22 11:14:22 Event ID=a7bf5996bb21fbf4c0e011e1a474390d2f38ecb68b4ea118b5868dd892210c9e, Processing time=3.75µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=5fda63661efba45631df33bfced2f41f01d585d5e0bb36a96f6c7c427cccb229, Processing time=9.5µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=92bef56df7cc2e24372caa39b1884fbbdd0e24a0321d8ca18ca10129ab8703f8, Processing time=5.583µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=b1dfcd2d08c31084e0eaa5a1666bd5813c89879865ead86e171aebc699d93e4e, Processing time=2.041µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=91e75052e38c4e484bfe07b53cbdf48cd652cd3faf7d290ae7711fa9c9728e99, Processing time=1.75µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=29e0fa8157e13c098871d9395a1b9dc2dc10b1494a84bdb3ea01452bc7d0b8fd, Processing time=2.375µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=d4abe5e9f2e487daae7085d83892f3572928631b9f83b16052ba0d1198ea4871, Processing time=1.875µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=330bcfb274e80eb0db87cf6e630477731bee122628ef779bda57306fbda55fc3, Processing time=1.542µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=11625865b4de2676ceac39edab0e1064e227b21ce9bfafd9dbfc5c598847a46e, Processing time=1.625µs, Result=false, Error=false
+2025/04/22 11:14:22 Event ID=9375fd6fd81e3b0ab7908ad1c22e913b738255504f734a3b9d7cf6fedf381a46, Processing time=1.875µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=757c72180849914369ab98543eb90570d3e6112343458fbac29b71c484972ae0, Processing time=1.458µs, Result=false, Error=false
+2025/04/22 11:14:22 Event ID=6bd44ac01d1282a8a8c680312bc4a294525cd13755b7e499a2671965dd6b9823, Processing time=1.959µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=faad11776c47aa0b188f850ba4e10928b0e3fd62921194d0600e0657b4fd403d, Processing time=1.459µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=4ba07fd0fc6282c50e4d4e485d2c54b9d192dc596380db8d5f282dedb47b3417, Processing time=1.416µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=cc5a1f9897086d283c89b760ba434af2001814f33ca3f4cbb2a9cff9f88770e3, Processing time=1.416µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=478ab7e0f26d08895c57263369c614867c39a2ef8c199f782763d24944c06c50, Processing time=2.083µs, Result=true, Error=false
+2025/04/22 11:14:22 Event ID=b38ed72744dabc05c63037fab353cb88599b33741284f0497a1e511ac934cae6, Processing time=1.5µs, Result=false, Error=false
+2025/04/22 11:14:23 Event ID=2e860c6b7529ff04fa3ad409dec2d995c3d917df60b790b27bf61976e488a1f1, Processing time=328.870792ms, Result=true, Error=false
+2025/04/22 11:14:23 Event ID=a8ee12d2935fa33bc022bd8c21543b2f0bf4b27f76093c33ee3af6258b3f265a, Processing time=226.810541ms, Result=true, Error=false
+2025/04/22 11:14:23 Event ID=c587d9670210095dcc81d5122cc1edb0c6f3cbedd5710a2710a2d278ecdbe811, Processing time=148.628208ms, Result=true, Error=false
+2025/04/22 11:14:23 Event ID=5a03dddafb769f53eafedc7f2304e73434dda9d9748cb91d54969dcd5338ebfb, Processing time=234.3445ms, Result=true, Error=false
+2025/04/22 11:14:24 Event ID=5e274836e047b91b26c3d7b46aedb63ae898062e8d55993e15bff3ae64dbbd19, Processing time=406.374125ms, Result=true, Error=false
+2025/04/22 11:14:24 Event ID=5ff7e2b8c03fa9baf8fe705fac2d3b7958701b5c634e18f475bdb2de3e76b2ff, Processing time=421.730042ms, Result=true, Error=false
+2025/04/22 11:14:24 Event ID=06f9d9d575e89062a429304f28e9f19cd8eaf9ccff2b9f62f5d860c99f9f2cb8, Processing time=370.020166ms, Result=true, Error=false
+2025/04/22 11:14:25 Event ID=5f5ec9a2643cff61ea50ed865743960ef9a86e30b950571bb054d2a112d5b95d, Processing time=147.562917ms, Result=false, Error=false
+2025/04/22 11:14:25 Event ID=143a89ac81a4bba339e06b6dc2ad44749c8548322cf742a5e01a4706f883b2eb, Processing time=168.713959ms, Result=true, Error=false
+2025/04/22 11:14:25 Event ID=0623d5b1a9db242220bd1b26903bea5d95cc0c8e3acc9fcd19abb6b83d359835, Processing time=168.918417ms, Result=true, Error=false
+2025/04/22 11:14:25 Event ID=e053034b73d3735ef630962424140825fc7b4dd09be65c788c739902b5eea36c, Processing time=210.520208ms, Result=true, Error=false
+2025/04/22 11:14:25 Event ID=aa279363543a69a86ea6e2189e703270a1021a36a9b91a6cc4081abb09aff54e, Processing time=171.708625ms, Result=true, Error=false
+2025/04/22 11:14:26 Event ID=30bc042366d1c9a4e0f3870e84f1452cf16c2a4189f96e30c247312532da8e95, Processing time=191.18875ms, Result=true, Error=false
+2025/04/22 11:14:26 Event ID=99b9f241f9341ea37d2e9cbf792b78259159d4223a2ef66800c11c6410fb3791, Processing time=168.69075ms, Result=true, Error=false
+2025/04/22 11:14:26 Event ID=4f8de755dd56bcdc35198e070b59fd1498490de8febff0ba6ef6df85a677d5c6, Processing time=170.058958ms, Result=true, Error=false
+2025/04/22 11:14:26 Event ID=06c855c7116a6071f5a8cc9ca4a53dd4652f7dcd9496ab07e35ac999c30720f3, Processing time=212.945458ms, Result=true, Error=false
+2025/04/22 11:14:26 Event ID=cbfe212bf3ed03dec0a1067ad1fbbae527e7a6d2e3c2878d341bf7124620822e, Processing time=132.080875ms, Result=false, Error=false
+2025/04/22 11:14:26 Event ID=4ef36c16844857d8802e2a25f180a879648d4019007448f513393ecc3bf3c08e, Processing time=150.066084ms, Result=true, Error=false
+2025/04/22 11:14:27 Event ID=556a7d33fec7986ca4cea5acc3f07c36922776a94534b02bdaf8a60c7ea3f2dd, Processing time=149.928583ms, Result=true, Error=false
+2025/04/22 11:14:27 Event ID=e491e98c332a83cdfe0c42da1a42e77f7c97fbf62a766da4349343d3f3bf223c, Processing time=234.608583ms, Result=false, Error=false
+2025/04/22 11:14:27 Event ID=57f7a4ad44634f83603bd4d5e5e7e519eb4ed16eed9dbddd60d2143fe960ff87, Processing time=403.204583ms, Result=true, Error=false
+2025/04/22 11:14:27 Event ID=9fc02484dae903cad154efedaea3ab3b39fad6890d45a5695fdff030a979f34b, Processing time=311.842125ms, Result=false, Error=false
+2025/04/22 11:14:28 Event ID=76d838bf9349e9a69fca2a8bbc303794821e220fe8dc2cfdc0676acee6badbe8, Processing time=133.820084ms, Result=true, Error=false
+2025/04/22 11:14:28 Event ID=dd019c69ccacd92587187911f70b69a65870a7d0549c2f8b78b199b20e71558a, Processing time=190.668833ms, Result=false, Error=false
+2025/04/22 11:14:28 Event ID=2b4f5ada3b33760e883b2598fc1b66ac15021ebb1fe6ff5273ac82d42aab751a, Processing time=150.250417ms, Result=true, Error=false
+2025/04/22 11:14:28 Event ID=d733ce82b1b53a305c9d5295dfbe2135ac3de0f35f7bd5b5fad778d32ec702dd, Processing time=174.592667ms, Result=true, Error=false
+2025/04/22 11:14:28 Event ID=f7d1b4e68c395c20e69368468be3467ec6cdfef0d3be97b4215fac6e1e62a8a9, Processing time=170.787042ms, Result=true, Error=false
+2025/04/22 11:14:28 Event ID=865830f4ddf79513adf1ccd2d58ab85690244867b1c6c9d7601c8ce1a82a523c, Processing time=133.799208ms, Result=true, Error=false
+2025/04/22 11:14:29 Event ID=0c3b8359f8625cbb028207ad228ba0f179467c6845756a50aeeec8fcbb338a8a, Processing time=233.696208ms, Result=true, Error=false
+2025/04/22 11:14:29 Event ID=19039856d54099794bd0c09bc1a2e43943af024c66cb477ffe5e71197195a19b, Processing time=333.519375ms, Result=true, Error=false
+2025/04/22 11:14:29 Event ID=f0b2fb5f99056757df630090f59b3b2c6967c8cfd0c21c0c05a3d3f75b91e9ce, Processing time=298.644417ms, Result=true, Error=false
+2025/04/22 11:14:30 Event ID=77f702a533ada8fb376b39c5f61a9b52b79d489920705bc5ea0b10b4057276f5, Processing time=291.304166ms, Result=true, Error=false
+2025/04/22 11:14:30 Event ID=332b127ba6d4b60143a3e5e5898d2fedc38f3fc2bdc261b572825681d6e55c03, Processing time=133.463708ms, Result=false, Error=false
+2025/04/22 11:14:30 Event ID=17a5b22cf6d053c7e3fdd59d303b5fdd842cd9aec793a25468fcab4b1ab2ebe3, Processing time=132.140167ms, Result=false, Error=false
+2025/04/22 11:14:30 Event ID=35e7807ea6358767ac6c693fed8fda9873ee50a6668a6ee1ee56604b692efb80, Processing time=234.6525ms, Result=false, Error=false
+2025/04/22 11:14:30 Event ID=d970ae72bb4e611d73c93f1e45fcf5fd6c0f3ef665ad09a470bd34b74a610125, Processing time=309.752791ms, Result=true, Error=false
+2025/04/22 11:14:31 Event ID=2e1fab60769ab43732e7489cf6c056d3d1fb711d847ae64e3e222d8321649e52, Processing time=212.876666ms, Result=true, Error=false
+2025/04/22 11:14:31 Event ID=29f941271da377da4ecdbd2d2ea99339b38412a91f2b4c763e394c523f3a952e, Processing time=248.74375ms, Result=true, Error=false
+2025/04/22 11:14:31 Event ID=936f296a8f855118ca6f300bdafbb3d7a6f5e2aa0fb22675ac5c2bd1cbc87901, Processing time=351.046584ms, Result=true, Error=false
+2025/04/22 11:14:31 Event ID=e5c7ba998da30a573aec02f0fd0a84b19b0fccf8f5d1954e12b08de71966ebe6, Processing time=171.232667ms, Result=true, Error=false
+2025/04/22 11:14:32 Event ID=7484a193c35034e77cd76987bfb16ddc812b2ee6028d9ac9155265389e25a40e, Processing time=133.609916ms, Result=true, Error=false
+2025/04/22 11:14:32 Event ID=13f5d263958b9f1cb2828a1b80a695b90c3e1c03c9929d952bf00f34e19c68f1, Processing time=191.8265ms, Result=true, Error=false
+2025/04/22 11:14:32 Event ID=917f5a51a0e1af44f9086b9142cbbe320880cbce7489044ebd946b68dbf5ff1f, Processing time=169.906959ms, Result=true, Error=false
+2025/04/22 11:14:32 Event ID=5e72d584ad16976eef3d728085f2736e711f554a3ca923fced1bdfe92f32baf0, Processing time=133.920625ms, Result=true, Error=false
+2025/04/22 11:14:32 Event ID=b47ba05118dbcaa26d50500fe1eeb7de62f57e398abafdebfdcb02f656e97cf1, Processing time=133.217542ms, Result=true, Error=false
+2025/04/22 11:14:32 Event ID=c2f53e09b73d5c4428be70bdc87b3e2231b82edbcb7212cbede4ed7f31de2491, Processing time=192.767625ms, Result=true, Error=false
+2025/04/22 11:14:33 Event ID=c0f2d2fdad3519f74304f04044cbb3ea987fdb891acf540d16476e342faf4743, Processing time=233.713625ms, Result=true, Error=false
+2025/04/22 11:14:33 Event ID=3065437a462cd80210fd431060006aa9407c44a47a0c08d005eb72b52ecffa90, Processing time=272.769333ms, Result=true, Error=false
+2025/04/22 11:14:33 Event ID=81a7236e18b00eedefd47b6ad1660a53c513e5a0d689d58001171faf00affa0a, Processing time=331.370708ms, Result=true, Error=false
+2025/04/22 11:14:34 Event ID=905f8cb3063f8dd2a7a346351e97a90f3db2255810bbb60645c4bc845c584a29, Processing time=355.136708ms, Result=true, Error=false
+2025/04/22 11:14:34 Event ID=b3e06181ea316af1fe54b03c56820549fd383042b3067f6840e5ce1a4f0fb642, Processing time=334.625416ms, Result=true, Error=false
+2025/04/22 11:14:34 Event ID=f06327d7af47be341e530385865808f65250de75e44c3a5c79e6f6972f963150, Processing time=148.624916ms, Result=true, Error=false
+2025/04/22 11:14:34 Event ID=87f602cc1b8afd137ba297f0c13d19f1a7b2834df67c10596e098b3d550f72b7, Processing time=213.973416ms, Result=true, Error=false
+2025/04/22 11:14:34 Event ID=2f4d7a40e8a4b9c258a001a5eb51a37786027e81949e11bc79f745eb9e55186f, Processing time=169.875292ms, Result=true, Error=false
+2025/04/22 11:14:35 Event ID=67a6af5cce30b6a78696a551faad6e381a0d551ce9ab9bb54673d6f517abc84e, Processing time=190.053917ms, Result=true, Error=false
+2025/04/22 11:14:35 Event ID=2c25e01c43ac449bac50f367b43cd51a1c86a03aece933b075548822508fba59, Processing time=211.60125ms, Result=true, Error=false
+2025/04/22 11:14:35 Event ID=d88096be93c6561908efbd476c1fb012ab3a225ad7ac38a7c34ff73f48c31e3e, Processing time=215.435666ms, Result=true, Error=false
+2025/04/22 11:14:35 Event ID=b4f1c3391929435fb19a09f5a8c99ddadb4bea2ca37cf5c78cb202d8384db5cd, Processing time=170.061875ms, Result=true, Error=false
+2025/04/22 11:14:35 Event ID=e30e2c6a70f81e84a4e3be536d89b1281a8b5609c37909ce17df961876ca44c7, Processing time=189.122917ms, Result=true, Error=false
+2025/04/22 11:14:36 Event ID=eb77a99354a76edd7f4f6e14bc996339ad7e06f53e1209b41ad7c3500f1e626e, Processing time=171.205333ms, Result=true, Error=false
+2025/04/22 11:14:36 Event ID=1fa42f5ffa3c4487f8c795bdeeec46872f3a83f7d57139d9eff1d01b19e92612, Processing time=190.981083ms, Result=true, Error=false
+2025/04/22 11:14:36 Event ID=31fda80410bf6c7b2906e923ce91cef8c4659bc7671a676236e6316970d5b130, Processing time=250.536125ms, Result=false, Error=false
+2025/04/22 11:14:36 Event ID=8afb79fc5663057eeac71afe0d3475acc1b6ca759cd405699a38eb405a08578b, Processing time=373.683167ms, Result=true, Error=false
+2025/04/22 11:14:37 Event ID=3d6dc533c837fe91c976a05c849ff44bcd894fb8ffe7159f5cc8913fe329ffc4, Processing time=213.042834ms, Result=true, Error=false
+2025/04/22 11:14:37 Event ID=c73244d7cd5663dd9be15ac6101f638273405e803f873ee2dc7e688addf06802, Processing time=294.008167ms, Result=true, Error=false
+2025/04/22 11:14:37 Event ID=fc5691a46f3cf437fed4f66c6899596e419e9033a1f5ca6f007fa2aee95a84a2, Processing time=488.914667ms, Result=true, Error=false
+2025/04/22 11:14:38 Event ID=dc0dac9b65ee707ef0025ed1dfaf05915228471592436844412283d036721dfe, Processing time=349.392292ms, Result=true, Error=false
+2025/04/22 11:14:38 Event ID=c03911e84de48231b9cdf26da936af3b203f32b2ce24e8cc044fdcf3bd1c698a, Processing time=296.157667ms, Result=true, Error=false
+2025/04/22 11:14:38 Event ID=2a34fef9d41d462a9b1004ddfb478bd3b1f22597c4fb553b8481e79244d6810a, Processing time=466.476042ms, Result=true, Error=false
+2025/04/22 11:14:39 Event ID=635b56ce24283085fd438348755b6be9942439df336e62b1389200ae389e8812, Processing time=463.644375ms, Result=true, Error=false
+2025/04/22 11:14:40 Event ID=d67379cf49a6068b13033422e8a7531879a662884d1a3742fc7d45ca884c0f76, Processing time=631.002916ms, Result=true, Error=false
+2025/04/22 11:14:40 
+===== BENCHMARK RESULTS =====
+2025/04/22 11:14:40 Total events processed: 88
+2025/04/22 11:14:40 Fastest processing time: 1.416µs
+2025/04/22 11:14:40 Slowest processing time: 631.002916ms
+2025/04/22 11:14:40 Average processing time: 195.619438ms
+2025/04/22 11:14:40 Total processing time: 17.21451058s
+2025/04/22 11:14:40 =============================
+2025/04/22 11:17:46 Starting content filter benchmark
+2025/04/22 11:19:37 Starting content filter benchmark
+2025/04/22 11:24:48 Starting content filter benchmark
+2025/04/22 11:25:48 Event ID=a7bf5996bb21fbf4c0e011e1a474390d2f38ecb68b4ea118b5868dd892210c9e, Processing time=1.320467834s, Result=true, Error=false
+2025/04/22 11:25:48 Event ID=5fda63661efba45631df33bfced2f41f01d585d5e0bb36a96f6c7c427cccb229, Processing time=132.385084ms, Result=true, Error=false
+2025/04/22 11:25:48 Event ID=92bef56df7cc2e24372caa39b1884fbbdd0e24a0321d8ca18ca10129ab8703f8, Processing time=189.609291ms, Result=true, Error=false
+2025/04/22 11:25:48 Event ID=b1dfcd2d08c31084e0eaa5a1666bd5813c89879865ead86e171aebc699d93e4e, Processing time=149.063708ms, Result=true, Error=false
+2025/04/22 11:25:48 Event ID=91e75052e38c4e484bfe07b53cbdf48cd652cd3faf7d290ae7711fa9c9728e99, Processing time=146.157041ms, Result=true, Error=false
+2025/04/22 11:25:48 Event ID=29e0fa8157e13c098871d9395a1b9dc2dc10b1494a84bdb3ea01452bc7d0b8fd, Processing time=232.206791ms, Result=true, Error=false
+2025/04/22 11:25:49 Event ID=d4abe5e9f2e487daae7085d83892f3572928631b9f83b16052ba0d1198ea4871, Processing time=353.690625ms, Result=true, Error=false
+2025/04/22 11:25:49 Event ID=330bcfb274e80eb0db87cf6e630477731bee122628ef779bda57306fbda55fc3, Processing time=234.75575ms, Result=true, Error=false
+2025/04/22 11:25:49 Event ID=11625865b4de2676ceac39edab0e1064e227b21ce9bfafd9dbfc5c598847a46e, Processing time=288.026334ms, Result=false, Error=false
+2025/04/22 11:25:49 Event ID=9375fd6fd81e3b0ab7908ad1c22e913b738255504f734a3b9d7cf6fedf381a46, Processing time=133.724084ms, Result=true, Error=false
+2025/04/22 11:25:50 Event ID=757c72180849914369ab98543eb90570d3e6112343458fbac29b71c484972ae0, Processing time=132.771ms, Result=false, Error=false
+2025/04/22 11:25:50 Event ID=6bd44ac01d1282a8a8c680312bc4a294525cd13755b7e499a2671965dd6b9823, Processing time=133.402458ms, Result=true, Error=false
+2025/04/22 11:25:50 Event ID=faad11776c47aa0b188f850ba4e10928b0e3fd62921194d0600e0657b4fd403d, Processing time=169.798208ms, Result=true, Error=false
+2025/04/22 11:25:50 Event ID=4ba07fd0fc6282c50e4d4e485d2c54b9d192dc596380db8d5f282dedb47b3417, Processing time=132.614375ms, Result=true, Error=false
+2025/04/22 11:25:50 Event ID=cc5a1f9897086d283c89b760ba434af2001814f33ca3f4cbb2a9cff9f88770e3, Processing time=132.349458ms, Result=true, Error=false
+2025/04/22 11:25:50 Event ID=478ab7e0f26d08895c57263369c614867c39a2ef8c199f782763d24944c06c50, Processing time=188.022625ms, Result=true, Error=false
+2025/04/22 11:25:50 Event ID=b38ed72744dabc05c63037fab353cb88599b33741284f0497a1e511ac934cae6, Processing time=169.718333ms, Result=false, Error=false
+2025/04/22 11:25:51 Event ID=2e860c6b7529ff04fa3ad409dec2d995c3d917df60b790b27bf61976e488a1f1, Processing time=146.385834ms, Result=true, Error=false
+2025/04/22 11:25:51 Event ID=a8ee12d2935fa33bc022bd8c21543b2f0bf4b27f76093c33ee3af6258b3f265a, Processing time=210.866666ms, Result=true, Error=false
+2025/04/22 11:25:51 Event ID=c587d9670210095dcc81d5122cc1edb0c6f3cbedd5710a2710a2d278ecdbe811, Processing time=146.4515ms, Result=true, Error=false
+2025/04/22 11:25:51 Event ID=5a03dddafb769f53eafedc7f2304e73434dda9d9748cb91d54969dcd5338ebfb, Processing time=230.528042ms, Result=true, Error=false
+2025/04/22 11:25:52 Event ID=5e274836e047b91b26c3d7b46aedb63ae898062e8d55993e15bff3ae64dbbd19, Processing time=406.77275ms, Result=true, Error=false
+2025/04/22 11:25:52 Event ID=5ff7e2b8c03fa9baf8fe705fac2d3b7958701b5c634e18f475bdb2de3e76b2ff, Processing time=419.968917ms, Result=true, Error=false
+2025/04/22 11:25:52 Event ID=06f9d9d575e89062a429304f28e9f19cd8eaf9ccff2b9f62f5d860c99f9f2cb8, Processing time=369.329083ms, Result=true, Error=false
+2025/04/22 11:25:53 Event ID=5f5ec9a2643cff61ea50ed865743960ef9a86e30b950571bb054d2a112d5b95d, Processing time=147.538541ms, Result=false, Error=false
+2025/04/22 11:25:53 Event ID=143a89ac81a4bba339e06b6dc2ad44749c8548322cf742a5e01a4706f883b2eb, Processing time=169.330958ms, Result=true, Error=false
+2025/04/22 11:25:53 Event ID=0623d5b1a9db242220bd1b26903bea5d95cc0c8e3acc9fcd19abb6b83d359835, Processing time=171.147292ms, Result=true, Error=false
+2025/04/22 11:25:53 Event ID=e053034b73d3735ef630962424140825fc7b4dd09be65c788c739902b5eea36c, Processing time=210.728917ms, Result=true, Error=false
+2025/04/22 11:25:53 Event ID=aa279363543a69a86ea6e2189e703270a1021a36a9b91a6cc4081abb09aff54e, Processing time=172.523083ms, Result=true, Error=false
+2025/04/22 11:25:53 Event ID=30bc042366d1c9a4e0f3870e84f1452cf16c2a4189f96e30c247312532da8e95, Processing time=191.1855ms, Result=true, Error=false
+2025/04/22 11:25:54 Event ID=99b9f241f9341ea37d2e9cbf792b78259159d4223a2ef66800c11c6410fb3791, Processing time=170.367958ms, Result=true, Error=false
+2025/04/22 11:25:54 Event ID=4f8de755dd56bcdc35198e070b59fd1498490de8febff0ba6ef6df85a677d5c6, Processing time=169.90675ms, Result=true, Error=false
+2025/04/22 11:25:54 Event ID=06c855c7116a6071f5a8cc9ca4a53dd4652f7dcd9496ab07e35ac999c30720f3, Processing time=212.757417ms, Result=true, Error=false
+2025/04/22 11:25:54 Event ID=cbfe212bf3ed03dec0a1067ad1fbbae527e7a6d2e3c2878d341bf7124620822e, Processing time=132.263667ms, Result=false, Error=false
+2025/04/22 11:25:54 Event ID=4ef36c16844857d8802e2a25f180a879648d4019007448f513393ecc3bf3c08e, Processing time=147.690209ms, Result=true, Error=false
+2025/04/22 11:25:54 Event ID=556a7d33fec7986ca4cea5acc3f07c36922776a94534b02bdaf8a60c7ea3f2dd, Processing time=152.191125ms, Result=true, Error=false
+2025/04/22 11:25:55 Event ID=e491e98c332a83cdfe0c42da1a42e77f7c97fbf62a766da4349343d3f3bf223c, Processing time=234.522459ms, Result=false, Error=false
+2025/04/22 11:25:55 Event ID=57f7a4ad44634f83603bd4d5e5e7e519eb4ed16eed9dbddd60d2143fe960ff87, Processing time=401.716166ms, Result=true, Error=false
+2025/04/22 11:25:55 Event ID=9fc02484dae903cad154efedaea3ab3b39fad6890d45a5695fdff030a979f34b, Processing time=310.520667ms, Result=false, Error=false
+2025/04/22 11:25:56 Event ID=76d838bf9349e9a69fca2a8bbc303794821e220fe8dc2cfdc0676acee6badbe8, Processing time=132.9575ms, Result=true, Error=false
+2025/04/22 11:25:56 Event ID=dd019c69ccacd92587187911f70b69a65870a7d0549c2f8b78b199b20e71558a, Processing time=190.809625ms, Result=false, Error=false
+2025/04/22 11:25:56 Event ID=2b4f5ada3b33760e883b2598fc1b66ac15021ebb1fe6ff5273ac82d42aab751a, Processing time=149.020666ms, Result=true, Error=false
+2025/04/22 11:25:56 Event ID=d733ce82b1b53a305c9d5295dfbe2135ac3de0f35f7bd5b5fad778d32ec702dd, Processing time=170.675625ms, Result=true, Error=false
+2025/04/22 11:25:56 Event ID=f7d1b4e68c395c20e69368468be3467ec6cdfef0d3be97b4215fac6e1e62a8a9, Processing time=171.098291ms, Result=true, Error=false
+2025/04/22 11:25:56 Event ID=865830f4ddf79513adf1ccd2d58ab85690244867b1c6c9d7601c8ce1a82a523c, Processing time=132.705917ms, Result=true, Error=false
+2025/04/22 11:25:57 Event ID=0c3b8359f8625cbb028207ad228ba0f179467c6845756a50aeeec8fcbb338a8a, Processing time=235.273917ms, Result=true, Error=false
+2025/04/22 11:25:57 Event ID=19039856d54099794bd0c09bc1a2e43943af024c66cb477ffe5e71197195a19b, Processing time=333.244208ms, Result=true, Error=false
+2025/04/22 11:25:57 Event ID=f0b2fb5f99056757df630090f59b3b2c6967c8cfd0c21c0c05a3d3f75b91e9ce, Processing time=298.288666ms, Result=true, Error=false
+2025/04/22 11:25:58 Event ID=77f702a533ada8fb376b39c5f61a9b52b79d489920705bc5ea0b10b4057276f5, Processing time=293.226875ms, Result=true, Error=false
+2025/04/22 11:25:58 Event ID=332b127ba6d4b60143a3e5e5898d2fedc38f3fc2bdc261b572825681d6e55c03, Processing time=132.874209ms, Result=false, Error=false
+2025/04/22 11:25:58 Event ID=17a5b22cf6d053c7e3fdd59d303b5fdd842cd9aec793a25468fcab4b1ab2ebe3, Processing time=134.332084ms, Result=false, Error=false
+2025/04/22 11:25:58 Event ID=35e7807ea6358767ac6c693fed8fda9873ee50a6668a6ee1ee56604b692efb80, Processing time=234.084042ms, Result=false, Error=false
+2025/04/22 11:25:58 Event ID=d970ae72bb4e611d73c93f1e45fcf5fd6c0f3ef665ad09a470bd34b74a610125, Processing time=309.279334ms, Result=true, Error=false
+2025/04/22 11:25:59 Event ID=2e1fab60769ab43732e7489cf6c056d3d1fb711d847ae64e3e222d8321649e52, Processing time=213.228583ms, Result=true, Error=false
+2025/04/22 11:25:59 Event ID=29f941271da377da4ecdbd2d2ea99339b38412a91f2b4c763e394c523f3a952e, Processing time=249.890459ms, Result=true, Error=false
+2025/04/22 11:25:59 Event ID=936f296a8f855118ca6f300bdafbb3d7a6f5e2aa0fb22675ac5c2bd1cbc87901, Processing time=350.704958ms, Result=true, Error=false
+2025/04/22 11:25:59 Event ID=e5c7ba998da30a573aec02f0fd0a84b19b0fccf8f5d1954e12b08de71966ebe6, Processing time=171.18525ms, Result=true, Error=false
+2025/04/22 11:25:59 Event ID=7484a193c35034e77cd76987bfb16ddc812b2ee6028d9ac9155265389e25a40e, Processing time=133.272834ms, Result=true, Error=false
+2025/04/22 11:26:00 Event ID=13f5d263958b9f1cb2828a1b80a695b90c3e1c03c9929d952bf00f34e19c68f1, Processing time=191.836459ms, Result=true, Error=false
+2025/04/22 11:26:00 Event ID=917f5a51a0e1af44f9086b9142cbbe320880cbce7489044ebd946b68dbf5ff1f, Processing time=170.905667ms, Result=true, Error=false
+2025/04/22 11:26:00 Event ID=5e72d584ad16976eef3d728085f2736e711f554a3ca923fced1bdfe92f32baf0, Processing time=134.845125ms, Result=true, Error=false
+2025/04/22 11:26:00 Event ID=b47ba05118dbcaa26d50500fe1eeb7de62f57e398abafdebfdcb02f656e97cf1, Processing time=133.427583ms, Result=true, Error=false
+2025/04/22 11:26:00 Event ID=c2f53e09b73d5c4428be70bdc87b3e2231b82edbcb7212cbede4ed7f31de2491, Processing time=193.352125ms, Result=true, Error=false
+2025/04/22 11:26:00 Event ID=c0f2d2fdad3519f74304f04044cbb3ea987fdb891acf540d16476e342faf4743, Processing time=211.775584ms, Result=true, Error=false
+2025/04/22 11:26:01 Event ID=3065437a462cd80210fd431060006aa9407c44a47a0c08d005eb72b52ecffa90, Processing time=272.668625ms, Result=true, Error=false
+2025/04/22 11:26:01 Event ID=81a7236e18b00eedefd47b6ad1660a53c513e5a0d689d58001171faf00affa0a, Processing time=331.086667ms, Result=true, Error=false
+2025/04/22 11:26:01 Event ID=905f8cb3063f8dd2a7a346351e97a90f3db2255810bbb60645c4bc845c584a29, Processing time=353.854667ms, Result=true, Error=false
+2025/04/22 11:26:02 Event ID=b3e06181ea316af1fe54b03c56820549fd383042b3067f6840e5ce1a4f0fb642, Processing time=333.055792ms, Result=true, Error=false
+2025/04/22 11:26:02 Event ID=f06327d7af47be341e530385865808f65250de75e44c3a5c79e6f6972f963150, Processing time=148.330208ms, Result=true, Error=false
+2025/04/22 11:26:02 Event ID=87f602cc1b8afd137ba297f0c13d19f1a7b2834df67c10596e098b3d550f72b7, Processing time=211.458875ms, Result=true, Error=false
+2025/04/22 11:26:02 Event ID=2f4d7a40e8a4b9c258a001a5eb51a37786027e81949e11bc79f745eb9e55186f, Processing time=169.760209ms, Result=true, Error=false
+2025/04/22 11:26:03 Event ID=67a6af5cce30b6a78696a551faad6e381a0d551ce9ab9bb54673d6f517abc84e, Processing time=189.470166ms, Result=true, Error=false
+2025/04/22 11:26:03 Event ID=2c25e01c43ac449bac50f367b43cd51a1c86a03aece933b075548822508fba59, Processing time=212.576958ms, Result=true, Error=false
+2025/04/22 11:26:03 Event ID=d88096be93c6561908efbd476c1fb012ab3a225ad7ac38a7c34ff73f48c31e3e, Processing time=191.0845ms, Result=true, Error=false
+2025/04/22 11:26:03 Event ID=b4f1c3391929435fb19a09f5a8c99ddadb4bea2ca37cf5c78cb202d8384db5cd, Processing time=170.308125ms, Result=true, Error=false
+2025/04/22 11:26:03 Event ID=e30e2c6a70f81e84a4e3be536d89b1281a8b5609c37909ce17df961876ca44c7, Processing time=190.276042ms, Result=true, Error=false
+2025/04/22 11:26:03 Event ID=eb77a99354a76edd7f4f6e14bc996339ad7e06f53e1209b41ad7c3500f1e626e, Processing time=169.532542ms, Result=true, Error=false
+2025/04/22 11:26:04 Event ID=1fa42f5ffa3c4487f8c795bdeeec46872f3a83f7d57139d9eff1d01b19e92612, Processing time=188.737458ms, Result=true, Error=false
+2025/04/22 11:26:04 Event ID=31fda80410bf6c7b2906e923ce91cef8c4659bc7671a676236e6316970d5b130, Processing time=250.500833ms, Result=false, Error=false
+2025/04/22 11:26:04 Event ID=8afb79fc5663057eeac71afe0d3475acc1b6ca759cd405699a38eb405a08578b, Processing time=375.750208ms, Result=true, Error=false
+2025/04/22 11:26:04 Event ID=3d6dc533c837fe91c976a05c849ff44bcd894fb8ffe7159f5cc8913fe329ffc4, Processing time=212.962792ms, Result=true, Error=false
+2025/04/22 11:26:05 Event ID=c73244d7cd5663dd9be15ac6101f638273405e803f873ee2dc7e688addf06802, Processing time=294.894791ms, Result=true, Error=false
+2025/04/22 11:26:05 Event ID=fc5691a46f3cf437fed4f66c6899596e419e9033a1f5ca6f007fa2aee95a84a2, Processing time=468.110583ms, Result=true, Error=false
+2025/04/22 11:26:06 Event ID=dc0dac9b65ee707ef0025ed1dfaf05915228471592436844412283d036721dfe, Processing time=349.274458ms, Result=true, Error=false
+2025/04/22 11:26:06 Event ID=c03911e84de48231b9cdf26da936af3b203f32b2ce24e8cc044fdcf3bd1c698a, Processing time=295.824791ms, Result=true, Error=false
+2025/04/22 11:26:06 Event ID=2a34fef9d41d462a9b1004ddfb478bd3b1f22597c4fb553b8481e79244d6810a, Processing time=464.731042ms, Result=true, Error=false
+2025/04/22 11:26:07 Event ID=635b56ce24283085fd438348755b6be9942439df336e62b1389200ae389e8812, Processing time=462.371667ms, Result=true, Error=false
+2025/04/22 11:26:07 Event ID=d67379cf49a6068b13033422e8a7531879a662884d1a3742fc7d45ca884c0f76, Processing time=634.864542ms, Result=true, Error=false
+2025/04/22 11:26:07 
+===== BENCHMARK RESULTS =====
+2025/04/22 11:26:07 Total events processed: 88
+2025/04/22 11:26:07 Fastest processing time: 132.263667ms
+2025/04/22 11:26:07 Slowest processing time: 1.320467834s
+2025/04/22 11:26:07 Average processing time: 240.650438ms
+2025/04/22 11:26:07 Total processing time: 21.177238627s
+2025/04/22 11:26:07 =============================
+2025/04/22 13:48:24 Event ID=a0ff5ba9d0ac503c8a7d68dd35f7d164f7039e56036378202e30f03624c7fa38, Processing time=1.556960584s, Result=true, Error=false
+2025/04/22 13:48:25 Event ID=c075de15a52ee5ce47a8bb9e62d3470481b0a2e2d107048aadc889970d67f1f3, Processing time=177.653917ms, Result=true, Error=false
+2025/04/22 13:48:25 Event ID=23502a7dcba9ffbe16810ccae646fd5e9644e709d5616d11274bd092d4341836, Processing time=147.680417ms, Result=false, Error=false
+2025/04/22 13:48:25 Event ID=8dedb608b6ce183093197f0589a94cde34e01803ef5bc994fed7c57dc4a2a895, Processing time=171.836291ms, Result=true, Error=false
+2025/04/22 13:48:25 Event ID=d7b16f18cba5117004d1221219e53929d075f27ef0465797838dbba52b8b79c9, Processing time=139.011125ms, Result=true, Error=false
+2025/04/22 13:48:25 Event ID=fe7e1f7ca0e816912a0943d7cc0f476e4c836f849910f9843aff68886f628859, Processing time=175.150583ms, Result=true, Error=false
+2025/04/22 13:48:25 Event ID=ddc64ab16e4ad236fc701c0cb5aa5dc33801456c1fb12d6eee0a611efd488196, Processing time=177.456459ms, Result=true, Error=false
+2025/04/22 13:48:26 Event ID=2268f4e57b6ecaa7ee6a05fc17c659d43d80038ab1b33010851574040cb07a2b, Processing time=171.827125ms, Result=true, Error=false
+2025/04/22 13:48:26 Event ID=63c7b023cff5c3db2215ddd7f5afb6247208a317694af03516fa00de77d1fcbd, Processing time=297.84725ms, Result=true, Error=false
+2025/04/22 13:48:26 Event ID=427ee9760f314b45dcb3ac0a305969277342ee4db26c3061db47d46c4491358a, Processing time=354.471458ms, Result=true, Error=false
+2025/04/22 13:48:26 Event ID=8020f9702e50ca35a20fe6c50375278ef2e29c63d2a63d0096416c402e455089, Processing time=148.10275ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=cb3b45562dae53629d6878ad4a91e9b415654cb4b9a752f617a46c5484f65ece, Processing time=172.326875ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=3a092fe810cf213d72fa08c2a3b966fe3a2725dd966b5f4667c5f6733af20b5d, Processing time=193.437667ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=bff3a243fe8c839c2ed4fec6237a0f6d473cbe16c44a3ca5252cd4af963e3faf, Processing time=150.815792ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=69534cceee068ee8667bc0d3e6097d2d3047842b81e9da8559968676350feedb, Processing time=132.638291ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=c88a6f9942cc7f514e015281947ec04927e213243f3dbc7f4212fb3204e18586, Processing time=132.4935ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=8246f8dcdae1775858a170fc4ed334a907b7a63ad85cf969a81f713d083b4030, Processing time=147.748042ms, Result=true, Error=false
+2025/04/22 13:48:27 Event ID=d8b5eeb78478c5a2095b9739ed005c13ca1e5b14d5969d3499bc5b0b0bc64e8a, Processing time=131.641959ms, Result=false, Error=false
+2025/04/22 13:48:28 Event ID=21838f97a7713df266837e0909a24078ce3393436dbb4613b6738cff6a5593f9, Processing time=167.929ms, Result=true, Error=false
+2025/04/22 13:48:28 Event ID=841506f469fef8d02e5b02fd5ba77b87f48cb500d82d7ae62f04def3ba7fa93b, Processing time=171.248291ms, Result=true, Error=false
+2025/04/22 13:48:28 Event ID=2219029fb6f02bbea3d4944950c293aa1ea59716a50d16484d513aaf79b4c742, Processing time=250.74725ms, Result=true, Error=false
+2025/04/22 13:48:28 Event ID=d475e31f78a1e8ea0b8b15de1a50927e985d1b545f60ed276ac2318160370c24, Processing time=290.022042ms, Result=false, Error=false
+2025/04/22 13:48:28 Event ID=fb99ff779c017f794bf85e176f555bc6a4ca2251466514b715f1f0f26b2aa24e, Processing time=168.546375ms, Result=true, Error=false
+2025/04/22 13:48:29 Event ID=d21f7b371d129757169e33685db627094c7dd13afd96eb6ab69d00bc58dfd94c, Processing time=168.543ms, Result=true, Error=false
+2025/04/22 13:48:29 Event ID=bacce6cb5607830cac01255a339749d851175096f44746389e0eb3d4612baf09, Processing time=169.301791ms, Result=true, Error=false
+2025/04/22 13:48:29 Event ID=65acb072e12413207d901046742149727212c4f8ea68a65567a8ff81abf9a642, Processing time=147.689542ms, Result=true, Error=false
+2025/04/22 13:48:29 Event ID=c6dfe6f607708b40859476420d17221b5835289b81815b670ff986116dccbb3e, Processing time=188.941792ms, Result=true, Error=false
+2025/04/22 13:48:29 Event ID=ea160c324dcb36284839655a0042ade8d1d58cdce91f7b4ae09ddcaa106ef15e, Processing time=132.164167ms, Result=true, Error=false
+2025/04/22 13:48:29 Event ID=4d3cc223b3bd9005e1a02d195b2b63c279331f243fcda046f9b11c2f68edb1f6, Processing time=149.638ms, Result=false, Error=false
+2025/04/22 13:48:30 Event ID=4c555090ed78c5420c7ef4e460ccd1f7227019aa34f3028b4964b8bd920846b0, Processing time=212.271958ms, Result=true, Error=false
+2025/04/22 13:48:30 Event ID=7d06738c5bf1dff4c01a214478ebb2cea9461577f407c2bc78c44cd2a31ffb68, Processing time=147.7975ms, Result=true, Error=false
+2025/04/22 13:48:30 Event ID=2373b9f943ba89d2c27471d9cd1ed3e02536761217eed7400a82e54d0fd53a29, Processing time=168.877417ms, Result=true, Error=false
+2025/04/22 13:48:30 Event ID=a435d65cf2ac1621a38c45328982c18b3272928f96bf29453c41335e39260095, Processing time=191.469208ms, Result=true, Error=false
+2025/04/22 13:48:30 Event ID=8efd2c6c7a28db0c02291c342c7c8457e31b33357e2c8cbbd9d462549b597caa, Processing time=169.547958ms, Result=true, Error=false
+2025/04/22 13:48:30 Event ID=d3daf4f36eaae6c2b8661d85606369192784ff9e8aa698e99fac449a5c346955, Processing time=133.538708ms, Result=true, Error=false
+2025/04/22 13:48:31 Event ID=f7124bb353a947342f4f29d0c36a998702c6b1037f7bb4df56a3ee4685c68b9c, Processing time=147.059542ms, Result=true, Error=false
+2025/04/22 13:48:31 Event ID=af39608d5e385fc398b5046108dec20166f7714469c6b11479e4a9dc8b814a63, Processing time=148.224125ms, Result=true, Error=false
+2025/04/22 13:48:31 Event ID=1c36342072634d2c185274e133ac76549c2d5e0b318edbe02064e06c06c60251, Processing time=132.817292ms, Result=false, Error=false
+2025/04/22 13:48:31 Event ID=9bc1c78e08df22c6f3d3cdb2fd27625da9f979e2c4f7f9b1a4476bdfdf44b6f0, Processing time=132.596041ms, Result=false, Error=false
+2025/04/22 13:48:31 Event ID=be07fee4a89345c4ba396dbaa742a179e4078f76dcf8b4ea998629962e8eeb91, Processing time=147.060125ms, Result=true, Error=false
+2025/04/22 13:48:31 Event ID=e7ee2956035e48566df5fcf0f4100152eeb3e600842e447358cb02e344c78cd6, Processing time=132.973583ms, Result=true, Error=false
+2025/04/22 13:48:31 Event ID=bea1d7c8fcd35826258b539be1c95fce9287fa8ea509f6f8087b20e9dd39b122, Processing time=131.937875ms, Result=true, Error=false
+2025/04/22 13:48:32 Event ID=b3027ddf4f1fd306d61e8d5726438867219f109c91abd0fdbddf8f36bb7ed235, Processing time=248.192625ms, Result=true, Error=false
+2025/04/22 13:48:32 Event ID=95e0db7fb44ebe15df19d1f677f2bdbbe849a839b22f7432485b561211c53d2c, Processing time=331.778917ms, Result=false, Error=false
+2025/04/22 13:48:32 Event ID=27344ace4b1058b80a1687adf6fb2cde36b0f082e7b1217b6bb3b172287f2cb1, Processing time=147.088709ms, Result=true, Error=false
+2025/04/22 13:48:32 Event ID=89d017cc06253290a0995a196902b22d2ef46a5a7981be1bf62cc19ab9a56bc3, Processing time=147.439042ms, Result=true, Error=false
+2025/04/22 13:48:33 Event ID=08d03cbf836cbb8fccc04aee3827b260c8675e03279336d76b1d97687c449b34, Processing time=238.520042ms, Result=true, Error=false
+2025/04/22 13:48:33 Event ID=4c20b589b8a14c91f790195cc4a5c154c64d2174cdd59d0608e02de1ff9d4dba, Processing time=348.136042ms, Result=true, Error=false
+2025/04/22 13:48:33 Event ID=a70f20fe179c2877fcab1ae1258ada3429ef8fcfe20821adea5e54b2570a62a3, Processing time=170.238958ms, Result=true, Error=false
+2025/04/22 13:48:33 Event ID=e664361ed0c088affdbd679b720c2268cddd8fdfbb2da93a167fed42678606f9, Processing time=132.145666ms, Result=true, Error=false
+2025/04/22 13:48:33 Event ID=82554484af9c0cae1c6eafa3c66c36469c8654eff2e7c69207068c0038e93014, Processing time=233.409ms, Result=true, Error=false
+2025/04/22 13:48:34 Event ID=64acedbf30d04b24b6b497138b219abf5d7f483e29088685b2919354e91f6bcc, Processing time=372.144ms, Result=true, Error=false
+2025/04/22 13:48:34 Event ID=5aa2def68e69713abd3cd59f485c5cb6d1e74318cf5296e5795edf27f35a756e, Processing time=260.011042ms, Result=true, Error=false
+2025/04/22 13:48:34 Event ID=22435789c43eb8027eca409e7529821e908257d192bfb0d7a27f4dcbab88492d, Processing time=290.418042ms, Result=false, Error=false
+2025/04/22 13:48:34 Event ID=9db97d3cde69fc45b9b989a1893b0e49220d9f0a21411bbcc55b1956f5f76a52, Processing time=134.226417ms, Result=true, Error=false
+2025/04/22 13:48:35 Event ID=9d65089b44b46a60c091aa37ccb0a86ceb6ffdb8910ed4875a72f51fa18e37da, Processing time=132.530167ms, Result=false, Error=false
+2025/04/22 13:48:35 Event ID=ce416d75d9e30eed7db8d6c93e3754c10f9526b5d3b7df212e078e248801fe56, Processing time=132.000667ms, Result=true, Error=false
+2025/04/22 13:48:35 Event ID=2d545a18a16d707011bdf96053be3021f5b5360da7fe90cc1389a6593747b124, Processing time=132.890208ms, Result=false, Error=false
+2025/04/22 13:48:35 Event ID=5f41ae542bdbe2278603ced4520369063e92a5e1b0ec742b28e1293931c8996d, Processing time=149.359125ms, Result=true, Error=false
+2025/04/22 13:48:35 Event ID=ab1e0b14cd17b5a9b3a9b3c8b9142e068c0889cfcef5a6680600871f279d0ac6, Processing time=132.102959ms, Result=true, Error=false
+2025/04/22 13:48:35 Event ID=3b19a8a465504d70742554d1b7d144bd4812333b2137e1fe4a52b42b718615f4, Processing time=188.8245ms, Result=true, Error=false
+2025/04/22 13:48:35 Event ID=ce99c8f5977fcb750dc6d397fce73503cb168d0fbbd1bb861ee33de081d6dc05, Processing time=132.126167ms, Result=true, Error=false
+2025/04/22 13:48:36 Event ID=1d0a8fec571e3caa516088933ea96d63df50ab500553bb6b58f45ee7568bacaa, Processing time=133.241292ms, Result=true, Error=false
+2025/04/22 13:48:36 Event ID=cecd877c638264b726c9c7dd15093962c26e768427ab38634862c289cc89f432, Processing time=132.450042ms, Result=true, Error=false
+2025/04/22 13:48:36 Event ID=5ca9106ce5cc7b851e93b21d23f12e9b86e5ecc52716ba79f1f4493bfae58661, Processing time=135.898459ms, Result=false, Error=false
+2025/04/22 13:48:36 Event ID=53fcc09f089c8bd34493abde280ac4c53bec7e70ec55269a7da8efd8d8922673, Processing time=151.676ms, Result=true, Error=false
+2025/04/22 13:48:36 Event ID=4cce4f2d5806761d821f88ac8043e7dc1ec986c22ff0e5c42bb63805e57f383f, Processing time=132.615875ms, Result=true, Error=false
+2025/04/22 13:48:36 Event ID=8b2461d3036e2d089085025a460cb8e4448dd72f53695a1491bb0b481b17ce44, Processing time=147.39425ms, Result=true, Error=false
+2025/04/22 13:48:36 Event ID=a98daa04cb00163ea9001cfca8b80d30b7975f2a05a6181dab28c7051d9619c8, Processing time=146.490125ms, Result=true, Error=false
+2025/04/22 13:48:37 Event ID=e647e45bf1040e60208c2443cf1d06c8f1d635c5ebc9d29d693b4e891b0784f1, Processing time=212.775833ms, Result=true, Error=false
+2025/04/22 13:48:37 Event ID=4edf1e6f565105a7a5fd23cbf6ca7dcfb22a468313efc399afbf9cc686a5b902, Processing time=168.682042ms, Result=true, Error=false
+2025/04/22 13:48:37 Event ID=97dd608f7fd709d6b59cf06d8047082a8465da8f58d0d8cc67c9e4ab3b45c168, Processing time=170.273ms, Result=true, Error=false
+2025/04/22 13:48:37 Event ID=4724b0f92e997c5d7584fb16e1f6e14c40bfc49e3a260c62363ff1f464123ae1, Processing time=210.63875ms, Result=true, Error=false
+2025/04/22 13:48:37 Event ID=6f2df707d36725718eff702480e65be901eeef21581a420b5a04170ff297416c, Processing time=133.1075ms, Result=true, Error=false
+2025/04/22 13:48:38 Event ID=743c074014b67a0a16f17059badbc22dfda5a5e26f9a26904c726b49593042fe, Processing time=155.141875ms, Result=true, Error=false
+2025/04/22 13:48:38 Event ID=d461493dc867761700629420b6e6458be2223f79cb9fedf268aef91018c11f36, Processing time=147.155541ms, Result=true, Error=false
+2025/04/22 13:48:38 Event ID=b25f5dddfa00b58a235239838bbaed76f7c69748ce068684feb23e5cef85ba53, Processing time=171.286292ms, Result=false, Error=false
+2025/04/22 13:48:38 Event ID=cd16e6d05598e3401acc51abdcc0dd8ed14520737ff2df88fd65c99422d34856, Processing time=148.000375ms, Result=false, Error=false
+2025/04/22 13:48:38 Event ID=5eb5850a49398df7c47221c3a72141f3d0410b48abb253f4787d2540da613c4a, Processing time=172.468417ms, Result=true, Error=false
+2025/04/22 13:48:39 Event ID=12f548810bb104ee56bcd2ff65598be488267c02d947af701379665271895c9d, Processing time=341.564541ms, Result=true, Error=false
+2025/04/22 13:48:39 Event ID=632f59cd595643b91460a0c0711f942b48c9810d55affe8e885b9a08bf9c8b64, Processing time=374.615041ms, Result=true, Error=false
+2025/04/22 13:48:39 Event ID=41c81fc445a9b83f544a80be63e61c7e2448fa27068e30b9bc9d4f1cef399199, Processing time=244.684084ms, Result=true, Error=false
+2025/04/22 13:48:39 Event ID=9f884ebb7c7b11e8c5751288fda33d057ab7a182969f2a9c6265d890e3b4ab85, Processing time=213.415625ms, Result=true, Error=false
+2025/04/22 13:48:39 Event ID=5872602738b1da6ae8cd6bf421d4f249ba6e6b3970fe2d229afde1c60ad95452, Processing time=148.578625ms, Result=true, Error=false
+2025/04/22 13:48:40 Event ID=a7060ff316732112d89f945d6049b577ce1f652a3ef65666b93c2b7498e95f29, Processing time=155.757167ms, Result=true, Error=false
+2025/04/22 13:48:40 Event ID=a6579464feeae95210821f1b77d38acc73550f514f4740a1f72d4fc5b1070cc6, Processing time=133.21325ms, Result=true, Error=false
+2025/04/22 13:48:40 Event ID=3748405eba83a233a029d51a99f954ebb685ce83292f40646c5795a098577ab2, Processing time=132.709208ms, Result=true, Error=false
+2025/04/22 13:48:40 Event ID=f9c2d1ab0a3ea272852c5d6c539c1c7664b02be5bc29fbb1c066e0a0d5331878, Processing time=233.359292ms, Result=true, Error=false
+2025/04/22 13:48:40 Event ID=250ce57b8274bcf96c9715475a112c219d94b83db4aea0e054d814c735566d31, Processing time=290.396584ms, Result=true, Error=false
+2025/04/22 13:48:41 Event ID=1d14321221ab62ee7df2f6e655643910f41c722d0c522cf6cb7f9eca201ff16d, Processing time=225.376833ms, Result=true, Error=false
+2025/04/22 13:48:41 Event ID=589ddb973b3bd00b4295e107da710487d56fbe8ee882204b60dc65ef12ca6227, Processing time=133.133792ms, Result=false, Error=false
+2025/04/22 13:48:41 Event ID=f4077aea64316f5bdd1f28f7ff85f856d12072a4981367d7d1e12d3d1c3092ca, Processing time=230.403667ms, Result=true, Error=false
+2025/04/22 13:48:41 Event ID=3c68fb5aa3979719283ca827f2c3824226bf8c3c995d5a44ffaeeb6afa73fbaa, Processing time=132.424792ms, Result=false, Error=false
+2025/04/22 13:48:41 
+===== BENCHMARK RESULTS =====
+2025/04/22 13:48:41 Total events processed: 93
+2025/04/22 13:48:41 Fastest processing time: 131.641959ms
+2025/04/22 13:48:41 Slowest processing time: 1.556960584s
+2025/04/22 13:48:41 Average processing time: 196.694119ms
+2025/04/22 13:48:41 Total processing time: 18.292553131s
+2025/04/22 13:48:41 =============================
+2025/04/22 13:51:49 Starting content filter benchmark

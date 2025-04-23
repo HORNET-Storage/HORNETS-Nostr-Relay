@@ -2,8 +2,10 @@ package filter
 
 import (
 	"log"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
@@ -114,6 +116,32 @@ func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
 }
 
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+	// Debug flags to help identify issues
+	var (
+		debugBypassModeration    = false // Set to true to bypass moderation filtering
+		debugBypassContentFilter = true  // Set to false to enable content filtering for benchmark
+		debugVerboseLogging      = true  // Set to true for additional debug logs
+		debugLogDatabaseResults  = true  // Set to true to log database query results
+
+		// Benchmark flags
+		runBenchmark          = true // Set to true to run the benchmark
+		benchmarkLogFile      = "mute_word_benchmark.log"
+		benchmarkMuteWordOnly = true // Set to true to benchmark mute-word-only filtering (skip AI)
+	)
+
+	// Initialize benchmark log file if needed
+	var benchmarkLogger *log.Logger
+	var benchmarkMutex sync.Mutex
+	if runBenchmark {
+		file, err := os.OpenFile(benchmarkLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			log.Printf("Failed to open benchmark log file: %v", err)
+		} else {
+			benchmarkLogger = log.New(file, "", log.LstdFlags)
+			benchmarkLogger.Println("Starting content filter benchmark")
+		}
+	}
+
 	// Initialize content filter service with direct Ollama integration
 	filterConfig := contentfilter.ServiceConfig{
 		APIURL:     viper.GetString("ollama_url"),
@@ -204,6 +232,23 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 		}
 
+		// Check if there are any events in the database at all
+		if debugLogDatabaseResults {
+			// Create a simple query to check for any events
+			anyEvents, err := store.QueryEvents(nostr.Filter{
+				Limit: 10, // Just get a few events to check
+			})
+			if err != nil {
+				log.Printf(ColorRedBold+"[DEBUG] Error checking for events in database: %v"+ColorReset, err)
+			} else {
+				log.Printf(ColorCyanBold+"[DEBUG] Database contains %d events (sample of 10)"+ColorReset, len(anyEvents))
+				for i, event := range anyEvents {
+					log.Printf(ColorCyan+"[DEBUG] Sample event %d: ID=%s, Kind=%d, PubKey=%s"+ColorReset,
+						i, event.ID, event.Kind, event.PubKey)
+				}
+			}
+		}
+
 		// Ensure that we respond to the client after processing all filters
 		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
 		var combinedEvents []*nostr.Event
@@ -213,24 +258,64 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				log.Printf("Error querying events for filter: %v", err)
 				continue
 			}
+
+			if debugLogDatabaseResults {
+				log.Printf(ColorCyanBold+"[DEBUG] Database query returned %d events for filter"+ColorReset, len(events))
+				for i, kind := range filter.Kinds {
+					log.Printf(ColorCyan+"[DEBUG] Filter included kind %d"+ColorReset, kind)
+					if i < 5 && i < len(events) { // Log up to 5 events per kind
+						log.Printf(ColorCyan+"[DEBUG] Sample event: ID=%s, Kind=%d, PubKey=%s"+ColorReset,
+							events[i].ID, events[i].Kind, events[i].PubKey)
+					}
+				}
+			}
+
 			combinedEvents = append(combinedEvents, events...)
 		}
 
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
+		if debugVerboseLogging {
+			log.Printf(ColorCyanBold+"[DEBUG] After deduplication: %d events"+ColorReset, len(uniqueEvents))
+			for i, event := range uniqueEvents {
+				if i < 10 { // Limit to first 10 events to avoid log spam
+					log.Printf(ColorCyan+"[DEBUG] Event %d: ID=%s, Kind=%d, PubKey=%s"+ColorReset,
+						i, event.ID, event.Kind, event.PubKey)
+				}
+			}
+		}
+
 		// Get the authenticated pubkey for the current connection
 		connPubkey := getAuthenticatedPubkey(data)
 
 		// Get moderation mode from relay_settings (default to strict if not specified)
 		var isStrict bool = true // Default to strict mode
-		var relaySettings lib.RelaySettings
-		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-			log.Printf("Error loading relay settings: %v", err)
-			// Keep default strict mode if there's an error
+
+		// First try to get the moderation mode directly from viper
+		moderationMode := viper.GetString("relay_settings.moderationmode")
+		if moderationMode == "passive" {
+			isStrict = false
+			if debugVerboseLogging {
+				log.Printf(ColorCyanBold + "[DEBUG] Using passive moderation mode from config" + ColorReset)
+			}
 		} else {
-			// Use the moderation mode from relay settings
-			isStrict = relaySettings.ModerationMode == "strict" || relaySettings.ModerationMode == "" // Default to strict
+			// Fall back to struct unmarshal if direct access fails
+			var relaySettings lib.RelaySettings
+			if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+				log.Printf("Error loading relay settings: %v", err)
+				// Keep default strict mode if there's an error
+			} else {
+				// Use the moderation mode from relay settings
+				isStrict = relaySettings.ModerationMode == "strict" || relaySettings.ModerationMode == "" // Default to strict
+				if debugVerboseLogging {
+					log.Printf(ColorCyanBold+"[DEBUG] Using moderation mode from struct: %s"+ColorReset, relaySettings.ModerationMode)
+				}
+			}
+		}
+
+		if debugVerboseLogging {
+			log.Printf(ColorCyanBold+"[DEBUG] Moderation mode: %s"+ColorReset, map[bool]string{true: "strict", false: "passive"}[isStrict])
 		}
 
 		// Filter out blocked events and handle pending moderation events based on mode
@@ -239,57 +324,64 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		var pendingCount int
 		var pendingAllowedCount int
 
-		for _, event := range uniqueEvents {
-			// First check if event is blocked (blocked events are always filtered out)
-			isBlocked, err := store.IsEventBlocked(event.ID)
-			if err != nil {
-				log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
-				// If there's an error, assume not blocked
-				filteredEvents = append(filteredEvents, event)
-				continue
+		if debugBypassModeration {
+			if debugVerboseLogging {
+				log.Printf(ColorCyanBold + "[DEBUG] Bypassing moderation filtering" + ColorReset)
 			}
-
-			if isBlocked {
-				log.Printf(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
-					event.ID, event.Kind, event.PubKey)
-				blockedCount++
-				// Skip this event - it's blocked for moderation reasons
-				continue
-			}
-
-			// Then check if event is pending moderation
-			isPending, err := store.IsPendingModeration(event.ID)
-			if err != nil {
-				log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
-				// If there's an error, assume not pending
-				filteredEvents = append(filteredEvents, event)
-				continue
-			}
-
-			if isPending {
-				pendingCount++
-
-				// Handle based on moderation mode
-				if !isStrict {
-					// Passive mode: include all pending events
-					log.Printf(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
+			filteredEvents = uniqueEvents
+		} else {
+			for _, event := range uniqueEvents {
+				// First check if event is blocked (blocked events are always filtered out)
+				isBlocked, err := store.IsEventBlocked(event.ID)
+				if err != nil {
+					log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
+					// If there's an error, assume not blocked
 					filteredEvents = append(filteredEvents, event)
-					pendingAllowedCount++
-				} else if connPubkey != "" && connPubkey == event.PubKey {
-					// Strict mode: only include if requester is author
-					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
-						event.ID, connPubkey)
-					filteredEvents = append(filteredEvents, event)
-					pendingAllowedCount++
-				} else {
-					// Strict mode: exclude if requester is not author
-					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
-					// Skip this event in strict mode if requester is not the author
 					continue
 				}
-			} else {
-				// Not blocked or pending, add to filtered events
-				filteredEvents = append(filteredEvents, event)
+
+				if isBlocked {
+					log.Printf(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
+						event.ID, event.Kind, event.PubKey)
+					blockedCount++
+					// Skip this event - it's blocked for moderation reasons
+					continue
+				}
+
+				// Then check if event is pending moderation
+				isPending, err := store.IsPendingModeration(event.ID)
+				if err != nil {
+					log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
+					// If there's an error, assume not pending
+					filteredEvents = append(filteredEvents, event)
+					continue
+				}
+
+				if isPending {
+					pendingCount++
+
+					// Handle based on moderation mode
+					if !isStrict {
+						// Passive mode: include all pending events
+						log.Printf(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
+						filteredEvents = append(filteredEvents, event)
+						pendingAllowedCount++
+					} else if connPubkey != "" && connPubkey == event.PubKey {
+						// Strict mode: only include if requester is author
+						log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
+							event.ID, connPubkey)
+						filteredEvents = append(filteredEvents, event)
+						pendingAllowedCount++
+					} else {
+						// Strict mode: exclude if requester is not author
+						log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
+						// Skip this event in strict mode if requester is not the author
+						continue
+					}
+				} else {
+					// Not blocked or pending, add to filtered events
+					filteredEvents = append(filteredEvents, event)
+				}
 			}
 		}
 
@@ -300,6 +392,10 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			uniqueEvents = filteredEvents
 		}
 
+		if debugVerboseLogging {
+			log.Printf(ColorCyanBold+"[DEBUG] After moderation filtering: %d events"+ColorReset, len(uniqueEvents))
+		}
+
 		// Get the authenticated pubkey for the current connection
 		connPubkey = getAuthenticatedPubkey(data)
 
@@ -307,12 +403,24 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		addLogging(&request, connPubkey)
 
 		// Apply content filtering if the user is authenticated
-		if connPubkey != "" && filterService.ShouldFilterKind(1) {
+		if debugBypassContentFilter {
+			if debugVerboseLogging {
+				log.Printf(ColorCyanBold + "[DEBUG] Bypassing content filtering" + ColorReset)
+			}
+		} else if connPubkey != "" && filterService.ShouldFilterKind(1) {
 			// Get user's filter preferences
 			pref, err := kind10010.GetUserFilterPreference(store, connPubkey)
 
 			// Check if filtering is enabled
 			if err == nil && pref.Enabled {
+				// Benchmark variables
+				var (
+					totalTime      time.Duration
+					fastestTime    = time.Hour
+					slowestTime    time.Duration
+					processedCount = 0
+					filterMutex    sync.Mutex
+				)
 				// Separate filterable (kind 1) and non-filterable events
 				var filterableEvents []*nostr.Event
 				var nonFilterableEvents []*nostr.Event
@@ -444,38 +552,88 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						}
 					}
 
-					// Only apply AI filtering for paid users
-					if isPaidUser {
+					// Only apply AI filtering for paid users and if not in mute-word-only benchmark mode
+					if isPaidUser && !benchmarkMuteWordOnly {
 						// Only filter the filterable events if there are any left after mute filtering
 						if len(filterableEvents) > 0 {
-							filteredEvents, err := filterService.FilterEvents(filterableEvents, pref.Instructions)
-							if err != nil {
-								log.Printf("Error filtering events: %v", err)
-								// On error, use the events that passed mute filtering
-								// Combine with non-filterable events
-								uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-							} else {
-								// Log which events passed filtering
-								log.Printf(ColorGreenBold + "[CONTENT FILTER] EVENTS THAT PASSED FILTERING:" + ColorReset)
-								for _, e := range filteredEvents {
-									log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+							// Process each event individually to measure timing
+							var filteredResults []*nostr.Event
+
+							for _, e := range filterableEvents {
+								startTime := time.Now()
+								result, err := filterService.FilterEvent(e, pref.Instructions)
+								duration := time.Since(startTime)
+
+								// Update benchmark metrics
+								filterMutex.Lock()
+								totalTime += duration
+								processedCount++
+								if duration < fastestTime {
+									fastestTime = duration
+								}
+								if duration > slowestTime {
+									slowestTime = duration
+								}
+								filterMutex.Unlock()
+
+								// Log to benchmark file
+								if runBenchmark && benchmarkLogger != nil {
+									benchmarkMutex.Lock()
+									benchmarkLogger.Printf("Event ID=%s, Processing time=%v, Result=%v, Error=%v",
+										e.ID, duration, result.Pass, err != nil)
+									benchmarkMutex.Unlock()
 								}
 
-								// Combine filtered events with non-filterable events
-								uniqueEvents = append(nonFilterableEvents, filteredEvents...)
-								log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
-									len(filteredEvents), originalCount, len(nonFilterableEvents))
+								// Only include events that pass the filter
+								if err == nil && result.Pass {
+									filteredResults = append(filteredResults, e)
+									log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: ID=%s, Kind=%d, PubKey=%s"+ColorReset, e.ID, e.Kind, e.PubKey)
+								}
 							}
+
+							// Log benchmark results
+							if runBenchmark && benchmarkLogger != nil && processedCount > 0 {
+								avgTime := totalTime / time.Duration(processedCount)
+								benchmarkMutex.Lock()
+								benchmarkLogger.Printf("\n===== BENCHMARK RESULTS =====")
+								benchmarkLogger.Printf("Total events processed: %d", processedCount)
+								benchmarkLogger.Printf("Fastest processing time: %v", fastestTime)
+								benchmarkLogger.Printf("Slowest processing time: %v", slowestTime)
+								benchmarkLogger.Printf("Average processing time: %v", avgTime)
+								benchmarkLogger.Printf("Total processing time: %v", totalTime)
+								benchmarkLogger.Printf("=============================")
+								benchmarkMutex.Unlock()
+							}
+
+							// Combine filtered events with non-filterable events
+							uniqueEvents = append(nonFilterableEvents, filteredResults...)
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] RESULTS: %d/%d filterable events passed filter, %d exempt events"+ColorReset,
+								len(filteredResults), originalCount, len(nonFilterableEvents))
 						} else {
 							// No filterable events left after mute filtering, just use non-filterable ones
 							uniqueEvents = nonFilterableEvents
 							log.Printf(ColorYellowBold+"[CONTENT FILTER] NO FILTERABLE EVENTS: %d exempt events passed through"+ColorReset, len(nonFilterableEvents))
 						}
 					} else {
-						// Non-paid user with instructions - skip AI filtering but keep mute word filtering results
+						// Non-paid user or mute-word-only benchmark mode - skip AI filtering but keep mute word filtering results
 						uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-						log.Printf(ColorYellowBold+"[CONTENT FILTER] NON-PAID USER: Skipping AI filtering, %d events passed mute filtering, %d exempt events"+ColorReset,
-							len(filterableEvents), len(nonFilterableEvents))
+						if benchmarkMuteWordOnly {
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] BENCHMARK MODE: Mute-word-only filtering, %d events passed mute filtering, %d exempt events"+ColorReset,
+								len(filterableEvents), len(nonFilterableEvents))
+
+							// Log benchmark results for mute word filtering
+							if runBenchmark && benchmarkLogger != nil && len(filterableEvents) > 0 {
+								benchmarkMutex.Lock()
+								benchmarkLogger.Printf("\n===== MUTE WORD BENCHMARK RESULTS =====")
+								benchmarkLogger.Printf("Total events processed: %d", len(filterableEvents))
+								benchmarkLogger.Printf("Mute word filtering is nearly instantaneous (microseconds)")
+								benchmarkLogger.Printf("=========================================")
+								benchmarkMutex.Unlock()
+							}
+						} else {
+							log.Printf(ColorYellowBold+"[CONTENT FILTER] NON-PAID USER: Skipping AI filtering, %d events passed mute filtering, %d exempt events"+ColorReset,
+								len(filterableEvents), len(nonFilterableEvents))
+						}
 					}
 				} else {
 					// No instructions but we've filtered by mute words, use the mute-filtered events
@@ -485,6 +643,16 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				}
 			} else {
 				log.Printf(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)
+			}
+		}
+
+		if debugVerboseLogging {
+			log.Printf(ColorCyanBold+"[DEBUG] Final event count: %d"+ColorReset, len(uniqueEvents))
+			for i, event := range uniqueEvents {
+				if i < 10 { // Limit to first 10 events to avoid log spam
+					log.Printf(ColorCyan+"[DEBUG] Final event %d: ID=%s, Kind=%d, PubKey=%s"+ColorReset,
+						i, event.ID, event.Kind, event.PubKey)
+				}
 			}
 		}
 
