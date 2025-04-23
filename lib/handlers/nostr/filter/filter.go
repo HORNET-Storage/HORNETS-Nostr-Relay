@@ -186,9 +186,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 		}
 
-		// We don't need to check for events in the database anymore
-		// since we removed the debug logging
-
 		// Ensure that we respond to the client after processing all filters
 		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
 		var combinedEvents []*nostr.Event
@@ -219,7 +216,9 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		moderationMode := viper.GetString("relay_settings.moderationmode")
 		if moderationMode == "passive" {
 			isStrict = false
+			log.Println("In Passive Mode.")
 		} else {
+			log.Println("In Strict Mode.")
 			// Fall back to struct unmarshal if direct access fails
 			var relaySettings lib.RelaySettings
 			if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
