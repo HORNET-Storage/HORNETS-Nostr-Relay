@@ -10,6 +10,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Worker handles the background processing of media (images and videos) pending moderation
@@ -246,6 +248,9 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 	// Get the pubkey from the event
 	pubKey = events[0].PubKey
 
+	// Create a title caser for proper Unicode handling
+	titleCaser := cases.Title(language.English)
+
 	// Process each media URL
 	for _, mediaURL := range mediaURLs {
 		// Determine the content type based on the URL
@@ -260,9 +265,9 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 			continue
 		}
 
-		// Log the moderation result
+		// Log the moderation result using proper Unicode-aware title casing
 		log.Printf("%s %s moderation result: level=%d decision=%s confidence=%.2f",
-			strings.Title(mediaType), mediaURL, response.ContentLevel, response.Decision, response.Confidence)
+			titleCaser.String(mediaType), mediaURL, response.ContentLevel, response.Decision, response.Confidence)
 
 		if response.ShouldBlock() {
 			shouldBlock = true
