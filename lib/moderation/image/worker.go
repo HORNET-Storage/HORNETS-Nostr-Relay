@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -400,6 +401,123 @@ func isVideoURL(url string) bool {
 // Note: Image downloading functionality is handled directly by the ModerationService,
 // which sends URLs to the moderation API rather than downloading images first.
 
+// extractMediaURLsFromEvent extracts all media (image and video) URLs from a Nostr event
+func extractMediaURLsFromEvent(event *nostr.Event) []string {
+	// Common media file extensions
+	imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif"}
+	videoExtensions := []string{".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".ogv", ".mpg", ".mpeg"}
+	mediaExtensions := append(append([]string{}, imageExtensions...), videoExtensions...)
+
+	// Common media hosting services
+	mediaHostingPatterns := []string{
+		// Image hosting services
+		"imgur.com",
+		"nostr.build/i/",
+		"nostr.build/p/",
+		"image.nostr.build",
+		"i.nostr.build",
+
+		// Video hosting services
+		"nostr.build/v/",
+		"v.nostr.build",
+		"video.nostr.build",
+		"youtube.com/watch",
+		"youtu.be/",
+		"vimeo.com/",
+
+		// Generic hosting
+		"void.cat",
+		"primal.net/",
+		"pbs.twimg.com",
+	}
+
+	// URL extraction regex
+	urlRegex := regexp.MustCompile(`https?://[^\s<>"']+`)
+
+	var urls []string
+	seen := make(map[string]bool) // Track seen URLs to avoid duplicates
+
+	// Extract from content text
+	contentURLs := urlRegex.FindAllString(event.Content, -1)
+	for _, url := range contentURLs {
+		url = strings.Split(url, "?")[0] // Remove query parameters
+		urlLower := strings.ToLower(url)
+
+		// Check for file extensions
+		for _, ext := range mediaExtensions {
+			if strings.HasSuffix(urlLower, ext) && !seen[url] {
+				urls = append(urls, url)
+				seen[url] = true
+				break
+			}
+		}
+
+		// Check for common media hosting services
+		for _, pattern := range mediaHostingPatterns {
+			if strings.Contains(urlLower, pattern) && !seen[url] {
+				urls = append(urls, url)
+				seen[url] = true
+				break
+			}
+		}
+	}
+
+	// Extract from r tags (common in Nostr Build)
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "r" {
+			url := tag[1]
+			url = strings.Split(url, "?")[0] // Remove query parameters
+			urlLower := strings.ToLower(url)
+
+			// Check extensions
+			for _, ext := range mediaExtensions {
+				if strings.HasSuffix(urlLower, ext) && !seen[url] {
+					urls = append(urls, url)
+					seen[url] = true
+					break
+				}
+			}
+
+			// Check hosting services
+			for _, pattern := range mediaHostingPatterns {
+				if strings.Contains(urlLower, pattern) && !seen[url] {
+					urls = append(urls, url)
+					seen[url] = true
+					break
+				}
+			}
+		}
+	}
+
+	// Extract from imeta and vmeta tags
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && (tag[0] == "imeta" || tag[0] == "vmeta") {
+			for _, value := range tag[1:] {
+				if strings.HasPrefix(value, "url ") {
+					mediaURL := strings.TrimPrefix(value, "url ")
+					if !seen[mediaURL] {
+						urls = append(urls, mediaURL)
+						seen[mediaURL] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Also check for media_url tag
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "media_url" {
+			url := tag[1]
+			if !seen[url] {
+				urls = append(urls, url)
+				seen[url] = true
+			}
+		}
+	}
+
+	return urls
+}
+
 // processDispute processes a single dispute for re-evaluation
 func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 	log.Printf("Processing dispute %s for event %s", dispute.DisputeID, dispute.EventID)
@@ -416,23 +534,67 @@ func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 		return
 	}
 
-	// Re-evaluate the media with dispute-specific parameters
-	response, err := w.ModerationService.ModerateDisputeURL(dispute.MediaURL, dispute.DisputeReason)
-	if err != nil {
-		log.Printf("Error re-evaluating media %s: %v", dispute.MediaURL, err)
+	// Query the original blocked event to extract media URLs
+	filter := nostr.Filter{
+		IDs: []string{dispute.EventID},
+	}
+	events, err := w.Store.QueryEvents(filter)
+	if err != nil || len(events) == 0 {
+		log.Printf("Error retrieving original event %s: %v", dispute.EventID, err)
 		return
 	}
 
-	// Log the re-evaluation result
-	log.Printf("Dispute re-evaluation result for %s: level=%d decision=%s confidence=%.2f",
-		dispute.MediaURL, response.ContentLevel, response.Decision, response.Confidence)
+	// Extract media URLs from the original event
+	originalEvent := events[0]
+	// Use the ExtractMediaURLsFromEvent function from the badgerhold package
+	// Since we don't have direct access to it, we'll implement the extraction logic here
+	mediaURLs := extractMediaURLsFromEvent(originalEvent)
+
+	if len(mediaURLs) == 0 {
+		log.Printf("No media URLs found in original event %s", dispute.EventID)
+		return
+	}
+
+	log.Printf("Found %d media URLs in original event %s", len(mediaURLs), dispute.EventID)
+
+	// Track if any media passes moderation
+	var anyMediaPassed bool
+	var lastResponse *ModerationResponse
+
+	// Re-evaluate each media URL with dispute-specific parameters
+	for _, mediaURL := range mediaURLs {
+		response, err := w.ModerationService.ModerateDisputeURL(mediaURL, dispute.DisputeReason)
+		if err != nil {
+			log.Printf("Error re-evaluating media %s: %v", mediaURL, err)
+			continue
+		}
+
+		// Log the re-evaluation result
+		log.Printf("Dispute re-evaluation result for %s: level=%d decision=%s confidence=%.2f",
+			mediaURL, response.ContentLevel, response.Decision, response.Confidence)
+
+		// Store the last response for use in the resolution
+		lastResponse = response
+
+		// If any media passes moderation, we'll approve the dispute
+		if !response.ShouldBlock() {
+			anyMediaPassed = true
+			break // One passing media is enough to approve
+		}
+	}
 
 	// Get relay public key and private key from viper config
 	relayPubKey := viper.GetString("RelayPubkey")
 	relayPrivKey := viper.GetString("private_key")
 
 	// Determine if the dispute should be approved based on the re-evaluation
-	approved := !response.ShouldBlock()
+	approved := anyMediaPassed
+
+	// Use the explanation from the last response, or a default if none available
+	explanation := "No valid media could be evaluated"
+	if lastResponse != nil {
+		explanation = lastResponse.Explanation
+	}
 
 	// Create a resolution event using the kind19843 package
 	_, err = kind19843.CreateResolutionEvent(
@@ -442,7 +604,7 @@ func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 		dispute.EventID,
 		dispute.UserPubKey,
 		approved,
-		response.Explanation,
+		explanation,
 		relayPubKey,
 		relayPrivKey,
 	)

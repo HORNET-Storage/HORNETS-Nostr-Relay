@@ -115,7 +115,7 @@ func init() {
 		"Audio":            []string{},
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
-		"KindWhitelist":    []string{"kind0", "kind1", "kind22242", "kind10010"}, // Essential kinds always enabled
+		"KindWhitelist":    []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843"}, // Essential kinds always enabled
 		"FreeTierEnabled":  true,
 		"FreeTierLimit":    "100 MB per month",
 		"ModerationMode":   "strict", // Default moderation mode to "strict"
