@@ -445,6 +445,40 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				}
 			}
 
+			// Special handling for moderation-related events (19841, 19842, 19843)
+			if event.Kind == 19841 || event.Kind == 19843 {
+				// These are relay-created events (tickets and resolutions)
+				// Extract the user pubkey from the p tag
+				userPubkey := ""
+				for _, tag := range event.Tags {
+					if tag[0] == "p" && len(tag) > 1 {
+						userPubkey = tag[1]
+						break
+					}
+				}
+
+				// Only allow the referenced user to see these events
+				if userPubkey != "" && connPubkey != "" && connPubkey != userPubkey {
+					log.Printf(ColorRedBold+"[MODERATION] DENIED: Skipping kind %d event - requested by %s but references user %s"+ColorReset,
+						event.Kind, connPubkey, userPubkey)
+					continue
+				} else {
+					log.Printf(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind %d event for user %s"+ColorReset,
+						event.Kind, userPubkey)
+				}
+			} else if event.Kind == 19842 {
+				// Disputes are created by users
+				// Only allow the author to see their own disputes
+				if connPubkey != "" && connPubkey != event.PubKey {
+					log.Printf(ColorRedBold+"[MODERATION] DENIED: Skipping kind 19842 dispute event - requested by %s but created by %s"+ColorReset,
+						connPubkey, event.PubKey)
+					continue
+				} else {
+					log.Printf(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind 19842 dispute event created by %s"+ColorReset,
+						event.PubKey)
+				}
+			}
+
 			eventJSON, err := json.Marshal(event)
 			if err != nil {
 				log.Printf("Error marshaling event: %v", err)
