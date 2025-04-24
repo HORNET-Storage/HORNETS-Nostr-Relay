@@ -193,6 +193,11 @@ func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, erro
 
 	// For each event, check if it's older than the retention period
 	for _, event := range blockedEvents {
+		// Skip events with active disputes
+		if event.HasDispute {
+			continue
+		}
+
 		if now.After(event.RetainUntil) {
 			// Delete the event from both the blocked list and the main event store
 			key := fmt.Sprintf("blocked:%s", event.EventID)
@@ -212,4 +217,123 @@ func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, erro
 	}
 
 	return deletedCount, nil
+}
+
+// AddToPendingDisputeModeration adds a dispute to the pending dispute moderation queue
+func (store *BadgerholdStore) AddToPendingDisputeModeration(disputeID string, ticketID string, eventID string, mediaURL string, disputeReason string, userPubKey string) error {
+	pending := lib.PendingDisputeModeration{
+		DisputeID:     disputeID,
+		TicketID:      ticketID,
+		EventID:       eventID,
+		MediaURL:      mediaURL,
+		DisputeReason: disputeReason,
+		UserPubKey:    userPubKey,
+		AddedAt:       time.Now(),
+	}
+
+	// Key format: "pending_dispute:{disputeID}" for easy querying
+	key := fmt.Sprintf("pending_dispute:%s", disputeID)
+
+	return store.Database.Upsert(key, pending)
+}
+
+// RemoveFromPendingDisputeModeration removes a dispute from the pending dispute moderation queue
+func (store *BadgerholdStore) RemoveFromPendingDisputeModeration(disputeID string) error {
+	key := fmt.Sprintf("pending_dispute:%s", disputeID)
+	return store.Database.Delete(key, lib.PendingDisputeModeration{})
+}
+
+// IsPendingDisputeModeration checks if a dispute is pending moderation
+func (store *BadgerholdStore) IsPendingDisputeModeration(disputeID string) (bool, error) {
+	key := fmt.Sprintf("pending_dispute:%s", disputeID)
+
+	var pending lib.PendingDisputeModeration
+	err := store.Database.Get(key, &pending)
+
+	if err == badgerhold.ErrNotFound {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// GetPendingDisputeModerationEvents returns all disputes pending moderation
+func (store *BadgerholdStore) GetPendingDisputeModerationEvents() ([]lib.PendingDisputeModeration, error) {
+	var results []lib.PendingDisputeModeration
+
+	// Query all records with the "pending_dispute:" prefix
+	err := store.Database.Find(&results, badgerhold.Where("DisputeID").Ne(""))
+
+	if err != nil && err != badgerhold.ErrNotFound {
+		return nil, fmt.Errorf("failed to query pending dispute moderation events: %w", err)
+	}
+
+	return results, nil
+}
+
+// GetAndRemovePendingDisputeModeration atomically gets and removes pending dispute moderation events up to the batch size.
+func (store *BadgerholdStore) GetAndRemovePendingDisputeModeration(batchSize int) ([]lib.PendingDisputeModeration, error) {
+	var results []lib.PendingDisputeModeration
+
+	// Make sure batch size is reasonable
+	if batchSize <= 0 {
+		batchSize = 10 // Default to 10 if not specified
+	}
+
+	// First get all pending disputes
+	err := store.Database.Find(&results, badgerhold.Where("DisputeID").Ne("").Limit(batchSize))
+	if err != nil && err != badgerhold.ErrNotFound {
+		return nil, fmt.Errorf("failed to query pending dispute moderation events: %w", err)
+	}
+
+	// If we found disputes, remove them from the queue immediately to prevent duplicate processing
+	for _, dispute := range results {
+		key := fmt.Sprintf("pending_dispute:%s", dispute.DisputeID)
+		err := store.Database.Delete(key, lib.PendingDisputeModeration{})
+		if err != nil {
+			// If we fail to delete, log the error but continue with other disputes
+			fmt.Printf("Error removing dispute %s from pending dispute moderation: %v\n", dispute.DisputeID, err)
+		}
+	}
+
+	return results, nil
+}
+
+// MarkEventDisputed marks an event as having an active dispute
+func (store *BadgerholdStore) MarkEventDisputed(eventID string) error {
+	key := fmt.Sprintf("blocked:%s", eventID)
+
+	var blocked lib.BlockedEvent
+	err := store.Database.Get(key, &blocked)
+	if err != nil {
+		return fmt.Errorf("failed to get blocked event %s: %w", eventID, err)
+	}
+
+	// Update the HasDispute flag
+	blocked.HasDispute = true
+
+	// Save the updated event
+	return store.Database.Upsert(key, blocked)
+}
+
+// HasEventDispute checks if an event has an active dispute
+func (store *BadgerholdStore) HasEventDispute(eventID string) (bool, error) {
+	key := fmt.Sprintf("blocked:%s", eventID)
+
+	var blocked lib.BlockedEvent
+	err := store.Database.Get(key, &blocked)
+
+	if err == badgerhold.ErrNotFound {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return blocked.HasDispute, nil
 }

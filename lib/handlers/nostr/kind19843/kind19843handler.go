@@ -113,5 +113,24 @@ func CreateResolutionEvent(
 		return nil, err
 	}
 
+	// If the dispute is approved, unblock the original event and delete the ticket
+	if approved {
+		// Unblock the event
+		if err := store.UnmarkEventBlocked(originalEventID); err != nil {
+			log.Printf("Error unblocking event %s: %v", originalEventID, err)
+			// Continue anyway as the resolution is still valid
+		} else {
+			log.Printf("Event %s has been unblocked due to approved dispute", originalEventID)
+		}
+
+		// Delete the ticket event
+		if err := store.DeleteEvent(ticketEventID); err != nil {
+			log.Printf("Error deleting ticket event %s: %v", ticketEventID, err)
+			// Continue anyway as the resolution is still valid
+		} else {
+			log.Printf("Ticket event %s has been deleted after successful dispute", ticketEventID)
+		}
+	}
+
 	return &resolutionEvent, nil
 }

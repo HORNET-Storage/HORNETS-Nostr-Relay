@@ -42,6 +42,15 @@ type Store interface {
 	IsEventBlocked(eventID string) (bool, error)
 	UnmarkEventBlocked(eventID string) error
 
+	// Dispute Moderation
+	AddToPendingDisputeModeration(disputeID string, ticketID string, eventID string, mediaURL string, disputeReason string, userPubKey string) error
+	RemoveFromPendingDisputeModeration(disputeID string) error
+	IsPendingDisputeModeration(disputeID string) (bool, error)
+	GetPendingDisputeModerationEvents() ([]types.PendingDisputeModeration, error)
+	GetAndRemovePendingDisputeModeration(batchSize int) ([]types.PendingDisputeModeration, error)
+	MarkEventDisputed(eventID string) error
+	HasEventDispute(eventID string) (bool, error)
+
 	// Pubkey Blocking
 	IsBlockedPubkey(pubkey string) (bool, error)
 	BlockPubkey(pubkey string, reason string) error

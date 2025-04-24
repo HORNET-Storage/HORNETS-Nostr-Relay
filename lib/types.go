@@ -69,6 +69,18 @@ type BlockedEvent struct {
 	Reason      string    `json:"reason"`       // Reason for blocking
 	BlockedAt   time.Time `json:"blocked_at"`   // Timestamp when it was blocked
 	RetainUntil time.Time `json:"retain_until"` // When to delete (typically 48hrs after blocking)
+	HasDispute  bool      `json:"has_dispute"`  // Whether this event has an active dispute
+}
+
+// PendingDisputeModeration represents a dispute waiting for re-evaluation
+type PendingDisputeModeration struct {
+	DisputeID     string    `json:"dispute_id"`     // Dispute event ID
+	TicketID      string    `json:"ticket_id"`      // Ticket event ID
+	EventID       string    `json:"event_id"`       // Original blocked event ID
+	MediaURL      string    `json:"media_url"`      // URL of the media to re-evaluate
+	DisputeReason string    `json:"dispute_reason"` // Reason provided by the user for the dispute
+	UserPubKey    string    `json:"user_pubkey"`    // Public key of the user who created the dispute
+	AddedAt       time.Time `json:"added_at"`       // Timestamp when added to queue
 }
 
 // BlockedPubkey represents a pubkey that is blocked from connecting to the relay

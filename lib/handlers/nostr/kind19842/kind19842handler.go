@@ -140,6 +140,34 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		// Mark the event as disputed to prevent it from being deleted
+		if err := store.MarkEventDisputed(blockedEventID); err != nil {
+			log.Printf("Error marking event as disputed: %v", err)
+			// Continue anyway as the dispute is still valid
+		}
+
+		// Extract media URL from the ticket
+		mediaURL := ""
+		for _, tag := range ticketEvent.Tags {
+			if tag[0] == "media" && len(tag) >= 2 {
+				mediaURL = tag[1]
+				break
+			}
+		}
+
+		// Add the dispute to the pending dispute moderation queue
+		if err := store.AddToPendingDisputeModeration(
+			env.Event.ID,
+			ticketEventID,
+			blockedEventID,
+			mediaURL,
+			disputeReason,
+			env.Event.PubKey,
+		); err != nil {
+			log.Printf("Error adding dispute to pending moderation: %v", err)
+			// Continue anyway as the dispute is still valid
+		}
+
 		// Successfully processed event
 		write("OK", env.Event.ID, true, "Dispute received and will be reviewed")
 	}

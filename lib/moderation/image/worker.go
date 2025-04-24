@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -64,6 +66,9 @@ func (w *Worker) Start() {
 	// Ticker for checking pending moderation events
 	eventTicker := time.NewTicker(w.CheckInterval)
 
+	// Ticker for checking pending dispute moderation events
+	disputeTicker := time.NewTicker(w.CheckInterval)
+
 	// Ticker for temporary file cleanup (every 1 hour)
 	tempCleanupTicker := time.NewTicker(1 * time.Hour)
 
@@ -76,6 +81,7 @@ func (w *Worker) Start() {
 	go func() {
 		log.Printf("Starting image moderation worker with check interval %s", w.CheckInterval)
 		defer eventTicker.Stop()
+		defer disputeTicker.Stop()
 		defer tempCleanupTicker.Stop()
 		defer blockedEventsCleanupTicker.Stop()
 
@@ -114,6 +120,30 @@ func (w *Worker) Start() {
 
 						w.processEvent(eventID, imageURLs)
 					}(event.EventID, event.ImageURLs)
+				}
+
+			case <-disputeTicker.C:
+				// Get and remove pending dispute moderation events atomically
+				pendingDisputes, err := w.Store.GetAndRemovePendingDisputeModeration(5) // Process up to 5 disputes at a time
+				if err != nil {
+					log.Printf("Error getting pending dispute moderation events: %v", err)
+					continue
+				}
+
+				if len(pendingDisputes) > 0 {
+					log.Printf("Processing %d disputes pending moderation", len(pendingDisputes))
+				}
+
+				// Process each pending dispute
+				for _, dispute := range pendingDisputes {
+					// Use the semaphore to limit concurrency
+					semaphore <- struct{}{}
+
+					go func(dispute lib.PendingDisputeModeration) {
+						defer func() { <-semaphore }() // Release the semaphore when done
+
+						w.processDispute(dispute)
+					}(dispute)
 				}
 
 			case <-tempCleanupTicker.C:
@@ -369,3 +399,58 @@ func isVideoURL(url string) bool {
 
 // Note: Image downloading functionality is handled directly by the ModerationService,
 // which sends URLs to the moderation API rather than downloading images first.
+
+// processDispute processes a single dispute for re-evaluation
+func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
+	log.Printf("Processing dispute %s for event %s", dispute.DisputeID, dispute.EventID)
+
+	// Check if the event is still blocked
+	isBlocked, err := w.Store.IsEventBlocked(dispute.EventID)
+	if err != nil {
+		log.Printf("Error checking if event %s is blocked: %v", dispute.EventID, err)
+		return
+	}
+
+	if !isBlocked {
+		log.Printf("Skipping dispute for event %s which is no longer blocked", dispute.EventID)
+		return
+	}
+
+	// Re-evaluate the media with dispute-specific parameters
+	response, err := w.ModerationService.ModerateDisputeURL(dispute.MediaURL, dispute.DisputeReason)
+	if err != nil {
+		log.Printf("Error re-evaluating media %s: %v", dispute.MediaURL, err)
+		return
+	}
+
+	// Log the re-evaluation result
+	log.Printf("Dispute re-evaluation result for %s: level=%d decision=%s confidence=%.2f",
+		dispute.MediaURL, response.ContentLevel, response.Decision, response.Confidence)
+
+	// Get relay public key and private key from viper config
+	relayPubKey := viper.GetString("RelayPubkey")
+	relayPrivKey := viper.GetString("private_key")
+
+	// Determine if the dispute should be approved based on the re-evaluation
+	approved := !response.ShouldBlock()
+
+	// Create a resolution event using the kind19843 package
+	_, err = kind19843.CreateResolutionEvent(
+		w.Store,
+		dispute.DisputeID,
+		dispute.TicketID,
+		dispute.EventID,
+		dispute.UserPubKey,
+		approved,
+		response.Explanation,
+		relayPubKey,
+		relayPrivKey,
+	)
+
+	if err != nil {
+		log.Printf("Error creating resolution event: %v", err)
+		return
+	}
+
+	log.Printf("Created resolution event for dispute %s (approved: %v)", dispute.DisputeID, approved)
+}
