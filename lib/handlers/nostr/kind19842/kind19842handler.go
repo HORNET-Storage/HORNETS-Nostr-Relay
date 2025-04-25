@@ -95,6 +95,32 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		// Check if this user has already disputed this event
+		hasDisputed, err := store.HasUserDisputedEvent(blockedEventID, env.Event.PubKey)
+		if err != nil {
+			log.Printf("Error checking if user has disputed event: %v", err)
+			write("NOTICE", "Error processing dispute. Please try again later.")
+			return
+		}
+
+		// If this is a subsequent dispute, check if the user is a paid subscriber
+		if hasDisputed {
+			isPaid, err := IsPaidSubscriber(store, env.Event.PubKey)
+			if err != nil {
+				log.Printf("Error checking paid subscriber status: %v", err)
+				write("NOTICE", "Error processing dispute. Please try again later.")
+				return
+			}
+
+			// If not a paid subscriber, reject the dispute
+			if !isPaid {
+				write("OK", env.Event.ID, false, "You have already disputed this event. Only paid subscribers can submit multiple disputes for the same event.")
+				return
+			}
+
+			log.Printf("Paid subscriber %s submitting a subsequent dispute for event %s", env.Event.PubKey, blockedEventID)
+		}
+
 		// Update the ticket status to "disputed"
 		// Create a new event that's a copy of the ticket but with updated status
 		updatedTicket := nostr.Event{

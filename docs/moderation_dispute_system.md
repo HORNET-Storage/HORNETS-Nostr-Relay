@@ -51,6 +51,15 @@ When content is blocked by the moderation system (e.g., due to image moderation)
 
 If a user believes their content was incorrectly flagged, they can create a dispute event (Kind 19842) that references the moderation ticket. The dispute should include a reason why the user believes the moderation decision was incorrect.
 
+#### Free vs. Paid Disputes
+
+The system implements a tiered approach to disputes:
+
+- **First Dispute**: Every user gets one free dispute per blocked event. This allows all users to challenge moderation decisions they believe are incorrect.
+- **Subsequent Disputes**: If a user wants to submit additional disputes for the same event (e.g., if their first dispute was rejected), they must be a paid subscriber.
+
+This approach balances accessibility with resource management, ensuring all users have access to the dispute system while preventing abuse.
+
 ### Step 3: Dispute Processing
 
 The relay now supports two methods of dispute processing:
@@ -250,6 +259,34 @@ The automated dispute processing system consists of several components:
 5. **Data Storage**: The system uses several data structures:
    - `BlockedEvent`: Tracks blocked events with a new `HasDispute` flag
    - `PendingDisputeModeration`: Represents disputes waiting for processing
+
+6. **Paid Subscriber Check**: The system checks if a user has already disputed an event and if they are a paid subscriber for subsequent disputes:
+   ```go
+   // In lib/handlers/nostr/kind19842/kind19842handler.go
+   // Check if this user has already disputed this event
+   hasDisputed, err := store.HasUserDisputedEvent(blockedEventID, env.Event.PubKey)
+   if err != nil {
+       log.Printf("Error checking if user has disputed event: %v", err)
+       write("NOTICE", "Error processing dispute. Please try again later.")
+       return
+   }
+
+   // If this is a subsequent dispute, check if the user is a paid subscriber
+   if hasDisputed {
+       isPaid, err := IsPaidSubscriber(store, env.Event.PubKey)
+       if err != nil {
+           log.Printf("Error checking paid subscriber status: %v", err)
+           write("NOTICE", "Error processing dispute. Please try again later.")
+           return
+       }
+
+       // If not a paid subscriber, reject the dispute
+       if !isPaid {
+           write("OK", env.Event.ID, false, "You have already disputed this event. Only paid subscribers can submit multiple disputes for the same event.")
+           return
+       }
+   }
+   ```
 
 ### Integration Points
 

@@ -50,6 +50,7 @@ type Store interface {
 	GetAndRemovePendingDisputeModeration(batchSize int) ([]types.PendingDisputeModeration, error)
 	MarkEventDisputed(eventID string) error
 	HasEventDispute(eventID string) (bool, error)
+	HasUserDisputedEvent(eventID string, userPubKey string) (bool, error)
 
 	// Pubkey Blocking
 	IsBlockedPubkey(pubkey string) (bool, error)

@@ -337,3 +337,44 @@ func (store *BadgerholdStore) HasEventDispute(eventID string) (bool, error) {
 
 	return blocked.HasDispute, nil
 }
+
+// HasUserDisputedEvent checks if a user has already disputed a specific event
+func (store *BadgerholdStore) HasUserDisputedEvent(eventID string, userPubKey string) (bool, error) {
+	// First, find the moderation ticket for this event
+	ticketFilter := nostr.Filter{
+		Kinds: []int{19841},
+		Tags: nostr.TagMap{
+			"e": []string{eventID},
+		},
+	}
+
+	tickets, err := store.QueryEvents(ticketFilter)
+	if err != nil {
+		return false, fmt.Errorf("failed to query moderation tickets: %w", err)
+	}
+
+	if len(tickets) == 0 {
+		// No ticket found for this event, so no disputes
+		return false, nil
+	}
+
+	// Get the ticket ID
+	ticketID := tickets[0].ID
+
+	// Now check if this user has created a dispute for this ticket
+	disputeFilter := nostr.Filter{
+		Kinds:   []int{19842},
+		Authors: []string{userPubKey},
+		Tags: nostr.TagMap{
+			"e": []string{ticketID},
+		},
+	}
+
+	disputes, err := store.QueryEvents(disputeFilter)
+	if err != nil {
+		return false, fmt.Errorf("failed to query dispute events: %w", err)
+	}
+
+	// If we found any disputes by this user for this ticket, return true
+	return len(disputes) > 0, nil
+}
