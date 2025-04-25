@@ -2,6 +2,7 @@ package kind0
 
 import (
 	"log"
+	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	jsoniter "github.com/json-iterator/go"
@@ -10,6 +11,63 @@ import (
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
+
+// NIP24Tags represents the tags defined in NIP-24
+type NIP24Tags struct {
+	ReferenceURLs []string // 'r' tags - web URLs the event is referring to
+	ExternalIDs   []string // 'i' tags - external IDs the event is referring to
+	Titles        []string // 'title' tags - names of NIP-51 sets, NIP-52 calendar events, etc.
+	Hashtags      []string // 't' tags - hashtags (always lowercase)
+}
+
+// ExtractNIP24Tags extracts the tags defined in NIP-24 from a Nostr event
+// These tags have the following meanings:
+// - 'r': a web URL the event is referring to in some way
+// - 'i': an external id the event is referring to in some way
+// - 'title': name of NIP-51 sets, NIP-52 calendar event, NIP-53 live event or NIP-99 listing
+// - 't': a hashtag. The value MUST be a lowercase string
+func ExtractNIP24Tags(event *nostr.Event) *NIP24Tags {
+	result := &NIP24Tags{
+		ReferenceURLs: []string{},
+		ExternalIDs:   []string{},
+		Titles:        []string{},
+		Hashtags:      []string{},
+	}
+
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 {
+			switch tag[0] {
+			case "r": // Web URL reference
+				result.ReferenceURLs = append(result.ReferenceURLs, tag[1])
+			case "i": // External ID reference
+				result.ExternalIDs = append(result.ExternalIDs, tag[1])
+			case "title": // Title for various NIP types
+				result.Titles = append(result.Titles, tag[1])
+			case "t": // Hashtag (must be lowercase)
+				// Ensure hashtag is lowercase as per NIP-24 specification
+				hashtag := strings.ToLower(tag[1])
+				result.Hashtags = append(result.Hashtags, hashtag)
+			}
+		}
+	}
+
+	return result
+}
+
+// ValidateNIP24Tags validates that the NIP-24 tags in an event follow the specification
+// Currently, this only checks that hashtags are lowercase
+func ValidateNIP24Tags(event *nostr.Event) bool {
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "t" {
+			// Hashtag must be lowercase
+			if tag[1] != strings.ToLower(tag[1]) {
+				log.Printf("Warning: Hashtag '%s' is not lowercase as required by NIP-24", tag[1])
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
@@ -34,6 +92,34 @@ func BuildKind0Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		success := lib_nostr.ValidateEvent(write, env, 0)
 		if !success {
 			return
+		}
+
+		// Check for NIP-24 tags - all NIP-24 tags are optional
+		hasNIP24Tags := false
+		for _, tag := range env.Event.Tags {
+			if len(tag) >= 2 {
+				switch tag[0] {
+				case "r", "i", "title", "t":
+					hasNIP24Tags = true
+				}
+			}
+			if hasNIP24Tags {
+				break
+			}
+		}
+
+		// Only validate and extract NIP-24 tags if they are present
+		if hasNIP24Tags {
+			// Validate NIP-24 tags if present (but still process the event even if tags are invalid)
+			if !ValidateNIP24Tags(&env.Event) {
+				log.Printf("Warning: Event %s contains invalid NIP-24 tags, but will still be processed", env.Event.ID)
+			}
+
+			// Extract and log NIP-24 tags for debugging
+			nip24Tags := ExtractNIP24Tags(&env.Event)
+			log.Printf("NIP-24 tags for event %s: URLs=%v, ExternalIDs=%v, Titles=%v, Hashtags=%v",
+				env.Event.ID, nip24Tags.ReferenceURLs, nip24Tags.ExternalIDs,
+				nip24Tags.Titles, nip24Tags.Hashtags)
 		}
 
 		// Retrieve existing kind 0 events for the pubkey
