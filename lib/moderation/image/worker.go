@@ -76,6 +76,9 @@ func (w *Worker) Start() {
 	// Ticker for blocked events cleanup (daily)
 	blockedEventsCleanupTicker := time.NewTicker(24 * time.Hour)
 
+	// Ticker for resolution events cleanup (daily)
+	resolutionEventsCleanupTicker := time.NewTicker(24 * time.Hour)
+
 	// Create a worker pool using semaphore pattern
 	semaphore := make(chan struct{}, w.Concurrency)
 
@@ -85,6 +88,7 @@ func (w *Worker) Start() {
 		defer disputeTicker.Stop()
 		defer tempCleanupTicker.Stop()
 		defer blockedEventsCleanupTicker.Stop()
+		defer resolutionEventsCleanupTicker.Stop()
 
 		for {
 			select {
@@ -157,6 +161,10 @@ func (w *Worker) Start() {
 				// Delete blocked events older than 48 hours
 				go w.cleanupBlockedEvents()
 
+			case <-resolutionEventsCleanupTicker.C:
+				// Delete resolution events older than 7 days
+				go w.cleanupResolutionEvents()
+
 			case <-w.StopChan:
 				log.Println("Stopping image moderation worker")
 				return
@@ -181,6 +189,25 @@ func (w *Worker) cleanupBlockedEvents() {
 
 	if count > 0 {
 		log.Printf("Deleted %d blocked events older than 48 hours", count)
+	}
+}
+
+// cleanupResolutionEvents deletes resolution events (kind 19843) older than 7 days
+func (w *Worker) cleanupResolutionEvents() {
+	log.Println("Running resolution events cleanup...")
+
+	// Calculate 7 days in seconds
+	age := int64(7 * 24 * 60 * 60)
+
+	// Delete resolution events older than the age
+	count, err := w.Store.DeleteResolutionEventsOlderThan(age)
+	if err != nil {
+		log.Printf("Error cleaning up resolution events: %v", err)
+		return
+	}
+
+	if count > 0 {
+		log.Printf("Deleted %d resolution events older than 7 days", count)
 	}
 }
 

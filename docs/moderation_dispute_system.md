@@ -131,7 +131,7 @@ Created by users to challenge a moderation decision.
 
 ### Resolution (Kind 19843)
 
-Created by the relay to respond to disputes.
+Created by the relay to respond to disputes. Resolution events are automatically deleted after 7 days to prevent database bloat.
 
 ```json
 {
@@ -240,7 +240,27 @@ The automated dispute processing system consists of several components:
    }
    ```
 
-3. **Dispute-Specific Moderation**: The system uses a specialized endpoint for re-evaluating disputed content:
+3. **Cleanup Worker**: A background worker automatically cleans up old resolution events:
+   ```go
+   // In lib/moderation/image/worker.go
+   func (w *Worker) cleanupResolutionEvents() {
+       // Calculate 7 days in seconds
+       age := int64(7 * 24 * 60 * 60)
+       
+       // Delete resolution events older than the age
+       count, err := w.Store.DeleteResolutionEventsOlderThan(age)
+       if err != nil {
+           log.Printf("Error cleaning up resolution events: %v", err)
+           return
+       }
+       
+       if count > 0 {
+           log.Printf("Deleted %d resolution events older than 7 days", count)
+       }
+   }
+   ```
+
+4. **Dispute-Specific Moderation**: The system uses a specialized endpoint for re-evaluating disputed content:
    ```go
    // In lib/moderation/image/service.go
    func (s *ModerationService) ModerateDisputeURL(mediaURL string, disputeReason string) (*ModerationResponse, error) {
@@ -251,16 +271,16 @@ The automated dispute processing system consists of several components:
    }
    ```
 
-4. **Event Handling**: The system includes handlers for all three event types:
+5. **Event Handling**: The system includes handlers for all three event types:
    - `kind19841handler.go`: Creates moderation tickets
    - `kind19842handler.go`: Processes dispute events and adds them to the queue
    - `kind19843handler.go`: Handles resolution events
 
-5. **Data Storage**: The system uses several data structures:
+6. **Data Storage**: The system uses several data structures:
    - `BlockedEvent`: Tracks blocked events with a new `HasDispute` flag
    - `PendingDisputeModeration`: Represents disputes waiting for processing
 
-6. **Paid Subscriber Check**: The system checks if a user has already disputed an event and if they are a paid subscriber for subsequent disputes:
+7. **Paid Subscriber Check**: The system checks if a user has already disputed an event and if they are a paid subscriber for subsequent disputes:
    ```go
    // In lib/handlers/nostr/kind19842/kind19842handler.go
    // Check if this user has already disputed this event
@@ -296,6 +316,7 @@ The dispute system integrates with the existing moderation system at several poi
 2. When a dispute is received, the `AddToPendingDisputeModeration` method adds it to the queue.
 3. When a dispute is approved, the `UnmarkEventBlocked` method unblocks the content.
 4. The `DeleteBlockedEventsOlderThan` method now skips events with active disputes.
+5. The `DeleteResolutionEventsOlderThan` method cleans up resolution events older than 7 days.
 
 ### Configuration
 

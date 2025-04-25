@@ -239,6 +239,44 @@ func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, erro
 	return deletedCount, nil
 }
 
+// DeleteResolutionEventsOlderThan deletes kind 19843 resolution events that are older than the specified age (in seconds)
+func (store *BadgerholdStore) DeleteResolutionEventsOlderThan(age int64) (int, error) {
+	var deletedCount int
+
+	// Calculate the cutoff time
+	cutoffTime := time.Now().Add(-time.Duration(age) * time.Second)
+	cutoffTimestamp := nostr.Timestamp(cutoffTime.Unix())
+
+	// Create a filter for kind 19843 events older than the cutoff time
+	filter := nostr.Filter{
+		Kinds: []int{19843},
+		Until: &cutoffTimestamp,
+	}
+
+	// Query for resolution events older than the cutoff time
+	resolutionEvents, err := store.QueryEvents(filter)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query resolution events: %w", err)
+	}
+
+	log.Printf("Found %d resolution events older than %s", len(resolutionEvents), cutoffTime.Format(time.RFC3339))
+
+	// Delete each resolution event
+	for _, event := range resolutionEvents {
+		if err := store.DeleteEvent(event.ID); err != nil {
+			log.Printf("Error deleting resolution event %s: %v", event.ID, err)
+			continue
+		}
+		deletedCount++
+	}
+
+	if deletedCount > 0 {
+		log.Printf("Successfully deleted %d resolution events", deletedCount)
+	}
+
+	return deletedCount, nil
+}
+
 // AddToPendingDisputeModeration adds a dispute to the pending dispute moderation queue
 func (store *BadgerholdStore) AddToPendingDisputeModeration(disputeID string, ticketID string, eventID string, mediaURL string, disputeReason string, userPubKey string) error {
 	pending := lib.PendingDisputeModeration{

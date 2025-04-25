@@ -39,6 +39,7 @@ type Store interface {
 	MarkEventBlocked(eventID string, timestamp int64) error
 	MarkEventBlockedWithDetails(eventID string, timestamp int64, reason string, contentLevel int, mediaURL string) error
 	DeleteBlockedEventsOlderThan(age int64) (int, error)
+	DeleteResolutionEventsOlderThan(age int64) (int, error)
 	IsEventBlocked(eventID string) (bool, error)
 	UnmarkEventBlocked(eventID string) error
 
