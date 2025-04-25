@@ -205,6 +205,26 @@ func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, erro
 				fmt.Printf("Error deleting blocked event %s: %v\n", event.EventID, err)
 				continue
 			}
+			
+			// Delete the associated kind 19841 moderation ticket
+			filter := nostr.Filter{
+				Kinds: []int{19841},
+				Tags: nostr.TagMap{
+					"e": []string{event.EventID},
+				},
+			}
+			
+			moderationTickets, err := store.QueryEvents(filter)
+			if err == nil && len(moderationTickets) > 0 {
+				for _, ticket := range moderationTickets {
+					if err := store.DeleteEvent(ticket.ID); err != nil {
+						// Log but don't fail - the main deletion was successful
+						fmt.Printf("Error deleting moderation ticket %s for event %s: %v\n", ticket.ID, event.EventID, err)
+					} else {
+						fmt.Printf("Successfully deleted moderation ticket %s for event %s\n", ticket.ID, event.EventID)
+					}
+				}
+			}
 
 			// Also delete from main event store if it still exists
 			if err := store.DeleteEvent(event.EventID); err != nil {

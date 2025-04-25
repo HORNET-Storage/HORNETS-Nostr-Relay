@@ -358,6 +358,26 @@ func deleteModeratedEvent(c *fiber.Ctx, store stores.Store) error {
 			}
 		}
 	}
+	
+	// Delete the associated kind 19841 moderation ticket
+	filter := nostr.Filter{
+		Kinds: []int{19841},
+		Tags: nostr.TagMap{
+			"e": []string{eventID},
+		},
+	}
+	
+	moderationTickets, err := store.QueryEvents(filter)
+	if err == nil && len(moderationTickets) > 0 {
+		for _, ticket := range moderationTickets {
+			if err := store.DeleteEvent(ticket.ID); err != nil {
+				// Log but don't fail - the main deletion was successful
+				log.Printf("Error deleting moderation ticket %s for event %s: %v", ticket.ID, eventID, err)
+			} else {
+				log.Printf("Successfully deleted moderation ticket %s for event %s", ticket.ID, eventID)
+			}
+		}
+	}
 
 	// Return success response
 	return c.JSON(fiber.Map{
