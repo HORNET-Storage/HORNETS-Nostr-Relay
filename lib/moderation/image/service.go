@@ -387,3 +387,160 @@ func (s *ModerationService) Enable() {
 func (s *ModerationService) Disable() {
 	s.Enabled = false
 }
+
+// ModerateDisputeURL sends a media URL to the moderation API with dispute-specific parameters
+func (s *ModerationService) ModerateDisputeURL(mediaURL string, disputeReason string) (*ModerationResponse, error) {
+	if !s.Enabled {
+		// Return default "allow" response if moderation is disabled
+		return &ModerationResponse{
+			Decision:     string(DecisionAllow),
+			Explanation:  "Moderation is disabled",
+			ContentLevel: 0,
+		}, nil
+	}
+
+	// Download the media file
+	imagePath, err := s.downloadImage(mediaURL)
+	if err != nil {
+		// If download fails, allow the content to avoid false positives
+		fmt.Printf("Warning: Failed to download image for dispute moderation: %v\n", err)
+		return &ModerationResponse{
+			Decision:       string(DecisionAllow),
+			Explanation:    "Failed to download image for dispute moderation",
+			ContentLevel:   0,
+			Confidence:     0.0,
+			Category:       "error",
+			ProcessingTime: 0.0,
+			ModerationMode: s.Mode,
+		}, nil
+	}
+	defer os.Remove(imagePath) // Clean up the temporary file
+
+	// Moderate the downloaded image with dispute-specific parameters
+	return s.ModerateDisputeFile(imagePath, disputeReason)
+}
+
+// ModerateDisputeFile sends a local image file to the moderation API with dispute-specific parameters
+func (s *ModerationService) ModerateDisputeFile(filePath string, disputeReason string) (*ModerationResponse, error) {
+	if !s.Enabled {
+		// Return default "allow" response if moderation is disabled
+		return &ModerationResponse{
+			Decision:     string(DecisionAllow),
+			Explanation:  "Moderation is disabled",
+			ContentLevel: 0,
+		}, nil
+	}
+
+	// Verify the file exists and has content
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat image file: %w", err)
+	}
+
+	// Check file size - if it's 0 bytes, it's not a valid image
+	if fileInfo.Size() == 0 {
+		return nil, fmt.Errorf("image file is empty: %s", filePath)
+	}
+
+	// Validate file is an image by checking magic bytes
+	imgType, err := validateImageFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("file validation failed: %w", err)
+	}
+
+	// Get the absolute path to the file for debugging
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		absPath = filePath // Fallback to relative path if abs fails
+	}
+
+	// Log file information for debugging
+	log.Printf("Uploading image for dispute moderation: %s (type: %s, size: %d bytes, path: %s)",
+		filepath.Base(filePath), imgType, fileInfo.Size(), absPath)
+
+	// Read the entire file into memory
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read image file: %w", err)
+	}
+
+	// Create a custom boundary for the form
+	boundary := "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+
+	// Create a buffer to store the request body
+	var requestBody bytes.Buffer
+
+	// Get the filename with proper extension
+	filename := filepath.Base(filePath)
+	if !strings.Contains(filename, ".") {
+		// Add extension based on detected type if missing
+		filename = filename + "." + imgType
+	}
+
+	// Manually construct the multipart form
+	// 1. Add the file part with explicit content type
+	requestBody.WriteString("--" + boundary + "\r\n")
+	requestBody.WriteString(fmt.Sprintf(`Content-Disposition: form-data; name="file"; filename="%s"`, filename) + "\r\n")
+	requestBody.WriteString(fmt.Sprintf("Content-Type: image/%s\r\n\r\n", imgType))
+	requestBody.Write(fileData)
+	requestBody.WriteString("\r\n")
+
+	// 2. Add moderation mode - always use "full" for disputes
+	requestBody.WriteString("--" + boundary + "\r\n")
+	requestBody.WriteString(`Content-Disposition: form-data; name="moderation_mode"` + "\r\n\r\n")
+	requestBody.WriteString("full\r\n")
+
+	// 3. Add threshold - use a lower threshold for disputes (0.35 instead of 0.4)
+	requestBody.WriteString("--" + boundary + "\r\n")
+	requestBody.WriteString(`Content-Disposition: form-data; name="threshold"` + "\r\n\r\n")
+	requestBody.WriteString(fmt.Sprintf("%f", 0.35) + "\r\n")
+
+	// 4. Add dispute reason if provided
+	if disputeReason != "" {
+		requestBody.WriteString("--" + boundary + "\r\n")
+		requestBody.WriteString(`Content-Disposition: form-data; name="dispute_reason"` + "\r\n\r\n")
+		requestBody.WriteString(disputeReason + "\r\n")
+	}
+
+	// 5. End of form
+	requestBody.WriteString("--" + boundary + "--\r\n")
+
+	// Debug the request body size
+	log.Printf("Dispute moderation request body size: %d bytes", requestBody.Len())
+
+	// Create and send the request
+	// Use the /moderate_dispute endpoint instead of /moderate
+	disputeEndpoint := strings.Replace(s.APIEndpoint, "/moderate", "/moderate_dispute", 1)
+	requestURL := fmt.Sprintf("%s?moderation_mode=full&threshold=0.35",
+		disputeEndpoint)
+
+	req, err := http.NewRequest("POST", requestURL, &requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
+	req.Header.Set("Accept", "application/json")
+
+	// Send the request
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned non-OK status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Parse response
+	var result ModerationResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API response: %w", err)
+	}
+
+	return &result, nil
+}

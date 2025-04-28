@@ -8,6 +8,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 // GetModerationNotifications retrieves all moderation notifications with pagination
@@ -187,5 +188,201 @@ func createModerationNotification(c *fiber.Ctx, store stores.Store) error {
 		"success": true,
 		"message": "Notification created successfully",
 		"id":      notification.ID,
+	})
+}
+
+// GetBlockedEvent retrieves a blocked event by its ID
+func getBlockedEvent(c *fiber.Ctx, store stores.Store) error {
+	// Get event ID from the URL parameters
+	eventID := c.Params("id")
+	if eventID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event ID is required",
+		})
+	}
+
+	// Check if the event is actually blocked
+	isBlocked, err := store.IsEventBlocked(eventID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to check event status: " + err.Error(),
+		})
+	}
+
+	if !isBlocked {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event is not currently blocked",
+		})
+	}
+
+	// Query the event from the store
+	filter := nostr.Filter{
+		IDs: []string{eventID},
+	}
+	events, err := store.QueryEvents(filter)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve event: " + err.Error(),
+		})
+	}
+
+	if len(events) == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Event not found",
+		})
+	}
+
+	// Get the moderation notification for this event to include the reason
+	var notification *lib.ModerationNotification
+	notifications, _, err := store.GetStatsStore().GetAllModerationNotifications(1, 100)
+	if err == nil {
+		for _, n := range notifications {
+			if n.EventID == eventID {
+				notification = &n
+				break
+			}
+		}
+	}
+
+	log.Println("Blocked event: ", events[0])
+
+	// Return the event along with its moderation details
+	return c.JSON(fiber.Map{
+		"event":              events[0],
+		"moderation_details": notification,
+	})
+}
+
+// UnblockEvent handles requests to unblock incorrectly flagged content
+func unblockEvent(c *fiber.Ctx, store stores.Store) error {
+	// Get event ID from request body
+	var req struct {
+		EventID string `json:"event_id"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if req.EventID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event ID is required",
+		})
+	}
+
+	// Check if the event is actually blocked
+	isBlocked, err := store.IsEventBlocked(req.EventID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to check event status: " + err.Error(),
+		})
+	}
+
+	if !isBlocked {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event is not currently blocked",
+		})
+	}
+
+	// Unblock the event
+	if err := store.UnmarkEventBlocked(req.EventID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to unblock event: " + err.Error(),
+		})
+	}
+
+	// Find and delete the corresponding moderation notification
+	notifications, _, err := store.GetStatsStore().GetAllModerationNotifications(1, 100)
+	if err == nil {
+		for _, notification := range notifications {
+			if notification.EventID == req.EventID {
+				store.GetStatsStore().DeleteModerationNotification(notification.ID)
+				break
+			}
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"success":  true,
+		"message":  "Event unblocked successfully",
+		"event_id": req.EventID,
+	})
+}
+
+// DeleteModeratedEvent permanently deletes a moderated event from the relay
+func deleteModeratedEvent(c *fiber.Ctx, store stores.Store) error {
+	// Get event ID from the URL parameters
+	eventID := c.Params("id")
+	if eventID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event ID is required",
+		})
+	}
+
+	// Check if the event is actually blocked
+	isBlocked, err := store.IsEventBlocked(eventID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to check event status: " + err.Error(),
+		})
+	}
+
+	if !isBlocked {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Event is not currently blocked",
+		})
+	}
+
+	// Delete the event from the database
+	if err := store.DeleteEvent(eventID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to delete event: " + err.Error(),
+		})
+	}
+
+	// Remove from blocked list
+	if err := store.UnmarkEventBlocked(eventID); err != nil {
+		// Log but don't fail - the main deletion was successful
+		log.Printf("Error removing event %s from blocked list: %v", eventID, err)
+	}
+
+	// Find and delete the corresponding moderation notification
+	notifications, _, err := store.GetStatsStore().GetAllModerationNotifications(1, 100)
+	if err == nil {
+		for _, notification := range notifications {
+			if notification.EventID == eventID {
+				store.GetStatsStore().DeleteModerationNotification(notification.ID)
+				break
+			}
+		}
+	}
+	
+	// Delete the associated kind 19841 moderation ticket
+	filter := nostr.Filter{
+		Kinds: []int{19841},
+		Tags: nostr.TagMap{
+			"e": []string{eventID},
+		},
+	}
+	
+	moderationTickets, err := store.QueryEvents(filter)
+	if err == nil && len(moderationTickets) > 0 {
+		for _, ticket := range moderationTickets {
+			if err := store.DeleteEvent(ticket.ID); err != nil {
+				// Log but don't fail - the main deletion was successful
+				log.Printf("Error deleting moderation ticket %s for event %s: %v", ticket.ID, eventID, err)
+			} else {
+				log.Printf("Successfully deleted moderation ticket %s for event %s", ticket.ID, eventID)
+			}
+		}
+	}
+
+	// Return success response
+	return c.JSON(fiber.Map{
+		"success":  true,
+		"message":  "Event permanently deleted",
+		"event_id": eventID,
 	})
 }

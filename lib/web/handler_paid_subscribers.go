@@ -18,6 +18,20 @@ type UserMetadata struct {
 	DisplayName string `json:"display_name,omitempty"`
 	About       string `json:"about,omitempty"`
 	Picture     string `json:"picture,omitempty"`
+
+	// New fields from NIP-24
+	Website  string `json:"website,omitempty"`
+	Banner   string `json:"banner,omitempty"`
+	Bot      bool   `json:"bot,omitempty"`
+	Birthday struct {
+		Year  int `json:"year,omitempty"`
+		Month int `json:"month,omitempty"`
+		Day   int `json:"day,omitempty"`
+	} `json:"birthday,omitempty"`
+
+	// Deprecated fields (for backward compatibility)
+	DeprecatedDisplayName string `json:"displayName,omitempty"`
+	DeprecatedUsername    string `json:"username,omitempty"`
 }
 
 // PaidSubscriberProfile represents the response structure
@@ -26,6 +40,16 @@ type PaidSubscriberProfile struct {
 	Picture string `json:"picture"`
 	Name    string `json:"name,omitempty"`
 	About   string `json:"about,omitempty"`
+
+	// Additional NIP-24 fields
+	Website  string `json:"website,omitempty"`
+	Banner   string `json:"banner,omitempty"`
+	Bot      bool   `json:"bot,omitempty"`
+	Birthday struct {
+		Year  int `json:"year,omitempty"`
+		Month int `json:"month,omitempty"`
+		Day   int `json:"day,omitempty"`
+	} `json:"birthday,omitempty"`
 }
 
 // TODO: Update this URL once Blossom blob images are implemented, as we will have migrated away from using links
@@ -122,10 +146,30 @@ func getProfilesForPubkeys(store stores.Store, pubkeys []string) ([]PaidSubscrib
 				profile.Name = metadata.DisplayName
 			} else if metadata.Name != "" {
 				profile.Name = metadata.Name
+			} else if metadata.DeprecatedDisplayName != "" {
+				// Fall back to deprecated displayName if no other name is available
+				profile.Name = metadata.DeprecatedDisplayName
+			} else if metadata.DeprecatedUsername != "" {
+				// Fall back to deprecated username as last resort
+				profile.Name = metadata.DeprecatedUsername
 			}
 
 			if metadata.About != "" {
 				profile.About = metadata.About
+			}
+
+			// Populate additional NIP-24 fields in the profile response
+			profile.Website = metadata.Website
+			profile.Banner = metadata.Banner
+			profile.Bot = metadata.Bot
+			profile.Birthday = metadata.Birthday
+
+			// Log NIP-24 fields for debugging
+			if metadata.Website != "" || metadata.Banner != "" || metadata.Bot ||
+				(metadata.Birthday.Year != 0 || metadata.Birthday.Month != 0 || metadata.Birthday.Day != 0) {
+				log.Printf("NIP-24 fields for %s: Website=%s, Banner=%s, Bot=%v, Birthday=%v-%v-%v",
+					pubkey, metadata.Website, metadata.Banner, metadata.Bot,
+					metadata.Birthday.Year, metadata.Birthday.Month, metadata.Birthday.Day)
 			}
 		}
 

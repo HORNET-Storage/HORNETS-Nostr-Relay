@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
+
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
@@ -13,8 +16,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
-	"net/url"
-	"strings"
 )
 
 // BuildKind11011Handler constructs and returns a handler function for kind 10000 (Mute List) events.
@@ -178,8 +179,8 @@ func UrlStringToMultiaddr(urlStr string) (string, error) {
 
 func HandleRelayList(event nostr.Event) error {
 	payload, pubkey, sig, success := getDHTPayloadPubkeySig(&event)
-	if success == false {
-		log.Printf("NOTICE", "Error parsing tags for event.")
+	if !success {
+		log.Println("NOTICE", "Error parsing tags for event.")
 		return errors.New("error parsing tags for event")
 	}
 

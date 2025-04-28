@@ -56,6 +56,8 @@ func cborDecode(data []byte, value interface{}) error {
 }
 
 func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
+	// We no longer need to set the top-level moderation_mode as we're using the one in relay_settings
+
 	store := &BadgerholdStore{}
 
 	var err error
@@ -458,10 +460,10 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		events = append(events, UnwrapEvent(&event))
 	}
 
-	fmt.Println("First check")
-	for _, ev := range events {
-		fmt.Printf("Found event of kind: %d\n", ev.Kind)
-	}
+	// fmt.Println("First check")
+	// for _, ev := range events {
+	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	// }
 
 	// Step 8: Apply additional filters (search term, etc.)
 	filteredEvents := postFilterEvents(events, filter)
@@ -474,29 +476,14 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		filteredEvents = filteredEvents[:filter.Limit]
 	}
 
-	// Step 11: Filter out events pending moderation
-	var finalEvents []*nostr.Event
-	for _, event := range filteredEvents {
-		isPending, err := store.IsPendingModeration(event.ID)
-		if err != nil {
-			log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
-			// On error, include the event anyway
-			finalEvents = append(finalEvents, event)
-			continue
-		}
+	// fmt.Println("Last check")
+	// for _, ev := range events {
+	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	// }
 
-		// Only include events that are not pending moderation
-		if !isPending {
-			finalEvents = append(finalEvents, event)
-		}
-	}
+	log.Println("DB Querying results: ", filteredEvents)
 
-	fmt.Println("Last check")
-	for _, ev := range finalEvents {
-		fmt.Printf("Found event of kind: %d\n", ev.Kind)
-	}
-
-	return finalEvents, nil
+	return filteredEvents, nil
 }
 
 func sortEventsByCreatedAt(events []*nostr.Event) {
