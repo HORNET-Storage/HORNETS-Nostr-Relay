@@ -4,7 +4,7 @@ go 1.22.1
 
 require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.2
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250410002150-60b72f8f2859
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250501131004-d1bd7ac615e0
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
