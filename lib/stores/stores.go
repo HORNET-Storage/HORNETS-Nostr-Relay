@@ -59,6 +59,14 @@ type Store interface {
 	UnblockPubkey(pubkey string) error
 	ListBlockedPubkeys() ([]types.BlockedPubkey, error)
 
+	// X-Nostr Verification
+	AddToPendingVerification(pubkey, xHandle string) error
+	RemoveFromPendingVerification(pubkey string) error
+	IsPendingVerification(pubkey string) (bool, error)
+	GetPendingVerifications() ([]types.PendingVerification, error)
+	GetAndRemovePendingVerifications(batchSize int) ([]types.PendingVerification, error)
+	RequeueFailedVerification(pubkey, xHandle string, attempts int) error
+
 	// Blossom
 	StoreBlob(data []byte, hash []byte, publicKey string) error
 	GetBlob(hash string) ([]byte, error)

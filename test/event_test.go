@@ -86,10 +86,7 @@ func randomHexString(length int) string {
 	return hex.EncodeToString(bytes)
 }
 
-// randInt generates a random integer between min and max
-func randInt(min, max int) int {
-	return min + rand.Intn(max-min)
-}
+// Note: This function was unused and has been removed
 
 // selectRandomItems selects n random items from the given slice.
 func selectRandomItems(arr []int, n int) []int {
@@ -156,7 +153,8 @@ func setupStore(basepath string) stores.Store {
 	}
 
 	handlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
-	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
+	// For testing purposes, we pass nil for xnostrService and privateKey
+	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, nil, nil))
 	handlers.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	handlers.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 	handlers.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
@@ -302,7 +300,13 @@ func TestHostCommunication(t *testing.T) {
 
 	filter := getRandomFilter()
 	events, err := store1.QueryEvents(filter)
+	if err != nil {
+		t.Fatalf("Error querying events: %v", err)
+	}
 	outgoing, err := json.Marshal(events)
+	if err != nil {
+		t.Fatalf("Error marshaling events: %v", err)
+	}
 
 	// Set a stream handler on the host
 	host2.SetStreamHandler(ProtocolID, func(s net.Stream) {
@@ -408,13 +412,19 @@ func TestNegentropyEventSync(t *testing.T) {
 
 	noFilter := nostr.Filter{}
 	events1, err := store1.QueryEvents(noFilter)
+	if err != nil {
+		t.Fatalf("Error querying events from store1: %v", err)
+	}
 	events2, err := store2.QueryEvents(noFilter)
+	if err != nil {
+		t.Fatalf("Error querying events from store2: %v", err)
+	}
 	if len(events1) != len(events2) {
 		t.Fatalf("Events mismatch %d != %d", len(events1), len(events2))
 	}
 
 	// events are already sorted by QueryEvents
-	for i, _ := range events1 {
+	for i := range events1 {
 		if !EventsEqual(events1[i], events2[i]) {
 			t.Fatalf("Event mismatch at index %d: First event\n%s, Second event\n%s", i, events1[i], events2[i])
 		}

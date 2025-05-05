@@ -20,9 +20,11 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind555"
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
+	"github.com/HORNET-Storage/hornet-storage/lib/verification/xnostr"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
@@ -163,6 +165,39 @@ func init() {
 	viper.SetDefault("image_moderation_check_interval", 30) // seconds
 	viper.SetDefault("image_moderation_timeout", 60)        // seconds
 	viper.SetDefault("image_moderation_concurrency", 5)
+
+	// X-Nostr verification settings
+	viper.SetDefault("xnostr_enabled", true)
+	viper.SetDefault("xnostr_temp_dir", "/tmp/xnostr-verification")
+	viper.SetDefault("xnostr_browser_path", "/usr/bin/chromium") // Default browser path
+	viper.SetDefault("xnostr_browser_pool_size", 3)              // Default browser pool size
+	viper.SetDefault("xnostr_update_interval", 24)               // hours
+	viper.SetDefault("xnostr_check_interval", 30)                // seconds
+	viper.SetDefault("xnostr_concurrency", 3)                    // concurrent verifications
+
+	// X-Nostr verification intervals
+	viper.SetDefault("xnostr_verification_intervals", map[string]interface{}{
+		"full_verification_interval_days": 30,
+		"follower_update_interval_days":   7,
+		"max_verification_attempts":       5,
+	})
+
+	// X-Nostr Nitter settings
+	viper.SetDefault("xnostr_nitter", map[string]interface{}{
+		"instances": []map[string]interface{}{
+			{"url": "https://nitter.net/", "priority": 1},
+			{"url": "https://nitter.lacontrevoie.fr/", "priority": 2},
+			{"url": "https://nitter.1d4.us/", "priority": 3},
+			{"url": "https://nitter.kavin.rocks/", "priority": 4},
+			{"url": "https://nitter.unixfox.eu/", "priority": 5},
+			{"url": "https://nitter.fdn.fr/", "priority": 6},
+			{"url": "https://nitter.pussthecat.org/", "priority": 7},
+			{"url": "https://nitter.nixnet.services/", "priority": 8},
+		},
+		"requests_per_minute": 10,
+		"failure_threshold":   3,
+		"recovery_threshold":  2,
+	})
 
 	// We no longer need to set the top-level moderation_mode as we're using the one in relay_settings
 
@@ -442,13 +477,128 @@ func main() {
 
 	}
 
+	// Initialize X-Nostr verification service if enabled
+	var xnostrService *xnostr.Service
+	if viper.GetBool("xnostr_enabled") {
+		log.Println("Initializing X-Nostr verification service...")
+
+		// Get X-Nostr configuration from viper
+		xnostrTempDir := viper.GetString("xnostr_temp_dir")
+		xnostrBrowserPath := viper.GetString("xnostr_browser_path")
+		xnostrUpdateInterval := time.Duration(viper.GetInt("xnostr_update_interval")) * time.Hour
+		xnostrCheckInterval := time.Duration(viper.GetInt("xnostr_check_interval")) * time.Second
+		xnostrConcurrency := viper.GetInt("xnostr_concurrency")
+
+		// Set defaults if not specified
+		if xnostrCheckInterval == 0 {
+			xnostrCheckInterval = 30 * time.Second // Default to 30 seconds
+		}
+		if xnostrConcurrency == 0 {
+			xnostrConcurrency = 3 // Default to 3 concurrent verifications
+		}
+
+		// Make sure temp directory exists
+		if _, err := os.Stat(xnostrTempDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(xnostrTempDir, 0755); err != nil {
+				log.Printf("Failed to create X-Nostr temp directory: %v", err)
+				xnostrTempDir = os.TempDir() // Fallback to system temp dir
+			}
+		}
+
+		// Initialize X-Nostr service
+		xnostrService = xnostr.NewService(xnostrTempDir, xnostrBrowserPath, xnostrUpdateInterval)
+
+		// Set browser pool size
+		browserPoolSize := 3 // Default to 3 browsers in the pool
+		if viper.IsSet("xnostr_browser_pool_size") {
+			configPoolSize := viper.GetInt("xnostr_browser_pool_size")
+			if configPoolSize > 0 {
+				browserPoolSize = configPoolSize
+			}
+		}
+		xnostrService.SetBrowserPoolSize(browserPoolSize)
+		log.Printf("X-Nostr browser pool size set to %d", browserPoolSize)
+
+		// Configure Nitter instances if available
+		if viper.IsSet("xnostr_nitter.instances") {
+			var nitterInstances []*xnostr.NitterInstance
+
+			// Get Nitter instances from config
+			var configInstances []map[string]interface{}
+			if err := viper.UnmarshalKey("xnostr_nitter.instances", &configInstances); err == nil {
+				for _, instance := range configInstances {
+					url, urlOk := instance["url"].(string)
+					priority, priorityOk := instance["priority"].(int)
+
+					if urlOk && priorityOk {
+						nitterInstances = append(nitterInstances, &xnostr.NitterInstance{
+							URL:      url,
+							Priority: priority,
+						})
+					}
+				}
+
+				// Set the Nitter instances
+				if len(nitterInstances) > 0 {
+					xnostrService.SetNitterInstances(nitterInstances)
+				}
+			}
+
+			// Set rate limit if available
+			if viper.IsSet("xnostr_nitter.requests_per_minute") {
+				rpm := viper.GetInt("xnostr_nitter.requests_per_minute")
+				if rpm > 0 {
+					xnostrService.SetRequestsPerMinute(rpm)
+				}
+			}
+		}
+
+		// Start the service to initialize the browser
+		xnostrService.Start()
+
+		// Initialize and start the X-Nostr worker
+		xnostrWorker := xnostr.NewWorker(
+			store,
+			xnostrService,
+			privateKey,
+			xnostrCheckInterval,
+			xnostrConcurrency,
+		)
+		xnostrWorker.Start()
+
+		// Get follower update interval from config
+		followerUpdateInterval := viper.GetInt64("xnostr_update_interval") // Default to same as update interval
+
+		// Check if we have the new configuration structure
+		if viper.IsSet("xnostr_verification_intervals.follower_update_interval_days") {
+			// Convert days to hours
+			followerUpdateDays := viper.GetInt64("xnostr_verification_intervals.follower_update_interval_days")
+			if followerUpdateDays > 0 {
+				followerUpdateInterval = followerUpdateDays * 24 // Convert days to hours
+			}
+		}
+
+		// Schedule periodic verifications
+		kind555.SchedulePeriodicVerifications(
+			store,
+			xnostrService,
+			privateKey,
+			viper.GetInt64("xnostr_update_interval"),
+			followerUpdateInterval,
+		)
+
+		log.Println("X-Nostr verification service and worker initialized successfully")
+	} else {
+		log.Println("X-Nostr verification service is disabled")
+	}
+
 	// Register Our Nostr Stream Handlers
 	if settings.Mode == "unlimited" {
 		log.Println("Using universal stream handler because Mode set to 'unlimited'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	} else if settings.Mode == "smart" {
 		log.Println("Using specific stream handlers because Mode set to 'smart'")
-		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store))
+		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, xnostrService, privateKey))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 		nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
@@ -475,6 +625,13 @@ func main() {
 		nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
 		nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
 		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
+
+		// Register X-Nostr verification handler (kind 555)
+		if xnostrService != nil {
+			log.Println("Registering kind 555 handler for X-Nostr verification")
+			// We don't need to register a handler for kind 555 since it's only generated by the relay
+			// The verification is triggered by the kind0 handler when a profile is updated
+		}
 	} else {
 		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
 	}
