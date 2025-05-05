@@ -2,6 +2,7 @@ package badgerhold
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -15,6 +16,26 @@ type PendingVerificationKey struct {
 
 // AddToPendingVerification adds a pubkey to the pending verification queue
 func (store *BadgerholdStore) AddToPendingVerification(pubkey, xHandle string) error {
+	// First, check if there's an existing pending verification for this pubkey
+	var existingVerification types.PendingVerification
+	err := store.Database.Get(PendingVerificationKey{PubKey: pubkey}, &existingVerification)
+
+	// If there's an existing verification, remove it first
+	if err == nil {
+		// Only log if the handle has changed
+		if existingVerification.XHandle != xHandle {
+			log.Printf("X handle changed for pubkey %s: %s -> %s, triggering new verification",
+				pubkey, existingVerification.XHandle, xHandle)
+		}
+
+		// Remove the existing verification
+		err = store.RemoveFromPendingVerification(pubkey)
+		if err != nil {
+			log.Printf("Warning: Failed to remove existing pending verification: %v", err)
+			// Continue anyway to try inserting the new one
+		}
+	}
+
 	// Create a new pending verification
 	pendingVerification := types.PendingVerification{
 		PubKey:        pubkey,
@@ -25,11 +46,12 @@ func (store *BadgerholdStore) AddToPendingVerification(pubkey, xHandle string) e
 	}
 
 	// Store the pending verification
-	err := store.Database.Insert(PendingVerificationKey{PubKey: pubkey}, pendingVerification)
+	err = store.Database.Insert(PendingVerificationKey{PubKey: pubkey}, pendingVerification)
 	if err != nil {
 		return fmt.Errorf("failed to add to pending verification: %w", err)
 	}
 
+	log.Printf("Added to pending verification queue: pubkey=%s, handle=%s", pubkey, xHandle)
 	return nil
 }
 
@@ -109,6 +131,13 @@ func (store *BadgerholdStore) GetAndRemovePendingVerifications(batchSize int) ([
 
 // RequeueFailedVerification re-queues a failed verification with updated attempt count and timestamp
 func (store *BadgerholdStore) RequeueFailedVerification(pubkey, xHandle string, attempts int) error {
+	// First, remove any existing verification for this pubkey
+	err := store.RemoveFromPendingVerification(pubkey)
+	if err != nil {
+		log.Printf("Warning: Failed to remove existing verification when requeuing: %v", err)
+		// Continue anyway to try inserting the new one
+	}
+
 	// Create a new pending verification with updated attempt count and timestamp
 	pendingVerification := types.PendingVerification{
 		PubKey:        pubkey,
@@ -119,10 +148,11 @@ func (store *BadgerholdStore) RequeueFailedVerification(pubkey, xHandle string, 
 	}
 
 	// Store the pending verification
-	err := store.Database.Insert(PendingVerificationKey{PubKey: pubkey}, pendingVerification)
+	err = store.Database.Insert(PendingVerificationKey{PubKey: pubkey}, pendingVerification)
 	if err != nil {
 		return fmt.Errorf("failed to requeue failed verification: %w", err)
 	}
 
+	log.Printf("Requeued failed verification for pubkey=%s, handle=%s, attempts=%d", pubkey, xHandle, attempts)
 	return nil
 }
