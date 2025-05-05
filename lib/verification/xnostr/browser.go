@@ -263,91 +263,11 @@ func (s *Service) initBrowser() {
 	log.Printf("Failed to initialize browser after maximum attempts")
 }
 
-// createSafePage creates a page with proper timeout handling to avoid panics
-func (s *Service) createSafePage(timeout time.Duration) (*rod.Page, context.CancelFunc, error) {
-	// We don't need to lock the mutex here since GetBrowser handles that
-
-	// Get a browser from the pool
-	browser := s.GetBrowser()
-	if browser == nil {
-		return nil, nil, fmt.Errorf("failed to get browser from pool")
-	}
-
-	// Use a longer timeout for page creation (3x the requested timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout*3)
-
-	// Create a new page with retry mechanism
-	var page *rod.Page
-	var err error
-
-	// Try multiple times with exponential backoff
-	for retries := 0; retries < 3; retries++ {
-		log.Printf("Attempting to create page (attempt %d)...", retries+1)
-
-		// Use a separate timeout just for page creation
-		createCtx, createCancel := context.WithTimeout(ctx, 30*time.Second)
-
-		// Create page in a goroutine with timeout protection
-		pageChannel := make(chan *rod.Page, 1)
-		errChannel := make(chan error, 1)
-
-		go func() {
-			p, err := browser.Page(proto.TargetCreateTarget{})
-			if err != nil {
-				errChannel <- err
-				return
-			}
-			pageChannel <- p
-		}()
-
-		// Wait for either the page to be created or timeout
-		var success bool
-		select {
-		case page = <-pageChannel:
-			createCancel()
-			log.Printf("Page created successfully on attempt %d", retries+1)
-			err = nil
-			success = true
-		case err = <-errChannel:
-			createCancel()
-			log.Printf("Page creation failed on attempt %d: %v. Retrying...", retries+1, err)
-			time.Sleep(time.Duration(1<<uint(retries)) * time.Second) // Exponential backoff
-			continue
-		case <-createCtx.Done():
-			createCancel()
-			err = fmt.Errorf("context deadline exceeded")
-			log.Printf("Page creation timed out on attempt %d. Retrying...", retries+1)
-			time.Sleep(time.Duration(1<<uint(retries)) * time.Second) // Exponential backoff
-			continue
-		}
-
-		// If we got a page successfully, break out of the retry loop
-		if success {
-			break
-		}
-	}
-
-	if err != nil {
-		cancel()
-		// Return the browser to the pool since we failed to create a page
-		s.ReleaseBrowser(browser)
-		return nil, nil, fmt.Errorf("failed to create page after retries: %v", err)
-	}
-
-	if page == nil {
-		cancel()
-		// Return the browser to the pool since we failed to create a page
-		s.ReleaseBrowser(browser)
-		return nil, nil, fmt.Errorf("failed to create page: page is nil after attempts")
-	}
-
-	// Return the page with the context
-	// Note: We don't return the browser to the pool here because the page is still using it
-	// The browser will be returned to the pool when the page is closed
-	return page.Context(ctx), cancel, nil
-}
+// Note: The createSafePage method has been replaced by createSafePageWithBrowser
+// to improve browser reuse and reduce initialization overhead
 
 // searchNitterForNostrKeyTweet searches for tweets with the #MyNostrKey: hashtag and extracts the npub
+// Only tries the first (highest priority) Nitter instance to avoid unnecessary processing
 func (s *Service) searchNitterForNostrKeyTweet(username string) (string, error) {
 	// Get a browser from the pool
 	browser := s.GetBrowser()
@@ -358,28 +278,26 @@ func (s *Service) searchNitterForNostrKeyTweet(username string) (string, error) 
 
 	log.Println("Searching for tweets with #MyNostrKey: hashtag...")
 
-	// Try multiple Nitter instances in case some are down
-	nitterInstances := []string{
-		"https://nitter.net/",
-		"https://nitter.lacontrevoie.fr/",
-		"https://nitter.1d4.us/",
-		"https://nitter.kavin.rocks/",
-		"https://nitter.unixfox.eu/",
-		"https://nitter.fdn.fr/",
-		"https://nitter.pussthecat.org/",
-		"https://nitter.nixnet.services/",
+	// Get the highest priority Nitter instance
+	instance := s.GetNextNitterInstance()
+	if instance == nil {
+		return "", fmt.Errorf("no available Nitter instances")
 	}
 
-	for _, nitterBase := range nitterInstances {
+	nitterBase := instance.URL
+
+	// Only try the first (highest priority) Nitter instance
+	{
 		// Construct the search URL
 		searchURL := nitterBase + username + "/search?f=tweets&q=%23MyNostrKey%3A"
 		log.Printf("Trying search URL: %s\n", searchURL)
 
 		// Create a new page with proper error handling and timeout
-		page, cancel, err := s.createSafePage(20 * time.Second)
+		// Using the same browser instance for all pages
+		page, cancel, err := s.createSafePageWithBrowser(browser, 20*time.Second)
 		if err != nil {
 			log.Printf("Error creating page for search: %v", err)
-			continue
+			return "", err
 		}
 
 		// Use a try-catch approach with recover to handle potential panics

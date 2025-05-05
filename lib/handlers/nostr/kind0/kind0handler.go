@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind555"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/verification/xnostr"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -154,7 +153,7 @@ func BuildKind0Handler(store stores.Store, xnostrService *xnostr.Service, relayP
 
 		// Trigger X-Nostr verification if the profile has an X handle
 		if xnostrService != nil && relayPrivKey != nil {
-			kind555.TriggerVerification(&env.Event, store, xnostrService, relayPrivKey)
+			xnostr.TriggerVerification(&env.Event, store, xnostrService, relayPrivKey)
 		}
 
 		// Successfully processed event

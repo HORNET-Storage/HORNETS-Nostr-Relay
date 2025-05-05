@@ -20,7 +20,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind555"
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
@@ -480,7 +479,7 @@ func main() {
 	// Initialize X-Nostr verification service if enabled
 	var xnostrService *xnostr.Service
 	if viper.GetBool("xnostr_enabled") {
-		log.Println("Initializing X-Nostr verification service...")
+		log.Println("Initializing X-Nostr verification service (with lazy browser initialization)...")
 
 		// Get X-Nostr configuration from viper
 		xnostrTempDir := viper.GetString("xnostr_temp_dir")
@@ -553,7 +552,7 @@ func main() {
 			}
 		}
 
-		// Start the service to initialize the browser
+		// Start the service (now just prepares the service without initializing browser)
 		xnostrService.Start()
 
 		// Initialize and start the X-Nostr worker
@@ -579,7 +578,7 @@ func main() {
 		}
 
 		// Schedule periodic verifications
-		kind555.SchedulePeriodicVerifications(
+		xnostr.SchedulePeriodicVerifications(
 			store,
 			xnostrService,
 			privateKey,
@@ -587,7 +586,7 @@ func main() {
 			followerUpdateInterval,
 		)
 
-		log.Println("X-Nostr verification service and worker initialized successfully")
+		log.Println("X-Nostr verification service and worker initialized successfully (browser will be initialized on first use)")
 	} else {
 		log.Println("X-Nostr verification service is disabled")
 	}

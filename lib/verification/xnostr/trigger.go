@@ -1,4 +1,4 @@
-package kind555
+package xnostr
 
 import (
 	"encoding/json"
@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
-	"github.com/HORNET-Storage/hornet-storage/lib/verification/xnostr"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -15,7 +14,7 @@ import (
 func TriggerVerification(
 	event *nostr.Event,
 	store stores.Store,
-	xnostrService *xnostr.Service,
+	xnostrService *Service,
 	relayPrivKey *btcec.PrivateKey,
 ) {
 	// Only process kind 0 events
@@ -41,7 +40,7 @@ func TriggerVerification(
 	var xHandle string
 	switch v := xHandleRaw.(type) {
 	case string:
-		xHandle = xnostr.CleanXHandle(v)
+		xHandle = CleanXHandle(v)
 	default:
 		log.Printf("Invalid X handle type: %T", xHandleRaw)
 		return
@@ -60,13 +59,13 @@ func TriggerVerification(
 // SchedulePeriodicVerifications schedules periodic verification updates for all profiles with X handles
 func SchedulePeriodicVerifications(
 	store stores.Store,
-	xnostrService *xnostr.Service,
+	xnostrService *Service,
 	relayPrivKey *btcec.PrivateKey,
 	updateInterval int64,
 	followerUpdateInterval int64, // New parameter for follower update interval
 ) {
 	// Create a worker to handle the verifications
-	worker := xnostr.NewWorker(
+	worker := NewWorker(
 		store,
 		xnostrService,
 		relayPrivKey,

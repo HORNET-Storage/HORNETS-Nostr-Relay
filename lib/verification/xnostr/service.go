@@ -42,6 +42,8 @@ type Service struct {
 	requestsPerMinute int
 	lastRequestTime   time.Time
 	requestCounter    int
+	initialized       bool      // Track if browser is initialized
+	initOnce          sync.Once // Ensure initialization happens only once
 }
 
 // NewService creates a new X-Nostr verification service
@@ -229,9 +231,9 @@ func (s *Service) UpdateInstanceHealth(instance *NitterInstance, success bool, r
 	}
 }
 
-// Start initializes the browser with improved error handling
+// Start prepares the X-Nostr verification service without initializing the browser
 func (s *Service) Start() {
-	log.Printf("Starting X-Nostr verification service...")
+	log.Printf("Starting X-Nostr verification service (lazy initialization enabled)...")
 
 	// Create temp directory if it doesn't exist
 	if _, err := os.Stat(s.tempDir); os.IsNotExist(err) {
@@ -244,111 +246,64 @@ func (s *Service) Start() {
 		}
 	}
 
-	// Try to initialize browser in a separate goroutine with timeout protection
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	// Browser will be initialized on first use
+	log.Printf("Browser will be initialized on first verification request")
+}
 
-	// Start browser initialization with timeout
-	initCtx, initCancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer initCancel()
+// ensureInitialized makes sure the browser is initialized before use
+func (s *Service) ensureInitialized() {
+	s.initOnce.Do(func() {
+		s.mutex.Lock()
+		defer s.mutex.Unlock()
 
-	// Channel to communicate when initialization is done
-	done := make(chan bool, 1)
+		if !s.initialized {
+			log.Printf("Performing lazy initialization of X-Nostr browser...")
 
-	// Launch browser initialization in separate goroutine
-	go func() {
-		// Initialize the browser
-		s.initBrowser()
+			// Start browser initialization with timeout
+			initCtx, initCancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer initCancel()
 
-		// Verify initialization was successful
-		if s.browser == nil {
-			log.Printf("Browser initialization failed, retrying with auto-detection...")
-			// Try again with a different browser path
-			s.browserPath = "" // Force auto-detection
-			s.initBrowser()
-		}
+			// Channel to communicate when initialization is done
+			done := make(chan bool, 1)
 
-		// Signal that initialization is done
-		done <- true
-	}()
+			// Launch browser initialization in separate goroutine
+			go func() {
+				// Initialize the browser
+				s.initBrowser()
 
-	// Wait for either completion or timeout
-	select {
-	case <-done:
-		if s.browser == nil {
-			log.Printf("Browser initialization failed completely. Service may not work properly.")
-		} else {
-			log.Printf("Browser initialized successfully.")
-		}
-	case <-initCtx.Done():
-		log.Printf("Browser initialization timed out after 120 seconds. Service may not work properly.")
-	}
-
-	// Perform a quick startup test to ensure browser is operational
-	if s.browser != nil {
-		log.Printf("Running quick startup test...")
-
-		// Create a context with timeout for the startup test
-		testCtx, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer testCancel()
-
-		// Channel to communicate when test is done
-		testDone := make(chan bool, 1)
-
-		// Run the test in a separate goroutine
-		go func() {
-			// Create a test page and verify it works
-			testPage, pageCancel, err := s.createSafePage(10 * time.Second)
-			if err != nil {
-				log.Printf("Startup test failed: could not create page: %v", err)
-				testDone <- false
-				return
-			}
-			defer pageCancel()
-			defer testPage.Close()
-
-			// Navigate to a simple test page
-			navErr := testPage.Navigate("https://example.com")
-			if navErr != nil {
-				log.Printf("Startup test failed: could not navigate to test page: %v", navErr)
-				testDone <- false
-				return
-			}
-
-			// Wait for page to load
-			loadErr := testPage.WaitLoad()
-			if loadErr != nil {
-				log.Printf("Startup test failed: page did not load: %v", loadErr)
-				testDone <- false
-				return
-			}
-
-			// Test successful
-			log.Printf("Startup test completed successfully.")
-			testDone <- true
-		}()
-
-		// Wait for either completion or timeout
-		select {
-		case success := <-testDone:
-			if !success {
-				// Close and re-initialize browser on failure
-				if s.browser != nil {
-					s.browser.Close()
-					s.browser = nil
-					log.Printf("Re-initializing browser after failed test...")
+				// Verify initialization was successful
+				if s.browser == nil {
+					log.Printf("Browser initialization failed, retrying with auto-detection...")
+					// Try again with a different browser path
+					s.browserPath = "" // Force auto-detection
 					s.initBrowser()
 				}
+
+				// Signal that initialization is done
+				done <- true
+			}()
+
+			// Wait for either completion or timeout
+			select {
+			case <-done:
+				if s.browser == nil {
+					log.Printf("Browser initialization failed completely. Service may not work properly.")
+				} else {
+					log.Printf("Browser initialized successfully.")
+					s.initialized = true
+				}
+			case <-initCtx.Done():
+				log.Printf("Browser initialization timed out after 120 seconds. Service may not work properly.")
 			}
-		case <-testCtx.Done():
-			log.Printf("Startup test timed out after 30 seconds. Continuing anyway.")
-			// We'll continue even if the test times out, as the browser might still work
 		}
-	}
+	})
 }
 
 // GetBrowser returns a browser instance from the pool or initializes a new one if needed
 func (s *Service) GetBrowser() *rod.Browser {
+	// Ensure browser is initialized
+	s.ensureInitialized()
+
 	// First try to get a browser from the pool
 	s.browserPoolMutex.Lock()
 	defer s.browserPoolMutex.Unlock()
@@ -446,9 +401,84 @@ func (s *Service) isBrowserHealthy(browser *rod.Browser) bool {
 	}
 }
 
+// createSafePageWithBrowser creates a page in the provided browser with proper timeout handling
+func (s *Service) createSafePageWithBrowser(browser *rod.Browser, timeout time.Duration) (*rod.Page, context.CancelFunc, error) {
+	if browser == nil {
+		return nil, nil, fmt.Errorf("browser is nil")
+	}
+
+	// Use a longer timeout for page creation (3x the requested timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout*3)
+
+	// Create a new page with retry mechanism
+	var page *rod.Page
+	var err error
+
+	// Try multiple times with exponential backoff
+	for retries := 0; retries < 3; retries++ {
+		log.Printf("Attempting to create page (attempt %d)...", retries+1)
+
+		// Use a separate timeout just for page creation
+		createCtx, createCancel := context.WithTimeout(ctx, 30*time.Second)
+
+		// Create page in a goroutine with timeout protection
+		pageChannel := make(chan *rod.Page, 1)
+		errChannel := make(chan error, 1)
+
+		go func() {
+			p, err := browser.Page(proto.TargetCreateTarget{})
+			if err != nil {
+				errChannel <- err
+				return
+			}
+			pageChannel <- p
+		}()
+
+		// Wait for either the page to be created or timeout
+		var success bool
+		select {
+		case page = <-pageChannel:
+			createCancel()
+			log.Printf("Page created successfully on attempt %d", retries+1)
+			err = nil
+			success = true
+		case err = <-errChannel:
+			createCancel()
+			log.Printf("Page creation failed on attempt %d: %v. Retrying...", retries+1, err)
+			time.Sleep(time.Duration(1<<uint(retries)) * time.Second) // Exponential backoff
+			continue
+		case <-createCtx.Done():
+			createCancel()
+			err = fmt.Errorf("context deadline exceeded")
+			log.Printf("Page creation timed out on attempt %d. Retrying...", retries+1)
+			time.Sleep(time.Duration(1<<uint(retries)) * time.Second) // Exponential backoff
+			continue
+		}
+
+		// If we got a page successfully, break out of the retry loop
+		if success {
+			break
+		}
+	}
+
+	if err != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("failed to create page after retries: %v", err)
+	}
+
+	if page == nil {
+		cancel()
+		return nil, nil, fmt.Errorf("failed to create page: page is nil after attempts")
+	}
+
+	// Return the page with the context
+	return page.Context(ctx), cancel, nil
+}
+
 // VerifyProfile verifies a Nostr profile against X using Nitter instances
 func (s *Service) VerifyProfile(pubkey, xHandle string) (*VerificationResult, error) {
-	// We don't need to get a browser here since verifyWithNitter will handle it
+	// Ensure browser is initialized
+	s.ensureInitialized()
 
 	// Generate temporary filenames with unique timestamp
 	timestamp := time.Now().Unix()
@@ -579,6 +609,16 @@ func (s *Service) verifyWithNitter(xHandle, screenshotPath, jsonOutputFile strin
 	var dataExtracted bool
 	var lastError error
 
+	// Get a single browser from the pool to use for all Nitter instances
+	// This avoids initializing a new browser for each instance
+	browser := s.GetBrowser()
+	if browser == nil {
+		log.Printf("Failed to get browser from pool")
+		return false, false, fmt.Errorf("failed to get browser from pool")
+	}
+	// Make sure we return the browser to the pool when we're done
+	defer s.ReleaseBrowser(browser)
+
 	// Try up to 3 different Nitter instances
 	for attempts := 0; attempts < 3; attempts++ {
 		// Get the next best Nitter instance
@@ -593,22 +633,12 @@ func (s *Service) verifyWithNitter(xHandle, screenshotPath, jsonOutputFile strin
 
 		startTime := time.Now()
 
-		// Get a browser from the pool
-		browser := s.GetBrowser()
-		if browser == nil {
-			log.Printf("Failed to get browser from pool")
-			s.UpdateInstanceHealth(instance, false, time.Since(startTime))
-			lastError = fmt.Errorf("failed to get browser from pool")
-			continue
-		}
-
 		// Create a new page with proper error handling and timeout
-		nitterPage, cancel, err := s.createSafePage(30 * time.Second)
+		// Using the same browser instance for all pages
+		nitterPage, cancel, err := s.createSafePageWithBrowser(browser, 30*time.Second)
 		if err != nil {
 			log.Printf("Error creating page for Nitter: %v", err)
 			s.UpdateInstanceHealth(instance, false, time.Since(startTime))
-			// Return the browser to the pool
-			s.ReleaseBrowser(browser)
 			lastError = err
 			continue
 		}
@@ -778,13 +808,8 @@ func (s *Service) verifyWithNitter(xHandle, screenshotPath, jsonOutputFile strin
 
 		// If we succeeded, break the loop
 		if nitterSuccess && dataExtracted {
-			// Return the browser to the pool
-			s.ReleaseBrowser(browser)
 			break
 		}
-
-		// Return the browser to the pool
-		s.ReleaseBrowser(browser)
 
 		// Add a small delay between attempts
 		if attempts < 2 {

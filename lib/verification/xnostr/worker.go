@@ -132,9 +132,21 @@ func (w *Worker) processVerification(pubKey, xHandle string, attempts int) {
 	}
 
 	if verificationEvent != nil {
-		log.Printf("X-Nostr verification completed successfully for pubkey %s", pubKey)
+		// Parse the event content to check if verification was actually successful
+		var content map[string]interface{}
+		if err := json.Unmarshal([]byte(verificationEvent.Content), &content); err != nil {
+			log.Printf("Error parsing verification event content: %v", err)
+		} else {
+			// Check the verified field in the content
+			verified, ok := content["verified"].(bool)
+			if ok && verified {
+				log.Printf("X-Nostr verification process completed successfully for pubkey %s", pubKey)
+			} else {
+				log.Printf("X-Nostr verification process completed but verification failed for pubkey %s", pubKey)
+			}
+		}
 	} else {
-		log.Printf("X-Nostr verification failed for pubkey %s", pubKey)
+		log.Printf("X-Nostr verification process failed for pubkey %s", pubKey)
 
 		// Check if we should retry
 		if attempts < MaxVerificationAttempts-1 {

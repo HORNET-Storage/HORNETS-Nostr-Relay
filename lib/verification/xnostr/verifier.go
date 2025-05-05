@@ -38,6 +38,31 @@ func (v *Verifier) CreateVerificationEvent(
 	relayPrivKey *btcec.PrivateKey,
 	attempts int,
 ) (*nostr.Event, error) {
+	// First, retrieve existing kind 555 events for this pubkey
+	filter := nostr.Filter{
+		Kinds: []int{555},
+		Tags: map[string][]string{
+			"p": {pubkey},
+		},
+	}
+
+	existingEvents, err := v.store.QueryEvents(filter)
+	if err != nil {
+		log.Printf("Error querying existing kind 555 events: %v", err)
+		// Continue anyway to create the new event
+	}
+
+	// Delete existing kind 555 events if any
+	if len(existingEvents) > 0 {
+		log.Printf("Found %d existing kind 555 events for pubkey %s, deleting them", len(existingEvents), pubkey)
+		for _, oldEvent := range existingEvents {
+			if err := v.store.DeleteEvent(oldEvent.ID); err != nil {
+				log.Printf("Error deleting old kind 555 event %s: %v", oldEvent.ID, err)
+				// Continue anyway to create the new event
+			}
+		}
+	}
+
 	// Calculate next retry time (24 hours from now)
 	nextRetryTime := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 
@@ -197,7 +222,7 @@ func (v *Verifier) UpdateVerification(pubkey string, relayPrivKey *btcec.Private
 	}
 
 	// Create the verification event
-	return v.CreateVerificationEvent(
+	verificationEvent, err := v.CreateVerificationEvent(
 		pubkey,
 		xHandle,
 		verificationResult.IsVerified,
@@ -206,6 +231,22 @@ func (v *Verifier) UpdateVerification(pubkey string, relayPrivKey *btcec.Private
 		relayPrivKey,
 		attempts,
 	)
+
+	// If verification failed (no npub found or no match), requeue for later retry
+	if !verificationResult.IsVerified {
+		log.Printf("Verification failed for pubkey %s, will retry in 24 hours (attempt %d)",
+			pubkey, attempts+1)
+
+		// Requeue with increased attempt count
+		requeueErr := v.store.RequeueFailedVerification(pubkey, xHandle, attempts+1)
+		if requeueErr != nil {
+			log.Printf("Error requeuing verification: %v", requeueErr)
+		}
+	} else {
+		log.Printf("Verification successful for pubkey %s", pubkey)
+	}
+
+	return verificationEvent, err
 }
 
 // IsUserVerified checks if a user has a verified X profile
