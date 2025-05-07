@@ -102,8 +102,8 @@ func init() {
 
 	// Set default relay settings (including Mode)
 	viper.SetDefault("relay_settings", map[string]interface{}{
-		"Mode":             "smart", // Default mode to "smart"
-		"IsKindsActive":    false,   // Default to false for activity flags
+		"Mode":             "whitelist", // Default mode to "whitelist"
+		"IsKindsActive":    false,       // Default to false for activity flags
 		"IsPhotosActive":   false,
 		"IsVideosActive":   false,
 		"IsGitNestrActive": false,
@@ -592,11 +592,11 @@ func main() {
 	}
 
 	// Register Our Nostr Stream Handlers
-	if settings.Mode == "unlimited" {
-		log.Println("Using universal stream handler because Mode set to 'unlimited'")
+	if settings.Mode == "blacklist" {
+		log.Println("Using universal stream handler because Mode set to 'blacklist'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
-	} else if settings.Mode == "smart" {
-		log.Println("Using specific stream handlers because Mode set to 'smart'")
+	} else if settings.Mode == "whitelist" {
+		log.Println("Using specific stream handlers because Mode set to 'whitelist'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, xnostrService, privateKey))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))

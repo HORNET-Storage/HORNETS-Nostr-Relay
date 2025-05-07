@@ -38,18 +38,18 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 		log.Printf("Failed to load relay settings: %v", err)
 	}
 
-	if settings.Mode == "unlimited" {
-		handleUnlimitedModeEvent(c, env)
-	} else if settings.Mode == "smart" {
-		handleSmartModeEvent(c, env)
+	if settings.Mode == "blacklist" {
+		handleBlacklistModeEvent(c, env)
+	} else if settings.Mode == "whitelist" {
+		handleWhitelistModeEvent(c, env)
 	}
 }
 
-func handleUnlimitedModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
+func handleBlacklistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler("universal")
 
-	log.Println("handled by unlimted.")
+	log.Println("handled by blacklist mode.")
 
 	read := func() ([]byte, error) {
 		return json.Marshal(env)
@@ -71,10 +71,10 @@ func handleUnlimitedModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	}
 }
 
-func handleSmartModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
+func handleWhitelistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
-	log.Println("handled by smart.")
+	log.Println("handled by whitelist mode.")
 
 	read := func() ([]byte, error) {
 		return json.Marshal(env)
