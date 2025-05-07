@@ -32,7 +32,9 @@ func TriggerVerification(
 	// Check if the profile has an X handle
 	xHandleRaw, ok := content["x"]
 	if !ok {
-		// No X handle, nothing to verify
+		// No X handle, delete any existing kind 555 events for this pubkey
+		log.Printf("No X handle found for pubkey %s, deleting any existing verifications", event.PubKey)
+		deleteExistingVerifications(event.PubKey, store)
 		return
 	}
 
@@ -46,6 +48,13 @@ func TriggerVerification(
 		return
 	}
 
+	// If X handle is empty after cleaning, delete any existing kind 555 events
+	if xHandle == "" {
+		log.Printf("Empty X handle for pubkey %s, deleting any existing verifications", event.PubKey)
+		deleteExistingVerifications(event.PubKey, store)
+		return
+	}
+
 	// Queue the verification instead of processing it immediately
 	err := store.AddToPendingVerification(event.PubKey, xHandle)
 	if err != nil {
@@ -54,6 +63,34 @@ func TriggerVerification(
 	}
 
 	log.Printf("Queued X-Nostr verification for pubkey %s with handle %s", event.PubKey, xHandle)
+}
+
+// deleteExistingVerifications deletes any existing kind 555 events for a pubkey
+func deleteExistingVerifications(pubkey string, store stores.Store) {
+	// Create a filter to find kind 555 events for this pubkey
+	filter := nostr.Filter{
+		Kinds: []int{555},
+		Tags: map[string][]string{
+			"p": {pubkey},
+		},
+	}
+
+	// Query the store
+	events, err := store.QueryEvents(filter)
+	if err != nil {
+		log.Printf("Error querying existing kind 555 events: %v", err)
+		return
+	}
+
+	// Delete any existing kind 555 events
+	if len(events) > 0 {
+		log.Printf("Deleting %d existing kind 555 events for pubkey %s", len(events), pubkey)
+		for _, event := range events {
+			if err := store.DeleteEvent(event.ID); err != nil {
+				log.Printf("Error deleting kind 555 event %s: %v", event.ID, err)
+			}
+		}
+	}
 }
 
 // SchedulePeriodicVerifications schedules periodic verification updates for all profiles with X handles
