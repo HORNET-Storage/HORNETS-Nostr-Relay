@@ -93,7 +93,7 @@ func init() {
 	viper.SetDefault("RelayName", "HORNETS")
 	viper.SetDefault("RelayDescription", "The best relay ever.")
 	viper.SetDefault("RelayPubkey", "")
-	viper.SetDefault("RelaySupportedNips", []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116, 888})
+	viper.SetDefault("RelaySupportedNips", []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116, 888, 555})
 	viper.SetDefault("RelayContact", "support@hornets.net")
 	viper.SetDefault("RelaySoftware", "golang")
 	viper.SetDefault("RelayVersion", "0.0.1")

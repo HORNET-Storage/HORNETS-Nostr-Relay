@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -231,6 +232,66 @@ func (s *Service) UpdateInstanceHealth(instance *NitterInstance, success bool, r
 	}
 }
 
+// cleanTempDirectory removes old temporary files from the temp directory
+func (s *Service) cleanTempDirectory() {
+	log.Printf("Cleaning X-Nostr temporary directory: %s", s.tempDir)
+
+	// Read all files in the temp directory
+	files, err := os.ReadDir(s.tempDir)
+	if err != nil {
+		log.Printf("Error reading temp directory: %v", err)
+		return
+	}
+
+	// Count of removed files
+	removed := 0
+
+	// Define the age threshold (1 hour)
+	ageThreshold := 3 * time.Hour
+	now := time.Now()
+
+	// Check each file
+	for _, file := range files {
+		// Skip directories
+		if file.IsDir() {
+			continue
+		}
+
+		// Only process PNG and JSON files
+		name := file.Name()
+		if !strings.HasSuffix(name, ".png") && !strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		// Get full path
+		path := filepath.Join(s.tempDir, name)
+
+		// Get file info to check modification time
+		fileInfo, err := os.Stat(path)
+		if err != nil {
+			log.Printf("Error getting file info for %s: %v", path, err)
+			continue
+		}
+
+		// Check if the file is older than the threshold
+		fileAge := now.Sub(fileInfo.ModTime())
+		if fileAge < ageThreshold {
+			log.Printf("Skipping file %s: too recent (age: %v)", name, fileAge)
+			continue
+		}
+
+		// Remove the file
+		if err := os.Remove(path); err != nil {
+			log.Printf("Error removing temp file %s: %v", path, err)
+		} else {
+			log.Printf("Removed old file %s (age: %v)", name, fileAge)
+			removed++
+		}
+	}
+
+	log.Printf("Cleaned up %d temporary files from previous runs", removed)
+}
+
 // Start prepares the X-Nostr verification service without initializing the browser
 func (s *Service) Start() {
 	log.Printf("Starting X-Nostr verification service (lazy initialization enabled)...")
@@ -245,6 +306,9 @@ func (s *Service) Start() {
 			log.Printf("Falling back to system temp directory: %s", s.tempDir)
 		}
 	}
+
+	// Clean up any leftover temporary files from previous runs
+	s.cleanTempDirectory()
 
 	// Browser will be initialized on first use
 	log.Printf("Browser will be initialized on first verification request")
@@ -484,6 +548,26 @@ func (s *Service) VerifyProfile(pubkey, xHandle string) (*VerificationResult, er
 	timestamp := time.Now().Unix()
 	screenshotPath := filepath.Join(s.tempDir, fmt.Sprintf("%s_%d.png", xHandle, timestamp))
 	jsonPath := filepath.Join(s.tempDir, fmt.Sprintf("%s_%d.json", xHandle, timestamp))
+
+	// Setup deferred cleanup that will run regardless of how the function exits
+	defer func() {
+		// Clean up temporary files
+		if _, err := os.Stat(screenshotPath); err == nil {
+			if err := os.Remove(screenshotPath); err != nil {
+				log.Printf("Warning: Failed to clean up screenshot file: %v", err)
+			} else {
+				log.Printf("Successfully cleaned up screenshot file: %s", screenshotPath)
+			}
+		}
+
+		if _, err := os.Stat(jsonPath); err == nil {
+			if err := os.Remove(jsonPath); err != nil {
+				log.Printf("Warning: Failed to clean up JSON file: %v", err)
+			} else {
+				log.Printf("Successfully cleaned up JSON file: %s", jsonPath)
+			}
+		}
+	}()
 
 	// Ensure temporary directory exists
 	dirErr := os.MkdirAll(filepath.Dir(screenshotPath), 0755)
