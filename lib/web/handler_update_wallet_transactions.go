@@ -1,25 +1,23 @@
 package web
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gofiber/fiber/v2"
-	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 )
 
+// updateWalletTransactions processes incoming wallet transactions
+// This is the entry point for handling Bitcoin payments
 func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	var transactions []map[string]interface{}
 	log.Println("Transactions request received")
@@ -31,78 +29,35 @@ func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// Get the expected wallet name from the configuration
-	expectedWalletName := viper.GetString("wallet_name")
-
-	// Set wallet name from first transaction if not set
-	if expectedWalletName == "" && len(transactions) > 0 {
-		walletName, ok := transactions[0]["wallet_name"].(string)
-		if !ok {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Wallet name missing or invalid",
-			})
-		}
-		viper.Set("wallet_name", walletName)
-		expectedWalletName = walletName
+	// Validate wallet name
+	expectedWalletName := validateWalletName(transactions)
+	if expectedWalletName == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Wallet name missing or invalid",
+		})
 	}
 
+	// Initialize subscription manager
+	subManager, err := initializeSubscriptionManager(store)
+	if err != nil {
+		log.Printf("Failed to initialize subscription manager: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to initialize subscription system",
+		})
+	}
+
+	// Process each transaction
 	for _, transaction := range transactions {
+		// Skip transactions from different wallets
 		walletName, ok := transaction["wallet_name"].(string)
 		if !ok || walletName != expectedWalletName {
-			continue // Skip processing if wallet name doesn't match
-		}
-
-		// Extract transaction details
-		address, _ := transaction["address"].(string)
-		dateStr, _ := transaction["date"].(string)
-		date, err := time.Parse(time.RFC3339, dateStr)
-		if err != nil {
-			log.Printf("Error parsing date: %v", err)
-			continue
-		}
-		output, _ := transaction["output"].(string)
-		valueStr, _ := transaction["value"].(string)
-		value, err := strconv.ParseFloat(valueStr, 64)
-		if err != nil {
-			log.Printf("Error parsing value: %v", err)
 			continue
 		}
 
-		// Process pending transactions
-		txID := strings.Split(address, ":")[0]
-		err = store.GetStatsStore().DeletePendingTransaction(txID)
-		if err != nil {
+		if err := processTransaction(store, subManager, transaction); err != nil {
+			log.Printf("Error processing transaction: %v", err)
+			// Continue processing other transactions even if one fails
 			continue
-		}
-
-		// Check for existing transactions
-		exists, err := store.GetStatsStore().TransactionExists(address, date, output, valueStr)
-		if err != nil {
-			log.Printf("Error checking existing transactions: %v", err)
-			continue
-		}
-		if exists {
-			continue
-		}
-
-		// Create a new transaction
-		newTransaction := types.WalletTransactions{
-			Address: address,
-			Date:    date,
-			Output:  output,
-			Value:   fmt.Sprintf("%.8f", value),
-		}
-
-		err = store.GetStatsStore().SaveWalletTransaction(newTransaction)
-		if err != nil {
-			log.Printf("Error saving new transaction: %v", err)
-			continue
-		}
-
-		// Process subscription payments
-		err = processSubscriptionPayment(store, output, transaction)
-		if err != nil {
-			log.Printf("Error processing subscription payment: %v", err)
 		}
 	}
 
@@ -112,162 +67,149 @@ func updateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	})
 }
 
-// processSubscriptionPayment checks if a transaction corresponds to a valid subscription payment
-func processSubscriptionPayment(store stores.Store, address string, transaction map[string]interface{}) error {
-	// Retrieve the subscription tiers from Viper
-	var subscriptionTiers []types.SubscriptionTier
-	err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers)
+// processTransaction handles an individual transaction
+func processTransaction(store stores.Store, subManager *subscription.SubscriptionManager, transaction map[string]interface{}) error {
+	// Extract transaction details
+	txDetails, err := extractTransactionDetails(transaction)
 	if err != nil {
-		return fmt.Errorf("failed to fetch subscription tiers: %v", err)
+		return fmt.Errorf("failed to extract transaction details: %v", err)
 	}
 
-	// Retrieve the subscriber associated with the address by finding their npub
-	subscriber, err := store.GetSubscriberByAddress(address)
-	if err != nil {
-		return fmt.Errorf("subscriber not found: %v", err)
+	// Process pending transaction
+	txID := strings.Split(txDetails.address, ":")[0]
+	if err := store.GetStatsStore().DeletePendingTransaction(txID); err != nil {
+		log.Printf("Warning: could not delete pending transaction: %v", err)
 	}
 
-	// Parse the transaction ID and value
-	transactionID, ok := transaction["transaction_id"].(string)
+	// Check if transaction already exists
+	exists, err := store.GetStatsStore().TransactionExists(
+		txDetails.address,
+		txDetails.date,
+		txDetails.output,
+		txDetails.valueStr,
+	)
+	if err != nil {
+		return fmt.Errorf("error checking existing transaction: %v", err)
+	}
+	if exists {
+		return fmt.Errorf("transaction already processed")
+	}
+
+	// Save transaction record
+	newTransaction := types.WalletTransactions{
+		Address: txDetails.address,
+		Date:    txDetails.date,
+		Output:  txDetails.output,
+		Value:   fmt.Sprintf("%.8f", txDetails.value),
+	}
+	if err := store.GetStatsStore().SaveWalletTransaction(newTransaction); err != nil {
+		return fmt.Errorf("failed to save transaction: %v", err)
+	}
+
+	// After subscriber retrieval in processTransaction
+	subscriber, err := store.GetStatsStore().GetSubscriberByAddress(txDetails.output)
+	if err != nil {
+		log.Printf("Error: subscriber not found for address %s: %v", txDetails.output, err)
+		return fmt.Errorf("subscriber not found for address %s: %v", txDetails.output, err)
+	} else {
+		log.Printf("Subscriber retrieved: %v", subscriber)
+	}
+
+	// Convert BTC value to satoshis for subscription processing
+	satoshis := int64(txDetails.value * 100_000_000)
+
+	// Process the subscription payment
+	if err := subManager.ProcessPayment(*subscriber.Npub, txID, satoshis); err != nil {
+		return fmt.Errorf("failed to process subscription: %v", err)
+	}
+
+	log.Printf("Successfully processed subscription payment for %s: %s sats",
+		*subscriber.Npub, txDetails.valueStr)
+	return nil
+}
+
+// transactionDetails holds parsed transaction information
+type transactionDetails struct {
+	address  string
+	date     time.Time
+	output   string
+	value    float64
+	valueStr string
+}
+
+// extractTransactionDetails parses and validates transaction data
+func extractTransactionDetails(transaction map[string]interface{}) (*transactionDetails, error) {
+	address, ok := transaction["address"].(string)
 	if !ok {
-		return fmt.Errorf("transaction ID missing or invalid")
+		return nil, fmt.Errorf("invalid address")
 	}
 
-	// Check if this transaction has already been processed
-	if subscriber.LastTransactionID == transactionID {
-		log.Printf("Transaction ID %s has already been processed for subscriber %s", transactionID, subscriber.Npub)
-		return nil // Skip processing to avoid duplicate subscription updates
+	dateStr, ok := transaction["date"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid date")
+	}
+	date, err := time.Parse(time.RFC3339, dateStr)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing date: %v", err)
+	}
+
+	output, ok := transaction["output"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid output")
 	}
 
 	valueStr, ok := transaction["value"].(string)
 	if !ok {
-		return fmt.Errorf("transaction value missing or invalid")
+		return nil, fmt.Errorf("invalid value")
 	}
-
 	value, err := strconv.ParseFloat(valueStr, 64)
 	if err != nil {
-		return fmt.Errorf("error parsing transaction value: %v", err)
+		return nil, fmt.Errorf("error parsing value: %v", err)
 	}
 
-	// Check if the transaction value matches any subscription tier
-	var matchedTier *types.SubscriptionTier
-	for _, tier := range subscriptionTiers {
-		// Convert tier.Price to float64
-		tierPrice, err := strconv.ParseFloat(tier.Price, 64)
-		if err != nil {
-			return fmt.Errorf("error parsing tier price to float64: %v", err)
+	return &transactionDetails{
+		address:  address,
+		date:     date,
+		output:   output,
+		value:    value,
+		valueStr: valueStr,
+	}, nil
+}
+
+// validateWalletName ensures the wallet name is valid and consistent
+func validateWalletName(transactions []map[string]interface{}) string {
+	expectedWalletName := viper.GetString("wallet_name")
+
+	// Set wallet name from first transaction if not set
+	if expectedWalletName == "" && len(transactions) > 0 {
+		if walletName, ok := transactions[0]["wallet_name"].(string); ok {
+			viper.Set("wallet_name", walletName)
+			expectedWalletName = walletName
 		}
-
-		if value >= tierPrice {
-			matchedTier = &tier
-			break
-		}
 	}
 
-	if matchedTier == nil {
-		log.Printf("Transaction value %v does not match any subscription tier for address: %s", value, address)
-		return nil // Payment too low or doesn't match any tier, skip
-	}
+	return expectedWalletName
+}
 
-	// Calculate the new subscription end date
-	newEndDate := time.Now().AddDate(0, 1, 0) // Set end date 1 month from now
-	if time.Now().Before(subscriber.EndDate) {
-		// If the current subscription is still active, extend from the current end date
-		newEndDate = subscriber.EndDate.AddDate(0, 1, 0)
-	}
-
-	// Update subscriber's subscription details
-	subscriber.Tier = matchedTier.DataLimit
-	subscriber.StartDate = time.Now()
-	subscriber.EndDate = newEndDate
-	subscriber.LastTransactionID = transactionID
-
-	err = store.SaveSubscriber(subscriber)
-	if err != nil {
-		return fmt.Errorf("failed to update subscriber: %v", err)
-	}
-
-	// Update the NIP-88 event
+// initializeSubscriptionManager creates a new subscription manager instance
+func initializeSubscriptionManager(store stores.Store) (*subscription.SubscriptionManager, error) {
+	// Load relay private key
 	privateKey, _, err := signing.DeserializePrivateKey(viper.GetString("private_key"))
 	if err != nil {
-		log.Printf("failed to deserialize private key")
+		return nil, fmt.Errorf("failed to load relay private key: %v", err)
 	}
 
-	err = UpdateNIP88EventAfterPayment(privateKey, subscriber.Npub, store, matchedTier.DataLimit, newEndDate.Unix())
-	if err != nil {
-		return fmt.Errorf("failed to update NIP-88 event: %v", err)
+	// Get subscription tiers from config
+	var subscriptionTiers []types.SubscriptionTier
+	if err := viper.UnmarshalKey("subscription_tiers", &subscriptionTiers); err != nil {
+		return nil, fmt.Errorf("failed to load subscription tiers: %v", err)
 	}
 
-	log.Printf("Subscriber %s activated/extended on tier %s with transaction ID %s. New end date: %v", subscriber.Npub, matchedTier.DataLimit, transactionID, newEndDate)
-	return nil
-}
-
-func UpdateNIP88EventAfterPayment(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store, tier string, expirationTimestamp int64) error {
-	existingEvent, err := getExistingNIP88Event(store, userPubKey)
-	if err != nil {
-		return fmt.Errorf("error fetching existing NIP-88 event: %v", err)
-	}
-	if existingEvent == nil {
-		return fmt.Errorf("no existing NIP-88 event found for user")
-	}
-
-	// Delete the existing event
-	err = store.DeleteEvent(existingEvent.ID)
-	if err != nil {
-		return fmt.Errorf("error deleting existing NIP-88 event: %v", err)
-	}
-
-	// Create a new event with updated status
-	newEvent := *existingEvent
-	newEvent.CreatedAt = nostr.Timestamp(time.Now().Unix())
-
-	// Update the tags
-	for i, tag := range newEvent.Tags {
-		switch tag[0] {
-		case "subscription_status":
-			newEvent.Tags[i] = nostr.Tag{"subscription_status", "active"}
-		case "active_subscription":
-			newEvent.Tags[i] = nostr.Tag{"active_subscription", tier, fmt.Sprintf("%d", expirationTimestamp)}
-		}
-	}
-
-	// Generate new ID and signature
-	serializedEvent := newEvent.Serialize()
-	hash := sha256.Sum256(serializedEvent)
-	newEvent.ID = hex.EncodeToString(hash[:])
-
-	sig, err := schnorr.Sign(relayPrivKey, hash[:])
-	if err != nil {
-		return fmt.Errorf("error signing updated event: %v", err)
-	}
-	newEvent.Sig = hex.EncodeToString(sig.Serialize())
-
-	// Store the updated event
-	err = store.StoreEvent(&newEvent)
-	if err != nil {
-		return fmt.Errorf("failed to store updated NIP-88 event: %v", err)
-	}
-
-	return nil
-}
-
-func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event, error) {
-	filter := nostr.Filter{
-		Kinds: []int{88},
-		Tags: nostr.TagMap{
-			"p": []string{userPubKey},
-		},
-		Limit: 1,
-	}
-
-	events, err := store.QueryEvents(filter)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(events) > 0 {
-		return events[0], nil
-	}
-
-	return nil, nil
+	// Create and return the subscription manager
+	return subscription.NewSubscriptionManager(
+		store,
+		privateKey,
+		viper.GetString("RelayDHTkey"),
+		subscriptionTiers,
+	), nil
 }

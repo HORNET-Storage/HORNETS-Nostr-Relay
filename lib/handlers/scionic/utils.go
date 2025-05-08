@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/spf13/viper"
 
 	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
 
@@ -95,6 +96,10 @@ func WaitForQueryMessage(stream types.Stream) (*types.QueryMessage, error) {
 	return ReadMessageFromStream[types.QueryMessage](stream)
 }
 
+func WaitForAdvancedQueryMessage(stream types.Stream) (*types.AdvancedQueryMessage, error) {
+	return ReadMessageFromStream[types.AdvancedQueryMessage](stream)
+}
+
 func ReadMessageFromStream[T any](stream types.Stream) (*T, error) {
 	streamDecoder := cbor.NewDecoder(stream)
 
@@ -133,4 +138,37 @@ func WriteMessageToStream[T any](stream types.Stream, message T) error {
 	}
 
 	return nil
+}
+
+func IsMimeTypePermitted(mimeType string) bool {
+	settings, err := RetrieveSettings()
+	if err != nil {
+		return false
+	}
+
+	if len(settings.MimeTypeWhitelist) > 0 {
+		if !contains(settings.MimeTypeWhitelist, mimeType) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func RetrieveSettings() (*types.RelaySettings, error) {
+	var settings types.RelaySettings
+	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+		return nil, err
+	}
+
+	return &settings, nil
+}
+
+func contains(list []string, item string) bool {
+	for _, element := range list {
+		if element == item {
+			return true
+		}
+	}
+	return false
 }

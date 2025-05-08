@@ -3,9 +3,10 @@ package blossom
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -37,8 +38,16 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 
 	data := c.Body()
 
+	mtype := mimetype.Detect(data)
+
 	checkHash := sha256.Sum256(data)
 	encodedHash := hex.EncodeToString(checkHash[:])
+
+	// Ensure the public key is valid
+	_, err := signing.DeserializePublicKey(pubkey)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"message": "invalid public key"})
+	}
 
 	filter := nostr.Filter{
 		Kinds:   []int{117},
@@ -46,11 +55,10 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		Tags:    nostr.TagMap{"blossom_hash": []string{encodedHash}},
 	}
 
-	fmt.Println("Recieved a blossom blob")
-
+	// Ensure a kind 117 file information event was uploaded first
 	events, err := s.storage.QueryEvents(filter)
 	if err != nil {
-		return err
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to query events"})
 	}
 
 	var event *nostr.Event
@@ -61,6 +69,10 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	event = events[0]
 
 	fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
+	if fileHash == nil {
+		// This is theoretically impossible but rather have it than not
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "matching event blossom_hash mismatch"})
+	}
 
 	// Check the submitted hash matches the data being submitted
 	if encodedHash != fileHash.Value() {
@@ -73,7 +85,17 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to store blob"})
 	}
 
-	fmt.Println("Finished a blossom blob")
+	// Extract the file name from the kind 117 file information event
+	var name string
+	nameTag := event.Tags.GetFirst([]string{"name"})
+	if nameTag == nil {
+		name = "Unknown"
+	} else {
+		name = nameTag.Value()
+	}
+
+	// Store the file in the statistics database
+	s.storage.GetStatsStore().SaveFile("blossom", encodedHash, name, mtype.String(), 0, int64(len(data)))
 
 	return c.SendStatus(fiber.StatusOK)
 }

@@ -35,7 +35,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		}
 
 		// Ensure the node is storing the root leaf
-		rootData, err := store.RetrieveLeaf(message.Root, message.Root, true)
+		rootData, err := store.RetrieveLeaf(message.Root, message.Root, true, false)
 		if err != nil {
 			utils.WriteErrorToStream(libp2pStream, "Node does not have root leaf", nil)
 
@@ -70,7 +70,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			includeContent = message.Filter.IncludeContent
 		}
 
-		dagData, err := store.BuildDagFromStore(message.Root, includeContent)
+		dagData, err := store.BuildDagFromStore(message.Root, includeContent, false)
 		if err != nil {
 			utils.WriteErrorToStream(libp2pStream, "Failed to build dag from root %e", err)
 
