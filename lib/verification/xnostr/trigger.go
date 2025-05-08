@@ -48,10 +48,17 @@ func TriggerVerification(
 		return
 	}
 
-	// If X handle is empty after cleaning, delete any existing kind 555 events
+	// If X handle is empty after cleaning, delete any existing kind 555 events and remove from pending queue
 	if xHandle == "" {
 		log.Printf("Empty X handle for pubkey %s, deleting any existing verifications", event.PubKey)
 		deleteExistingVerifications(event.PubKey, store)
+
+		// Also remove from pending verification queue
+		err := store.RemoveFromPendingVerification(event.PubKey)
+		if err != nil {
+			log.Printf("Warning: Failed to remove from pending verification queue: %v", err)
+		}
+
 		return
 	}
 

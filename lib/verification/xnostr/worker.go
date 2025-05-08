@@ -104,6 +104,12 @@ const MaxVerificationAttempts = 5
 
 // processVerification processes a single X-Nostr verification
 func (w *Worker) processVerification(pubKey, xHandle string, attempts int) {
+	// Skip verification if handle is empty
+	if xHandle == "" {
+		log.Printf("Skipping X-Nostr verification for pubkey %s: empty handle", pubKey)
+		return
+	}
+
 	log.Printf("Processing X-Nostr verification for pubkey %s with handle %s (attempt %d/%d)",
 		pubKey, xHandle, attempts+1, MaxVerificationAttempts)
 

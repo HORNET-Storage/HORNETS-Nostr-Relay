@@ -103,11 +103,22 @@ func (store *BadgerholdStore) GetAndRemovePendingVerifications(batchSize int) ([
 		return nil, fmt.Errorf("failed to get pending verifications: %w", err)
 	}
 
-	// Filter out verifications that were attempted less than 24 hours ago
+	// Filter out verifications that were attempted less than 24 hours ago or have empty handles
 	var eligibleVerifications []types.PendingVerification
 	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
 
 	for _, verification := range allPendingVerifications {
+		// Skip verifications with empty handles
+		if verification.XHandle == "" {
+			// Remove these from the queue since they shouldn't be there
+			err := store.RemoveFromPendingVerification(verification.PubKey)
+			if err != nil {
+				fmt.Printf("Failed to remove pending verification with empty handle for pubkey %s: %v\n",
+					verification.PubKey, err)
+			}
+			continue
+		}
+
 		// If LastAttemptAt is zero or more than 24 hours ago, include it
 		if verification.LastAttemptAt.IsZero() || verification.LastAttemptAt.Before(twentyFourHoursAgo) {
 			eligibleVerifications = append(eligibleVerifications, verification)
