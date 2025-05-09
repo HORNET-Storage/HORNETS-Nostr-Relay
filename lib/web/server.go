@@ -86,6 +86,12 @@ func StartServer(store stores.Store) error {
 	})
 
 	secured.Get("/relay-settings", getRelaySettings)
+
+	// Generic settings endpoints
+	secured.Get("/settings/:group", getConfigSettings)
+	secured.Post("/settings/:group", func(c *fiber.Ctx) error {
+		return updateConfigSettings(c, store)
+	})
 	secured.Get("/timeseries", func(c *fiber.Ctx) error {
 		return getProfilesTimeSeriesData(c, store)
 	})
