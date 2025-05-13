@@ -193,7 +193,12 @@ func storeSettingsInViper(groupName string, settings interface{}) error {
 	// For other groups with prefixed keys
 	prefix := groupName + "_"
 	for key, value := range settingsMap {
-		viper.Set(prefix+key, value)
+		// Check if the key already has the prefix to avoid double prefixing
+		if strings.HasPrefix(key, prefix) {
+			viper.Set(key, value)
+		} else {
+			viper.Set(prefix+key, value)
+		}
 	}
 
 	return viper.WriteConfig()
