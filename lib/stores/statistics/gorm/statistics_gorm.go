@@ -422,7 +422,7 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-// SaveFile saves the file (photo, video, audio, or misc) based on its type and processing mode (smart or unlimited).
+// SaveFile saves the file (photo, video, audio, or misc) based on its type and processing mode (whitelist or blacklist).
 func (store *GormStatisticsStore) SaveFile(root string, hash string, fileName string, mimeType string, leafCount int, size int64) error {
 	file := types.FileInfo{
 		Root:      root,

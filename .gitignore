@@ -32,3 +32,6 @@ demo-config.json
 **/.DS_Store
 
 /temp-*
+
+/memory-bank
+.clinerules

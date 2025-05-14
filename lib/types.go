@@ -612,3 +612,12 @@ type UserStat struct {
 	PubKey string `json:"pubkey"` // User public key
 	Count  int    `json:"count"`  // Number of blocked items
 }
+
+// PendingVerification represents a profile waiting for X-Nostr verification
+type PendingVerification struct {
+	PubKey        string    `json:"pubkey"`          // Nostr public key
+	XHandle       string    `json:"x_handle"`        // X/Twitter handle
+	CreatedAt     time.Time `json:"created_at"`      // When the verification was queued
+	LastAttemptAt time.Time `json:"last_attempt_at"` // When the last verification attempt was made
+	Attempts      int       `json:"attempts"`        // Number of verification attempts
+}
