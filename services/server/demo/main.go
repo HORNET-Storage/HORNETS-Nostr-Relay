@@ -15,8 +15,8 @@ import (
 func init() {
 	viper.SetDefault("key", "")
 	viper.SetDefault("web", true)
-	viper.SetDefault("proxy", false) // No need for websocket proxy in demo mode
-	viper.SetDefault("port", "9000")
+	viper.SetDefault("proxy", false)    // No need for websocket proxy in demo mode
+	viper.SetDefault("port", "10000")   // Default to port 10000 for demo mode
 	viper.SetDefault("demo_mode", true) // Enable demo mode by default for the demo server
 	viper.SetDefault("relay_stats_db", "demo_statistics.db")
 	viper.SetDefault("service_tag", "hornet-storage-service-demo")
@@ -105,15 +105,12 @@ func main() {
 		}
 	}()
 
-	// Use a different port for the demo server to avoid conflicts
+	// Log which ports will be used
 	demoPortStr := viper.GetString("port")
 	var portNum int
 	_, err = fmt.Sscanf(demoPortStr, "%d", &portNum)
 	if err == nil && portNum > 0 {
-		// If we got a port number successfully, add 1000 to avoid conflicting with main relay
-		newPort := portNum + 1000
-		viper.Set("port", fmt.Sprintf("%d", newPort))
-		log.Printf("Demo server will use port %d (web panel on port %d)", newPort, newPort+2)
+		log.Printf("Demo server will use port %d (web panel on port %d)", portNum, portNum+2)
 	}
 
 	log.Println("Starting demo web server...")

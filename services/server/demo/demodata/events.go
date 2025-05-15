@@ -6,7 +6,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
-	statistics_gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm"
+	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -147,7 +147,7 @@ func (g *DemoDataGenerator) saveKind(store statistics.StatisticsStore, kind *lib
 
 	// Approach 2: Direct SQL insertion using reflection to access the DB
 	// This bypasses the whitelist check that might be causing issues
-	gormStore, ok := store.(*statistics_gorm.GormStatisticsStore)
+	gormStore, ok := store.(*gorm.GormStatisticsStore)
 	if ok {
 		// Direct insertion to the kinds table
 		dbKind := lib.Kind{
@@ -172,7 +172,7 @@ func (g *DemoDataGenerator) saveKind(store statistics.StatisticsStore, kind *lib
 }
 
 // generateFileInfo creates a FileInfo entry for media content
-func (g *DemoDataGenerator) generateFileInfo(store statistics.StatisticsStore, kind *lib.Kind, _ time.Time) error {
+func (g *DemoDataGenerator) generateFileInfo(store statistics.StatisticsStore, kind *lib.Kind, timestamp time.Time) error {
 	// Generate file metadata
 	mimeType := g.generateMimeType(kind.KindNumber)
 	fileName := g.generateFileName(mimeType)
@@ -180,16 +180,36 @@ func (g *DemoDataGenerator) generateFileInfo(store statistics.StatisticsStore, k
 	// Convert MB to bytes for file size
 	sizeBytes := int64(kind.Size * 1024 * 1024)
 
-	// Create a file entry
-	if err := store.SaveFile(
-		kind.EventID,     // Use event ID as root
-		g.generateHash(), // Generate a hash
-		fileName,         // Generated file name
-		mimeType,         // Generated MIME type
-		g.rng.Intn(10)+1, // Random leaf count between 1-10
-		sizeBytes,        // Size in bytes
-	); err != nil {
-		return err
+	// Get the GormStatisticsStore to set timestamp directly
+	gormStore, ok := store.(*gorm.GormStatisticsStore)
+	if ok {
+		// Create file record with timestamp
+		file := lib.FileInfo{
+			Root:             kind.EventID,
+			Hash:             g.generateHash(),
+			FileName:         fileName,
+			MimeType:         mimeType,
+			LeafCount:        g.rng.Intn(10) + 1,
+			Size:             sizeBytes,
+			TimestampHornets: timestamp,
+		}
+
+		// Insert directly with timestamp
+		if err := gormStore.DB.Create(&file).Error; err != nil {
+			return err
+		}
+	} else {
+		// Fallback to standard method without timestamp
+		if err := store.SaveFile(
+			kind.EventID,     // Use event ID as root
+			g.generateHash(), // Generate a hash
+			fileName,         // Generated file name
+			mimeType,         // Generated MIME type
+			g.rng.Intn(10)+1, // Random leaf count between 1-10
+			sizeBytes,        // Size in bytes
+		); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -720,33 +720,65 @@ func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityDa
 
 // FetchNotesMediaStorageData retrieves the total GBs per month for notes and media
 func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChartData, error) {
-	var data []struct {
+	// Get notes data from kinds table
+	var notesData []struct {
 		Month time.Time `gorm:"column:month"`
 		Size  float64   `gorm:"column:size"`
 	}
 
 	err := store.DB.Raw(`
-        SELECT timestamp_hornets as month, size 
+        SELECT timestamp_hornets as month, size
         FROM kinds
-    `).Scan(&data).Error
+    `).Scan(&notesData).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// Group and calculate in Go
-	monthData := make(map[string]float64)
-	for _, d := range data {
+	// Get media data from file_infos table
+	var mediaData []struct {
+		Month    time.Time `gorm:"column:month"`
+		MimeType string    `gorm:"column:mime_type"`
+		Size     int64     `gorm:"column:size"`
+	}
+
+	err = store.DB.Raw(`
+        SELECT timestamp_hornets as month, mime_type, size
+        FROM file_infos
+    `).Scan(&mediaData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group notes by month
+	notesMonthData := make(map[string]float64)
+	for _, d := range notesData {
 		key := d.Month.Format("2006-01")
-		monthData[key] += d.Size / 1024.0
+		notesMonthData[key] += d.Size / 1024.0 // Convert to GB
+	}
+
+	// Group media by month
+	mediaMonthData := make(map[string]float64)
+	for _, d := range mediaData {
+		key := d.Month.Format("2006-01")
+		mediaMonthData[key] += float64(d.Size) / (1024.0 * 1024.0 * 1024.0) // Convert bytes to GB
+	}
+
+	// Combine all months from both datasets
+	allMonths := make(map[string]bool)
+	for month := range notesMonthData {
+		allMonths[month] = true
+	}
+	for month := range mediaMonthData {
+		allMonths[month] = true
 	}
 
 	// Convert to BarChartData
-	result := make([]types.BarChartData, 0, len(monthData))
-	for month, size := range monthData {
+	result := make([]types.BarChartData, 0, len(allMonths))
+	for month := range allMonths {
 		result = append(result, types.BarChartData{
 			Month:   month,
-			NotesGB: size,
-			MediaGB: 0,
+			NotesGB: notesMonthData[month],
+			MediaGB: mediaMonthData[month],
 		})
 	}
 

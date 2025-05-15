@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -65,7 +66,7 @@ func NewDemoDataGenerator() *DemoDataGenerator {
 		BothAdoptionRate:      0.1,  // 10% have both
 		InitialNotesPerDay:    50,   // 50 notes per day initially
 		NotesGrowthRate:       1.1,  // 10% monthly growth in notes
-		MediaPercentage:       0.2,  // 20% of notes are media
+		MediaPercentage:       0.5,  // 50% of notes are media - increased to get more media content
 
 		// Kind distribution - percentages should sum to 1.0
 		// Only using kinds that are in the whitelist
@@ -132,6 +133,16 @@ func (g *DemoDataGenerator) GenerateAllData(store statistics.StatisticsStore) er
 	// Generate event kinds and files
 	if err := g.GenerateEventKinds(store); err != nil {
 		return fmt.Errorf("error generating event kinds: %v", err)
+	}
+
+	// Generate wallet balance history
+	if err := g.GenerateWalletBalance(store); err != nil {
+		return fmt.Errorf("error generating wallet balance: %v", err)
+	}
+
+	// Generate wallet transactions (100 transactions)
+	if err := g.GenerateWalletTransactions(store, 100); err != nil {
+		return fmt.Errorf("error generating wallet transactions: %v", err)
 	}
 
 	// Generate a limited number of payment notifications
@@ -203,11 +214,14 @@ func (g *DemoDataGenerator) selectRandomKind() int {
 func (g *DemoDataGenerator) isMediaKind(kind int) bool {
 	// These kinds typically contain media (focused on kinds in our whitelist)
 	mediaKinds := map[int]bool{
-		1:     false, // Text notes (handled with MediaPercentage)
+		1:     false, // Text notes (handled separately with MediaPercentage)
+		6:     true,  // Reposts often include media
+		8:     true,  // Badges often include images
+		16:    true,  // Generic events can contain rich media
 		30023: true,  // Long-form content (articles)
 		10000: false, // Mute lists
-		10001: false, // Pin lists
-		30000: false, // Categorized people lists
+		10001: true,  // Pin lists often include media items
+		30000: true,  // Categorized people lists can include rich content
 	}
 
 	// For kinds explicitly marked as media
@@ -215,9 +229,9 @@ func (g *DemoDataGenerator) isMediaKind(kind int) bool {
 		return result
 	}
 
-	// Default behavior for other kinds
-	// Treat anything not explicitly listed as non-media
-	return false
+	// For other kinds, give a 30% chance for them to contain media
+	// This ensures even less common kinds have a chance to include media
+	return g.rng.Float64() < 0.3
 }
 
 // generateSizeForKind generates a realistic size for a given kind
@@ -227,11 +241,36 @@ func (g *DemoDataGenerator) generateSizeForKind(kind int, isMedia bool) float64 
 	if !exists {
 		// Default ranges if not specified
 		if isMedia {
-			sizeRange = struct {
-				Min float64
-				Max float64
-			}{0.2, 2.0} // 200KB to 2MB for media
+			// Check what type of media and assign appropriate size range
+			mimeType := g.generateMimeType(kind)
+
+			if strings.HasPrefix(mimeType, "video/") {
+				// Videos: 5MB to 50MB
+				sizeRange = struct {
+					Min float64
+					Max float64
+				}{5.0, 50.0}
+			} else if strings.HasPrefix(mimeType, "audio/") {
+				// Audio: 1MB to 15MB
+				sizeRange = struct {
+					Min float64
+					Max float64
+				}{1.0, 15.0}
+			} else if strings.HasPrefix(mimeType, "image/") {
+				// Images: 0.2MB to 5MB
+				sizeRange = struct {
+					Min float64
+					Max float64
+				}{0.2, 5.0}
+			} else {
+				// Default for other media: 0.2MB to 2MB
+				sizeRange = struct {
+					Min float64
+					Max float64
+				}{0.2, 2.0}
+			}
 		} else {
+			// Non-media content
 			sizeRange = struct {
 				Min float64
 				Max float64
@@ -248,20 +287,21 @@ func (g *DemoDataGenerator) generateSizeForKind(kind int, isMedia bool) float64 
 // generateMimeType generates a realistic MIME type for a file
 func (g *DemoDataGenerator) generateMimeType(_ int) string {
 	// Default distribution for any kind that has media
-	// 60% images, 20% videos, 15% audio, 5% documents
+	// 40% images, 30% videos, 25% audio, 5% documents
+	// Balanced to provide more video and audio content
 	r := g.rng.Float64()
 
 	// Different categories
-	if r < 0.60 {
-		// Images (60%)
+	if r < 0.40 {
+		// Images (40%)
 		imageTypes := []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 		return imageTypes[g.rng.Intn(len(imageTypes))]
-	} else if r < 0.80 {
-		// Videos (20%)
+	} else if r < 0.70 {
+		// Videos (30%)
 		videoTypes := []string{"video/mp4", "video/webm", "video/quicktime"}
 		return videoTypes[g.rng.Intn(len(videoTypes))]
 	} else if r < 0.95 {
-		// Audio (15%)
+		// Audio (25%)
 		audioTypes := []string{"audio/mpeg", "audio/wav", "audio/ogg"}
 		return audioTypes[g.rng.Intn(len(audioTypes))]
 	} else {
