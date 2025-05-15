@@ -720,33 +720,65 @@ func (store *GormStatisticsStore) FetchMonthlyStorageStats() ([]types.ActivityDa
 
 // FetchNotesMediaStorageData retrieves the total GBs per month for notes and media
 func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChartData, error) {
-	var data []struct {
+	// Get notes data from kinds table
+	var notesData []struct {
 		Month time.Time `gorm:"column:month"`
 		Size  float64   `gorm:"column:size"`
 	}
 
 	err := store.DB.Raw(`
-        SELECT timestamp_hornets as month, size 
+        SELECT timestamp_hornets as month, size
         FROM kinds
-    `).Scan(&data).Error
+    `).Scan(&notesData).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// Group and calculate in Go
-	monthData := make(map[string]float64)
-	for _, d := range data {
+	// Get media data from file_infos table
+	var mediaData []struct {
+		Month    time.Time `gorm:"column:month"`
+		MimeType string    `gorm:"column:mime_type"`
+		Size     int64     `gorm:"column:size"`
+	}
+
+	err = store.DB.Raw(`
+        SELECT timestamp_hornets as month, mime_type, size
+        FROM file_infos
+    `).Scan(&mediaData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Group notes by month
+	notesMonthData := make(map[string]float64)
+	for _, d := range notesData {
 		key := d.Month.Format("2006-01")
-		monthData[key] += d.Size / 1024.0
+		notesMonthData[key] += d.Size / 1024.0 // Convert to GB
+	}
+
+	// Group media by month
+	mediaMonthData := make(map[string]float64)
+	for _, d := range mediaData {
+		key := d.Month.Format("2006-01")
+		mediaMonthData[key] += float64(d.Size) / (1024.0 * 1024.0 * 1024.0) // Convert bytes to GB
+	}
+
+	// Combine all months from both datasets
+	allMonths := make(map[string]bool)
+	for month := range notesMonthData {
+		allMonths[month] = true
+	}
+	for month := range mediaMonthData {
+		allMonths[month] = true
 	}
 
 	// Convert to BarChartData
-	result := make([]types.BarChartData, 0, len(monthData))
-	for month, size := range monthData {
+	result := make([]types.BarChartData, 0, len(allMonths))
+	for month := range allMonths {
 		result = append(result, types.BarChartData{
 			Month:   month,
-			NotesGB: size,
-			MediaGB: 0,
+			NotesGB: notesMonthData[month],
+			MediaGB: mediaMonthData[month],
 		})
 	}
 
@@ -758,26 +790,55 @@ func (store *GormStatisticsStore) FetchNotesMediaStorageData() ([]types.BarChart
 }
 
 // FetchProfilesTimeSeriesData retrieves the time series data for profiles over the last 6 months
+// with cumulative totals rather than monthly counts
 func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate string) ([]types.TimeSeriesData, error) {
 	var rawData []struct {
-		Time      time.Time `gorm:"column:timestamp_hornets"`
-		Profiles  int       `gorm:"column:total"`
-		Lightning int       `gorm:"column:lightning"`
-		DHTKey    int       `gorm:"column:dht"`
-		Both      int       `gorm:"column:both"`
+		Month     string `gorm:"column:month"`
+		Profiles  int    `gorm:"column:total"`
+		Lightning int    `gorm:"column:lightning"`
+		DHTKey    int    `gorm:"column:dht"`
+		Both      int    `gorm:"column:both"`
 	}
 
+	log.Printf("FetchProfilesTimeSeriesData: startDate=%s, endDate=%s", startDate, endDate)
+
+	// First, let's make sure we include all months in our range, even if there's no data for a month
+	// Then calculate the cumulative totals for each month
 	err := store.DB.Raw(`
-   SELECT 
-       timestamp_hornets,
-       COUNT(*) as total,
-       COUNT(lightning_addr) as lightning,
-       COUNT(dht_key) as dht,
-       COUNT(lightning_addr) as both
-   FROM user_profiles 
-   WHERE timestamp_hornets >= ? AND timestamp_hornets <= ?
-   GROUP BY timestamp_hornets
-`, startDate, endDate).Scan(&rawData).Error
+   WITH date_range AS (
+       SELECT 
+           date(?) as start_date,
+           date(?) as end_date
+   ),
+   all_months AS (
+       WITH RECURSIVE months(dt) AS (
+           SELECT date(start_date, 'start of month') FROM date_range
+           UNION ALL
+           SELECT date(dt, '+1 month') FROM months
+           WHERE dt < date((SELECT end_date FROM date_range), 'start of month')
+       )
+       SELECT strftime('%Y-%m', dt) as month FROM months
+   ),
+   data_by_month AS (
+       SELECT
+           strftime('%Y-%m', timestamp_hornets) as month,
+           COUNT(*) as monthly_total,
+           SUM(CASE WHEN lightning_addr = 1 THEN 1 ELSE 0 END) as monthly_lightning,
+           SUM(CASE WHEN dht_key = 1 THEN 1 ELSE 0 END) as monthly_dht,
+           SUM(CASE WHEN lightning_addr = 1 AND dht_key = 1 THEN 1 ELSE 0 END) as monthly_both
+       FROM user_profiles
+       WHERE timestamp_hornets >= ? AND timestamp_hornets < ?
+       GROUP BY month
+   )
+   SELECT
+       am.month,
+       (SELECT SUM(monthly_total) FROM data_by_month WHERE month <= am.month) as total,
+       (SELECT SUM(monthly_lightning) FROM data_by_month WHERE month <= am.month) as lightning,
+       (SELECT SUM(monthly_dht) FROM data_by_month WHERE month <= am.month) as dht,
+       (SELECT SUM(monthly_both) FROM data_by_month WHERE month <= am.month) as both
+   FROM all_months am
+   ORDER BY am.month
+`, startDate, endDate, startDate, endDate).Scan(&rawData).Error
 
 	if err != nil {
 		return nil, fmt.Errorf("error fetching time series data: %v", err)
@@ -786,7 +847,7 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 	data := make([]types.TimeSeriesData, len(rawData))
 	for i, raw := range rawData {
 		data[i] = types.TimeSeriesData{
-			Month:           raw.Time.Format("2006-01"),
+			Month:           raw.Month,
 			Profiles:        raw.Profiles,
 			LightningAddr:   raw.Lightning,
 			DHTKey:          raw.DHTKey,

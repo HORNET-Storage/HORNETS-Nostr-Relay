@@ -2,6 +2,8 @@ package sqlite_demo
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -19,9 +21,18 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 
 	var err error
 
-	// Use demo_statistics.db instead of statistics.db for demo environment
-	// The database file will be created in the project root directory if it doesn't exist
-	dsn := "demo_statistics.db?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate&_synchronous=normal&_mutex=no&_locking_mode=normal&cache=shared"
+	// Find the project root directory by looking for go.mod file
+	projectRoot, err := findProjectRoot()
+	if err != nil {
+		fmt.Printf("Warning: Could not determine project root: %v\n", err)
+		fmt.Println("Using current directory as a fallback.")
+		projectRoot, _ = os.Getwd()
+	}
+
+	// Use absolute path to demo_statistics.db in the project root
+	dbPath := filepath.Join(projectRoot, "demo_statistics.db")
+	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate&_synchronous=normal&_mutex=no&_locking_mode=normal&cache=shared"
+	fmt.Printf("Using database at absolute path: %s\n", dbPath)
 
 	// Configure GORM with the same settings as the production version
 	store.DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -66,4 +77,31 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	fmt.Println("Demo SQLite database initialized with optimized settings")
 
 	return store, nil
+}
+
+// findProjectRoot attempts to locate the project root directory by looking for go.mod
+func findProjectRoot() (string, error) {
+	// Start with the current directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current directory: %v", err)
+	}
+
+	// Traverse up the directory tree looking for go.mod
+	for {
+		// Check if go.mod exists in the current directory
+		goModPath := filepath.Join(currentDir, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			// Found go.mod, this is likely the project root
+			return currentDir, nil
+		}
+
+		// Move up one directory
+		parentDir := filepath.Dir(currentDir)
+		if parentDir == currentDir {
+			// We've reached the filesystem root without finding go.mod
+			return "", fmt.Errorf("project root not found: go.mod not found in any parent directory")
+		}
+		currentDir = parentDir
+	}
 }

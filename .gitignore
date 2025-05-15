@@ -35,3 +35,6 @@ demo-config.json
 
 /memory-bank
 .clinerules
+# Demo binaries
+hornet-demo-generator
+hornet-storage-demo
