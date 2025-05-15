@@ -68,15 +68,21 @@ func NewDemoDataGenerator() *DemoDataGenerator {
 		MediaPercentage:       0.2,  // 20% of notes are media
 
 		// Kind distribution - percentages should sum to 1.0
+		// Only using kinds that are in the whitelist
 		KindDistribution: map[int]float64{
-			0:     0.10, // Metadata/Profiles: 10%
-			1:     0.45, // Text notes: 45%
-			3:     0.10, // Contacts: 10%
-			4:     0.05, // Direct messages: 5%
+			0:     0.05, // Metadata/Profiles: 5%
+			1:     0.30, // Text notes: 30%
+			2:     0.05, // Recommended relay: 5%
+			3:     0.05, // Contacts: 5%
 			5:     0.05, // Deletions: 5%
-			7:     0.15, // Reactions: 15%
-			1063:  0.05, // File metadata: 5%
-			30023: 0.05, // Article: 5%
+			6:     0.05, // Reposts: 5%
+			7:     0.10, // Reactions: 10%
+			8:     0.05, // Badges: 5%
+			16:    0.05, // Generic events: 5%
+			30023: 0.10, // Long-form content: 10% (increased for better media representation)
+			10000: 0.05, // Mute lists: 5%
+			10001: 0.05, // Pin lists: 5%
+			30000: 0.05, // Categorized people lists: 5%
 		},
 
 		// Size ranges for different kinds (in MB)
@@ -86,12 +92,17 @@ func NewDemoDataGenerator() *DemoDataGenerator {
 		}{
 			0:     {0.0005, 0.002},  // Metadata: 500B to 2KB
 			1:     {0.0005, 0.005},  // Text notes: 500B to 5KB
+			2:     {0.0003, 0.001},  // Recommended relay: 300B to 1KB
 			3:     {0.001, 0.01},    // Contacts: 1KB to 10KB
-			4:     {0.0005, 0.002},  // DMs: 500B to 2KB
 			5:     {0.0001, 0.0005}, // Deletions: 100B to 500B
+			6:     {0.0005, 0.003},  // Reposts: 500B to 3KB
 			7:     {0.0001, 0.0005}, // Reactions: 100B to 500B
-			1063:  {0.5, 5.0},       // File metadata: 500KB to 5MB
-			30023: {0.05, 0.5},      // Article: 50KB to 500KB
+			8:     {0.0005, 0.002},  // Badges: 500B to 2KB
+			16:    {0.001, 0.01},    // Generic events: 1KB to 10KB
+			30023: {0.05, 3.0},      // Long-form content: 50KB to 3MB (increased size for media content)
+			10000: {0.001, 0.005},   // Mute lists: 1KB to 5KB
+			10001: {0.001, 0.005},   // Pin lists: 1KB to 5KB
+			30000: {0.001, 0.01},    // Categorized people lists: 1KB to 10KB
 		},
 
 		pubkeys:  make([]string, 0, 1000),
@@ -190,14 +201,23 @@ func (g *DemoDataGenerator) selectRandomKind() int {
 
 // isMediaKind determines if a kind is typically associated with media
 func (g *DemoDataGenerator) isMediaKind(kind int) bool {
-	// These kinds typically contain media
+	// These kinds typically contain media (focused on kinds in our whitelist)
 	mediaKinds := map[int]bool{
-		1063:  true, // File metadata
-		30023: true, // Article with images
-		30063: true, // Live chat message with media
-		1000:  true, // Regular post with media
+		1:     false, // Text notes (handled with MediaPercentage)
+		30023: true,  // Long-form content (articles)
+		10000: false, // Mute lists
+		10001: false, // Pin lists
+		30000: false, // Categorized people lists
 	}
-	return mediaKinds[kind]
+
+	// For kinds explicitly marked as media
+	if result, exists := mediaKinds[kind]; exists {
+		return result
+	}
+
+	// Default behavior for other kinds
+	// Treat anything not explicitly listed as non-media
+	return false
 }
 
 // generateSizeForKind generates a realistic size for a given kind
@@ -226,23 +246,28 @@ func (g *DemoDataGenerator) generateSizeForKind(kind int, isMedia bool) float64 
 }
 
 // generateMimeType generates a realistic MIME type for a file
-func (g *DemoDataGenerator) generateMimeType(kind int) string {
-	// Different MIME types based on kind
-	if kind == 1063 {
-		// File metadata - various file types
-		fileTypes := []string{
-			"image/jpeg", "image/png", "image/gif",
-			"video/mp4", "audio/mpeg", "application/pdf",
-			"application/zip", "text/plain", "application/json",
-		}
-		return fileTypes[g.rng.Intn(len(fileTypes))]
-	} else if kind == 30023 {
-		// Article - mostly images
-		imageTypes := []string{"image/jpeg", "image/png", "image/webp"}
+func (g *DemoDataGenerator) generateMimeType(_ int) string {
+	// Default distribution for any kind that has media
+	// 60% images, 20% videos, 15% audio, 5% documents
+	r := g.rng.Float64()
+
+	// Different categories
+	if r < 0.60 {
+		// Images (60%)
+		imageTypes := []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
 		return imageTypes[g.rng.Intn(len(imageTypes))]
+	} else if r < 0.80 {
+		// Videos (20%)
+		videoTypes := []string{"video/mp4", "video/webm", "video/quicktime"}
+		return videoTypes[g.rng.Intn(len(videoTypes))]
+	} else if r < 0.95 {
+		// Audio (15%)
+		audioTypes := []string{"audio/mpeg", "audio/wav", "audio/ogg"}
+		return audioTypes[g.rng.Intn(len(audioTypes))]
 	} else {
-		// Default to common image types for other kinds
-		return "image/jpeg"
+		// Documents (5%)
+		docTypes := []string{"application/pdf", "application/zip", "text/plain", "application/json"}
+		return docTypes[g.rng.Intn(len(docTypes))]
 	}
 }
 
