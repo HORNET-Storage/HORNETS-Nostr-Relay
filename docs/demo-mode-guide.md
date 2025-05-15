@@ -60,6 +60,29 @@ The demo server uses a separate statistics database (`demo_statistics.db`), whic
 3. Tools like SQLite Browser can be used to view and edit the database directly
 4. You can also create scripts to automatically populate it with realistic-looking data
 
+### Demo Data Generator
+
+HORNETS Relay includes a built-in demo data generator tool that can populate the demo database with realistic-looking data:
+
+```
+./hornet-demo-generator
+```
+
+This interactive tool allows you to:
+- Generate user profiles with realistic adoption patterns
+- Generate event kinds with realistic distribution
+- Generate wallet balance history and transactions
+- Generate payment notifications
+- Configure time ranges and growth patterns
+
+For quick population with default settings, use:
+
+```
+./hornet-demo-generator --auto
+```
+
+This will populate the database with a complete set of demo data spanning 24 months.
+
 Once populated, the demo server will display this data in the admin panel without requiring authentication.
 
 ## What's Different in Demo Mode

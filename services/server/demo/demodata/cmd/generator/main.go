@@ -114,18 +114,40 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 			}
 
 		case "5":
-			configureTimeRange(scanner, generator)
+			err := generator.GenerateWalletBalance(store)
+			if err != nil {
+				fmt.Printf("Error generating wallet balance history: %v\n", err)
+			}
 
 		case "6":
-			configureGrowthPatterns(scanner, generator)
+			fmt.Print("How many wallet transactions do you want to generate? [100]: ")
+			scanner.Scan()
+			countStr := strings.TrimSpace(scanner.Text())
+			count := 100
+			if countStr != "" {
+				if val, err := strconv.Atoi(countStr); err == nil && val > 0 {
+					count = val
+				}
+			}
+
+			err := generator.GenerateWalletTransactions(store, count)
+			if err != nil {
+				fmt.Printf("Error generating wallet transactions: %v\n", err)
+			}
 
 		case "7":
-			configureKindDistribution(scanner, generator)
+			configureTimeRange(scanner, generator)
 
 		case "8":
-			showCurrentSettings(generator)
+			configureGrowthPatterns(scanner, generator)
 
 		case "9":
+			configureKindDistribution(scanner, generator)
+
+		case "10":
+			showCurrentSettings(generator)
+
+		case "11":
 			generator = demodata.NewDemoDataGenerator()
 			fmt.Println("Settings reset to defaults.")
 
@@ -146,15 +168,17 @@ func printMainMenu() {
 	fmt.Println("\nHORNETS-Nostr-Relay Demo Data Generator")
 	fmt.Println("=======================================")
 	fmt.Println("Main Menu:")
-	fmt.Println("1. Generate All Demo Data (User Profiles, Events, Files)")
+	fmt.Println("1. Generate All Demo Data (User Profiles, Events, Files, Wallet Data)")
 	fmt.Println("2. Generate User Profiles Only (for Address Adoption charts)")
 	fmt.Println("3. Generate Event Kinds Only (for Gigabytes Per Month charts)")
 	fmt.Println("4. Generate Payment Notifications")
-	fmt.Println("5. Configure Time Range")
-	fmt.Println("6. Configure Growth Patterns")
-	fmt.Println("7. Configure Kind Distribution")
-	fmt.Println("8. Show Current Settings")
-	fmt.Println("9. Reset to Defaults")
+	fmt.Println("5. Generate Wallet Balance History")
+	fmt.Println("6. Generate Wallet Transactions")
+	fmt.Println("7. Configure Time Range")
+	fmt.Println("8. Configure Growth Patterns")
+	fmt.Println("9. Configure Kind Distribution")
+	fmt.Println("10. Show Current Settings")
+	fmt.Println("11. Reset to Defaults")
 	fmt.Println("0. Exit")
 }
 
