@@ -136,18 +136,34 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 			}
 
 		case "7":
-			configureTimeRange(scanner, generator)
+			fmt.Print("How many wallet addresses do you want to generate? [50]: ")
+			scanner.Scan()
+			countStr := strings.TrimSpace(scanner.Text())
+			count := 50
+			if countStr != "" {
+				if val, err := strconv.Atoi(countStr); err == nil && val > 0 {
+					count = val
+				}
+			}
+
+			err := generator.GenerateWalletAddresses(store, count)
+			if err != nil {
+				fmt.Printf("Error generating wallet addresses: %v\n", err)
+			}
 
 		case "8":
-			configureGrowthPatterns(scanner, generator)
+			configureTimeRange(scanner, generator)
 
 		case "9":
-			configureKindDistribution(scanner, generator)
+			configureGrowthPatterns(scanner, generator)
 
 		case "10":
-			showCurrentSettings(generator)
+			configureKindDistribution(scanner, generator)
 
 		case "11":
+			showCurrentSettings(generator)
+
+		case "12":
 			generator = demodata.NewDemoDataGenerator()
 			fmt.Println("Settings reset to defaults.")
 
@@ -174,11 +190,12 @@ func printMainMenu() {
 	fmt.Println("4. Generate Payment Notifications")
 	fmt.Println("5. Generate Wallet Balance History")
 	fmt.Println("6. Generate Wallet Transactions")
-	fmt.Println("7. Configure Time Range")
-	fmt.Println("8. Configure Growth Patterns")
-	fmt.Println("9. Configure Kind Distribution")
-	fmt.Println("10. Show Current Settings")
-	fmt.Println("11. Reset to Defaults")
+	fmt.Println("7. Generate Wallet Addresses")
+	fmt.Println("8. Configure Time Range")
+	fmt.Println("9. Configure Growth Patterns")
+	fmt.Println("10. Configure Kind Distribution")
+	fmt.Println("11. Show Current Settings")
+	fmt.Println("12. Reset to Defaults")
 	fmt.Println("0. Exit")
 }
 

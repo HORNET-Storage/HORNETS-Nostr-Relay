@@ -2,6 +2,7 @@ package demodata
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -110,5 +111,33 @@ func (g *DemoDataGenerator) GenerateWalletTransactions(store statistics.Statisti
 	}
 
 	fmt.Println("Wallet transaction generation complete!")
+	return nil
+}
+
+// GenerateWalletAddresses creates wallet address data
+func (g *DemoDataGenerator) GenerateWalletAddresses(store statistics.StatisticsStore, count int) error {
+	fmt.Printf("Generating %d wallet addresses...\n", count)
+
+	// Generate addresses
+	for i := 0; i < count; i++ {
+		// Create a unique index
+		indexHornets := strconv.Itoa(i)
+
+		// Generate a realistic BTC address (starting with bc1 for SegWit)
+		address := "bc1" + generateRandomHex(38)
+
+		// Create wallet address record
+		walletAddress := &lib.WalletAddress{
+			IndexHornets: indexHornets,
+			Address:      address,
+		}
+
+		// Save the address
+		if err := store.SaveAddress(walletAddress); err != nil {
+			return fmt.Errorf("error creating wallet address at index %d: %v", i, err)
+		}
+	}
+
+	fmt.Println("Wallet address generation complete!")
 	return nil
 }

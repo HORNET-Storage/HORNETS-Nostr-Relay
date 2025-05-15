@@ -72,6 +72,7 @@ This interactive tool allows you to:
 - Generate user profiles with realistic adoption patterns
 - Generate event kinds with realistic distribution
 - Generate wallet balance history and transactions
+- Generate wallet addresses for receiving payments
 - Generate payment notifications
 - Configure time ranges and growth patterns
 

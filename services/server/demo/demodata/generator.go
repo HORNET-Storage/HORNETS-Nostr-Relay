@@ -145,6 +145,11 @@ func (g *DemoDataGenerator) GenerateAllData(store statistics.StatisticsStore) er
 		return fmt.Errorf("error generating wallet transactions: %v", err)
 	}
 
+	// Generate wallet addresses (50 addresses)
+	if err := g.GenerateWalletAddresses(store, 50); err != nil {
+		return fmt.Errorf("error generating wallet addresses: %v", err)
+	}
+
 	// Generate a limited number of payment notifications
 	paymentCount := 20 // Fixed small number instead of percentage of users
 	if err := g.GeneratePaymentNotifications(store, paymentCount); err != nil {
