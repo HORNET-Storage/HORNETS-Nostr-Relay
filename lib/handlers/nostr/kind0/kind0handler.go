@@ -6,7 +6,6 @@ import (
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
-	"github.com/HORNET-Storage/hornet-storage/lib/verification/xnostr"
 	"github.com/btcsuite/btcd/btcec/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -70,7 +69,7 @@ func ValidateNIP24Tags(event *nostr.Event) bool {
 }
 
 // BuildKind0Handler creates a handler for kind 0 events
-func BuildKind0Handler(store stores.Store, xnostrService *xnostr.Service, relayPrivKey *btcec.PrivateKey) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+func BuildKind0Handler(store stores.Store, relayPrivKey *btcec.PrivateKey) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		// Use Jsoniter for JSON operations
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -149,11 +148,6 @@ func BuildKind0Handler(store stores.Store, xnostrService *xnostr.Service, relayP
 		if err := store.StoreEvent(&env.Event); err != nil {
 			write("NOTICE", "Failed to store the event")
 			return
-		}
-
-		// Trigger X-Nostr verification if the profile has an X handle
-		if xnostrService != nil && relayPrivKey != nil {
-			xnostr.TriggerVerification(&env.Event, store, xnostrService, relayPrivKey)
 		}
 
 		// Successfully processed event

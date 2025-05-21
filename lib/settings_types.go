@@ -36,40 +36,6 @@ type OllamaSettings struct {
 	URL     string `json:"ollama_url" mapstructure:"ollama_url"`
 }
 
-// XNostrSettings represents the X-Nostr verification configuration
-type XNostrSettings struct {
-	BrowserPath     string                 `json:"xnostr_browser_path" mapstructure:"xnostr_browser_path"`
-	BrowserPoolSize int                    `json:"xnostr_browser_pool_size" mapstructure:"xnostr_browser_pool_size"`
-	CheckInterval   int                    `json:"xnostr_check_interval" mapstructure:"xnostr_check_interval"`
-	Concurrency     int                    `json:"xnostr_concurrency" mapstructure:"xnostr_concurrency"`
-	Enabled         bool                   `json:"xnostr_enabled" mapstructure:"xnostr_enabled"`
-	TempDir         string                 `json:"xnostr_temp_dir" mapstructure:"xnostr_temp_dir"`
-	UpdateInterval  int                    `json:"xnostr_update_interval" mapstructure:"xnostr_update_interval"`
-	Nitter          XNostrNitterSettings   `json:"xnostr_nitter" mapstructure:"xnostr_nitter"`
-	Intervals       XNostrIntervalSettings `json:"xnostr_verification_intervals" mapstructure:"xnostr_verification_intervals"`
-}
-
-// XNostrNitterSettings represents the Nitter configuration for X-Nostr
-type XNostrNitterSettings struct {
-	FailureThreshold  int                    `json:"failure_threshold" mapstructure:"failure_threshold"`
-	Instances         []XNostrNitterInstance `json:"instances" mapstructure:"instances"`
-	RecoveryThreshold int                    `json:"recovery_threshold" mapstructure:"recovery_threshold"`
-	RequestsPerMinute int                    `json:"requests_per_minute" mapstructure:"requests_per_minute"`
-}
-
-// XNostrNitterInstance represents a Nitter instance configuration
-type XNostrNitterInstance struct {
-	Priority int    `json:"priority" mapstructure:"priority"`
-	URL      string `json:"url" mapstructure:"url"`
-}
-
-// XNostrIntervalSettings represents the verification intervals for X-Nostr
-type XNostrIntervalSettings struct {
-	FollowerUpdateIntervalDays   int `json:"follower_update_interval_days" mapstructure:"follower_update_interval_days"`
-	FullVerificationIntervalDays int `json:"full_verification_interval_days" mapstructure:"full_verification_interval_days"`
-	MaxVerificationAttempts      int `json:"max_verification_attempts" mapstructure:"max_verification_attempts"`
-}
-
 // RelayInfoSettings represents the relay information configuration
 type RelayInfoSettings struct {
 	Contact       string `json:"relaycontact" mapstructure:"relaycontact"`
