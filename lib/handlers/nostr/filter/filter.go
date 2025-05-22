@@ -8,6 +8,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
@@ -189,6 +190,11 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Ensure that we respond to the client after processing all filters
 		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
 		var combinedEvents []*nostr.Event
+		var missingEventIDs []string
+		
+		// Get global relay store for missing note retrieval
+		relayStore := sync.GetRelayStore()
+		
 		for _, filter := range request.Filters {
 			events, err := store.QueryEvents(filter)
 			if err != nil {
@@ -196,9 +202,86 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				continue
 			}
 
+			// Check for missing specific event IDs
+			if len(filter.IDs) > 0 {
+				foundIDs := make(map[string]bool)
+				for _, event := range events {
+					foundIDs[event.ID] = true
+				}
+				
+				// Find missing event IDs
+				for _, requestedID := range filter.IDs {
+					if !foundIDs[requestedID] {
+						missingEventIDs = append(missingEventIDs, requestedID)
+						log.Printf(ColorYellow+"[MISSING NOTE] Event ID %s not found locally, will attempt DHT retrieval"+ColorReset, requestedID)
+					}
+				}
+			}
+
 			// No debug logging for database results
 
 			combinedEvents = append(combinedEvents, events...)
+		}
+		
+		// Attempt to retrieve missing events via DHT (with timeout protection)
+		if len(missingEventIDs) > 0 && relayStore != nil {
+			log.Printf(ColorCyan+"[MISSING NOTE] Attempting to retrieve %d missing events via DHT"+ColorReset, len(missingEventIDs))
+			
+			// Limit the number of missing events we try to retrieve to prevent excessive delays
+			maxMissingEvents := 5
+			if len(missingEventIDs) > maxMissingEvents {
+				log.Printf(ColorYellow+"[MISSING NOTE] Limiting DHT retrieval to %d events (requested %d)"+ColorReset, maxMissingEvents, len(missingEventIDs))
+				missingEventIDs = missingEventIDs[:maxMissingEvents]
+			}
+			
+			for _, eventID := range missingEventIDs {
+				log.Printf(ColorCyan+"[MISSING NOTE] Searching for event %s via DHT"+ColorReset, eventID)
+				
+				// Strategy 1: If we have author filters in any filter, use those for DHT lookup
+				var potentialAuthors []string
+				for _, filter := range request.Filters {
+					if len(filter.Authors) > 0 {
+						potentialAuthors = append(potentialAuthors, filter.Authors...)
+					}
+				}
+				
+				// Try to retrieve from each potential author's relay list (limited attempts)
+				var foundEvent *nostr.Event
+				maxAuthors := 3 // Limit to prevent excessive DHT lookups
+				for i, authorPubkey := range potentialAuthors {
+					if i >= maxAuthors {
+						break
+					}
+					
+					response, err := sync.RetrieveMissingNote(eventID, authorPubkey, relayStore, store)
+					if err != nil {
+						log.Printf(ColorRed+"[MISSING NOTE] Error retrieving event %s for author %s: %v"+ColorReset, eventID, authorPubkey, err)
+						continue
+					}
+					
+					if response.Found && response.Event != nil {
+						log.Printf(ColorGreen+"[MISSING NOTE] Successfully retrieved event %s from %s"+ColorReset, eventID, response.RelayURL)
+						foundEvent = response.Event
+						break
+					}
+				}
+				
+				// Strategy 2: If no authors specified or no event found, try a broader DHT search
+				if foundEvent == nil {
+					log.Printf(ColorYellow+"[MISSING NOTE] Event %s not found via author-specific search, trying broader DHT search"+ColorReset, eventID)
+					
+					// Try to find the event by querying multiple known relay lists
+					// This could be enhanced to iterate through all DHT entries
+					// For now, we'll just log that we tried
+					log.Printf(ColorYellow+"[MISSING NOTE] Broader DHT search for event %s not yet implemented"+ColorReset, eventID)
+				}
+				
+				// If we found the event, add it to combined events
+				if foundEvent != nil {
+					combinedEvents = append(combinedEvents, foundEvent)
+					log.Printf(ColorGreen+"[MISSING NOTE] Added retrieved event %s to response"+ColorReset, eventID)
+				}
+			}
 		}
 
 		// Deduplicate events
