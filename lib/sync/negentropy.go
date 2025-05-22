@@ -38,15 +38,11 @@ func SendNegentropyMessage(
 		msgArray = append(msgArray, string(jsonFilter))
 		msgArray = append(msgArray, strconv.Itoa(IdSize))
 		msgArray = append(msgArray, msgString)
-		break
 	case "NEG-MSG":
 		msgArray = append(msgArray, msgString)
-		break
 	case "NEG-ERR":
 		msgArray = append(msgArray, errMsg)
-		break
 	case "NEG-CLOSE":
-		break
 	case "NEG-HAVE":
 
 		msgArray = append(msgArray, string(haveBytes))
