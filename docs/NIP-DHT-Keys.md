@@ -17,11 +17,11 @@ This NIP proposes a solution using DHT to store and retrieve relay lists associa
 A DHT key is derived from a user's nsec (private key) using the following algorithm:
 
 1. Extract the raw private key bytes from the nsec
-2. Apply HKDF-SHA256 with a specific info string "nostr:dht-key"
+2. Apply SHA1 hash to the private key bytes
 3. Encode the resulting bytes as a hexadecimal string
 
 ```
-dht_key = hex(HKDF-SHA256(private_key_bytes, info="nostr:dht-key"))
+dht_key = hex(SHA1(private_key_bytes))
 ```
 
 ### Relay List Format
@@ -124,6 +124,149 @@ Relays that support this NIP should:
 4. Implement NIP-42 for relay authentication
 5. Handle requests for missing notes from other relays
 
+## Implementation
+
+The HORNETS-Nostr-Relay implements this NIP with the following components:
+
+### DHT Key Derivation
+
+The implementation uses SHA1 for DHT key derivation, consistent with the existing DHT implementation:
+
+```go
+// DeriveKeyFromNsec derives a DHT key from a user's nsec (private key)
+func DeriveKeyFromNsec(nsec string) (string, error) {
+    // Extract private key bytes using the signing package
+    privateKeyBytes, err := signing.DecodeKey(nsec)
+    if err != nil {
+        return "", fmt.Errorf("invalid nsec: %w", err)
+    }
+    
+    // Use SHA1 for target generation (consistent with existing code)
+    emptySalt := []byte{}
+    target := CreateMutableTarget(privateKeyBytes, emptySalt)
+    
+    return hex.EncodeToString(target[:]), nil
+}
+
+// CreateMutableTarget derives the target (dht-input) for a given pubKey and salt
+func CreateMutableTarget(pubKey []byte, salt []byte) krpc.ID {
+    return sha1.Sum(append(pubKey[:], salt...))
+}
+```
+
+### Relay List Signing
+
+The implementation uses the existing signing package for relay list signing:
+
+```go
+// SignRelayList signs a relay list with the user's private key
+func SignRelayList(relayList []string, nsec string) (string, error) {
+    // Use existing DeserializePrivateKey
+    privateKey, _, err := signing.DeserializePrivateKey(nsec)
+    if err != nil {
+        return "", fmt.Errorf("invalid nsec: %w", err)
+    }
+    
+    // Create a canonical JSON representation of the relay list
+    relayListJSON, err := json.Marshal(relayList)
+    if err != nil {
+        return "", fmt.Errorf("failed to marshal relay list: %w", err)
+    }
+    
+    // Use existing SignData function
+    signature, err := signing.SignData(relayListJSON, privateKey)
+    if err != nil {
+        return "", fmt.Errorf("failed to sign relay list: %w", err)
+    }
+    
+    return hex.EncodeToString(signature.Serialize()), nil
+}
+```
+
+### DHT Storage and Retrieval
+
+The implementation extends the existing `RelayStore` for DHT operations:
+
+```go
+// StoreRelayList stores a signed relay list in the DHT
+func (rs *RelayStore) StoreRelayList(dhtKey string, relayList []string, pubkey string, signature string) error {
+    // Convert the relay list to JSON
+    relayListJSON, err := json.Marshal(relayList)
+    if err != nil {
+        return fmt.Errorf("failed to marshal relay list: %w", err)
+    }
+    
+    // Add to uploadables table using existing method
+    return rs.AddUploadable(
+        hex.EncodeToString(relayListJSON),
+        pubkey,
+        signature,
+        true, // Upload now
+    )
+}
+```
+
+### Kind 30078 Handler
+
+The implementation includes a handler for kind 30078 events:
+
+```go
+// BuildKind30078Handler creates a handler for DHT Relay List events
+func BuildKind30078Handler(store stores.Store, relayStore *sync.RelayStore) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+    return func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+        // Read and validate event
+        
+        // Extract relay list and DHT key
+        var relayURLs []string
+        var dhtKey string
+        
+        for _, tag := range event.Tags {
+            if len(tag) >= 2 {
+                if tag[0] == "r" {
+                    relayURLs = append(relayURLs, tag[1])
+                } else if tag[0] == "dht" {
+                    dhtKey = tag[1]
+                }
+            }
+        }
+        
+        // Store the relay list in the DHT
+        err := relayStore.StoreRelayList(dhtKey, relayURLs, event.PubKey, event.Sig)
+        if err != nil {
+            write("NOTICE", "Failed to store relay list in DHT")
+            return
+        }
+        
+        // Successfully processed event
+        write("OK", event.ID, true, "Relay list stored in DHT")
+    }
+}
+```
+
+### Missing Note Retrieval
+
+The implementation includes functionality for retrieving missing notes:
+
+```go
+// RetrieveMissingNote retrieves a missing note from relays associated with a user
+func RetrieveMissingNote(eventID string, authorPubkey string, relayStore *RelayStore) (*nostr.Event, error) {
+    // Get the DHT key for the author
+    dhtKey, err := GetDHTKeyForPubkey(authorPubkey)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get DHT key: %w", err)
+    }
+    
+    // Retrieve the relay list from DHT
+    relayInfos, err := relayStore.GetRelayListFromDHT(&dhtKey)
+    if err != nil {
+        return nil, fmt.Errorf("failed to retrieve relay list: %w", err)
+    }
+    
+    // For each relay, try to retrieve the note
+    // ...
+}
+```
+
 ## Security Considerations
 
 1. **Key Security**: Private keys should never be transmitted or stored insecurely
@@ -147,4 +290,4 @@ This NIP is compatible with existing Nostr clients and relays. Clients and relay
 
 1. NIP-01: Basic protocol flow description
 2. NIP-42: Authentication of clients to relays
-3. HKDF-SHA256: RFC 5869
+3. SHA1: Secure Hash Algorithm 1
