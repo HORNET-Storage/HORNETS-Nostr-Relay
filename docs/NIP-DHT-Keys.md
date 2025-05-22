@@ -4,6 +4,32 @@
 
 This NIP defines a mechanism for using Distributed Hash Tables (DHT) to efficiently discover relay lists associated with Nostr users. It enables users to publish their preferred relay lists to the DHT and allows other users to discover these lists, facilitating more efficient content discovery and retrieval of missing notes.
 
+## End-to-End Process Flow
+
+Here's how the complete DHT Keys system works from start to finish:
+
+### 1. User Setup
+- User generates DHT key from their nsec (private key)
+- User publishes Kind 30078 event with their relay list
+- Relay stores relay list in DHT using the user's DHT key
+
+### 2. Content Discovery (Missing Note Scenario)
+- Client sends REQ for specific event ID: `["REQ", "sub1", {"ids": ["abc123..."]}]`
+- Relay queries local storage - event not found
+- Relay detects missing event ID and initiates DHT retrieval
+- If REQ includes author filters, relay uses those pubkeys for targeted DHT lookup
+- Relay derives DHT key from author's pubkey
+- Relay queries DHT to get author's relay list
+- Relay connects to author's relays and requests the missing event
+- If found, relay stores event locally and includes in response
+- Client receives EVENT message with the previously missing note
+- Client receives EOSE as normal
+
+### 3. Result
+- Missing content is automatically retrieved and delivered
+- Future requests for the same event are served from local storage
+- No client-side DHT implementation required
+
 ## Motivation
 
 In the Nostr ecosystem, users often struggle to discover content that exists on relays they are not connected to. When a user encounters a reference to a note they don't have locally, they need a way to discover which relays might have that note. Current approaches are inefficient and often result in "content not found" experiences.
@@ -114,6 +140,8 @@ Clients that support this NIP should:
 3. Query the DHT for relay lists when encountering missing notes
 4. Cache retrieved relay lists for efficiency
 
+**Note**: With real-time missing note retrieval, clients benefit automatically from DHT functionality without needing to implement DHT lookups themselves. The relay handles missing note retrieval transparently.
+
 ## Relay Behavior
 
 Relays that support this NIP should:
@@ -123,6 +151,59 @@ Relays that support this NIP should:
 3. Retrieve relay lists from the DHT when requested
 4. Implement NIP-42 for relay authentication
 5. Handle requests for missing notes from other relays
+6. **Integrate missing note retrieval into REQ processing** (HORNETS enhancement)
+7. **Apply performance limits** to prevent DHT lookup abuse
+
+## Real-time Missing Note Retrieval
+
+When a client sends a REQ message requesting specific event IDs that are not found locally, the relay automatically attempts to retrieve them via DHT:
+
+### REQ Processing Flow
+
+1. **Local Query**: Process filters and query local storage first
+2. **Missing Event Detection**: Identify event IDs that were requested but not found
+3. **DHT Retrieval**: For missing events, attempt retrieval using author's relay lists
+4. **Response**: Include both local and retrieved events in the normal EVENT/EOSE response
+
+### Performance Safeguards
+
+- **Event Limit**: Maximum 5 missing events per REQ to prevent delays
+- **Author Limit**: Maximum 3 author lookups per missing event
+- **Timeout Protection**: 10-second timeout per relay connection
+- **Strategy Prioritization**: Use author filters when available for targeted DHT lookups
+
+### Integration Points
+
+The missing note retrieval is integrated into the main filter handler (`lib/handlers/nostr/filter/filter.go`):
+
+```go
+// After local query, check for missing event IDs
+if len(filter.IDs) > 0 {
+    foundIDs := make(map[string]bool)
+    for _, event := range events {
+        foundIDs[event.ID] = true
+    }
+    
+    // Find missing event IDs
+    for _, requestedID := range filter.IDs {
+        if !foundIDs[requestedID] {
+            missingEventIDs = append(missingEventIDs, requestedID)
+        }
+    }
+}
+
+// Attempt DHT retrieval for missing events
+if len(missingEventIDs) > 0 && relayStore != nil {
+    // Use author filters to target specific relay lists
+    for _, authorPubkey := range potentialAuthors {
+        response, err := sync.RetrieveMissingNote(eventID, authorPubkey, relayStore, store)
+        if response.Found && response.Event != nil {
+            combinedEvents = append(combinedEvents, response.Event)
+            break
+        }
+    }
+}
+```
 
 ## Implementation
 
@@ -285,6 +366,31 @@ This NIP is compatible with existing Nostr clients and relays. Clients and relay
 2. Relay lists should be periodically refreshed to ensure they remain current
 3. Fallback mechanisms should be implemented for cases where DHT lookups fail
 4. Consideration should be given to the size and frequency of DHT operations to minimize network overhead
+5. **Real-time retrieval should be limited** to prevent performance degradation during high-traffic periods
+6. **Author-based targeting** improves DHT lookup efficiency when author filters are available
+7. **Automatic storage** of retrieved events reduces future DHT lookups for the same content
+
+## HORNETS-Specific Enhancements
+
+The HORNETS-Nostr-Relay implementation includes several enhancements beyond the base NIP specification:
+
+### Automatic Missing Note Detection
+- Integrated into standard REQ processing
+- No client-side DHT implementation required
+- Transparent to existing Nostr clients
+
+### Performance Optimizations
+- Configurable limits on DHT lookups per request
+- Author-based targeting when filters include author pubkeys
+- Automatic local storage of retrieved events
+- Timeout protection for all external relay connections
+
+### Logging and Monitoring
+- Detailed logging of DHT operations with color-coded output
+- Success/failure tracking for retrieved events
+- Performance metrics for DHT lookup times
+
+This implementation makes DHT functionality accessible to all Nostr clients without requiring client-side modifications, while maintaining compatibility with the standard Nostr protocol.
 
 ## References
 
