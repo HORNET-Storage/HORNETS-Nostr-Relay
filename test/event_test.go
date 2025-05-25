@@ -153,8 +153,8 @@ func setupStore(basepath string) stores.Store {
 	}
 
 	handlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
-	// For testing purposes, we pass nil for xnostrService and privateKey
-	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, nil, nil))
+	// For testing purposes, we pass nil for privateKey
+	handlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, nil))
 	handlers.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	handlers.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 	handlers.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))

@@ -24,7 +24,6 @@ var settingsRegistry = map[string]interface{}{
 	"content_filter":   types.ContentFilterSettings{},
 	"nest_feeder":      types.NestFeederSettings{},
 	"ollama":           types.OllamaSettings{},
-	"xnostr":           types.XNostrSettings{},
 	"relay_info":       types.RelayInfoSettings{},
 	"wallet":           types.WalletSettings{},
 	"general":          types.GeneralSettings{},
