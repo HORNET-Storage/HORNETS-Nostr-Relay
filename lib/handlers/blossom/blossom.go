@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/fiber/v2"

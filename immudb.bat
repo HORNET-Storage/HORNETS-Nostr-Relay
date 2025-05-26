@@ -1,1 +1,0 @@
-immudb --dir ./immudb --auth

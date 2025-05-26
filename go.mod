@@ -2,13 +2,9 @@ module github.com/HORNET-Storage/hornet-storage
 
 go 1.22.1
 
-//replace github.com/codenotary/immugorm => D:\organizations\akashic_record\merge\immugorm
-
-//replace github.com/HORNET-Storage/Scionic-Merkle-Tree => D:/organizations/akashic_record/relevant/golang/scionic-merkletree
-
 require (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.1
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250310130615-f4b83d0723b6
+	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.3
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250501131004-d1bd7ac615e0
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f

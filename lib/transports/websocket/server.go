@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 

@@ -5,6 +5,7 @@ import (
 	"log"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/nbd-wtf/go-nostr"
@@ -19,7 +20,7 @@ type Store interface {
 	// Hornet Storage
 	StoreLeaf(root string, leafData *types.DagLeafData, temp bool) error
 	RetrieveLeaf(root string, hash string, includeContent bool, temp bool) (*types.DagLeafData, error)
-	QueryDag(filter types.QueryFilter, temp bool) ([]string, error)
+	QueryDag(filter lib_types.QueryFilter, temp bool) ([]string, error)
 	StoreDag(dag *types.DagData, temp bool) error
 	BuildDagFromStore(root string, includeContent bool, temp bool) (*types.DagData, error)
 	RetrieveLeafContent(contentHash []byte, temp bool) ([]byte, error)

@@ -8,7 +8,6 @@ import (
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/nbd-wtf/go-nostr"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
@@ -100,13 +99,6 @@ type DagData struct {
 	PublicKey string
 	Signature string
 	Dag       merkle_dag.Dag
-}
-
-type Stream interface {
-	Read(p []byte) (int, error)
-	Write(p []byte) (int, error)
-	Close() error
-	Context() context.Context
 }
 
 type UploadMessage struct {
@@ -396,36 +388,9 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-type Libp2pStream struct {
-	Stream network.Stream
-	Ctx    context.Context
-}
-
 type SubscriptionTier struct {
 	DataLimit string `json:"datalimit" mapstructure:"datalimit"`
 	Price     string `json:"price" mapstructure:"price"`
-}
-
-func (ls *Libp2pStream) Read(msg []byte) (int, error) {
-	return ls.Stream.Read(msg)
-}
-
-func (ls *Libp2pStream) Write(msg []byte) (int, error) {
-	return ls.Stream.Write(msg)
-}
-
-func (ls *Libp2pStream) Close() error {
-	return ls.Stream.Close()
-}
-
-func (ls *Libp2pStream) Context() context.Context {
-	return ls.Ctx
-}
-
-type WebSocketStream struct {
-	Conn        *websocket.Conn
-	Ctx         context.Context
-	writeBuffer bytes.Buffer
 }
 
 type AggregatedKindData struct {
@@ -443,6 +408,35 @@ type KindData struct {
 type MonthlyKindData struct {
 	Month     string  `json:"month"`
 	TotalSize float64 `json:"totalSize"`
+}
+
+type AddressResponse struct {
+	IndexHornets string `json:"index"`
+	Address      string `json:"address"`
+}
+
+type DagContent struct {
+	Hash    string
+	Content []byte
+}
+
+type BlobContent struct {
+	Hash    string
+	PubKey  string
+	Content []byte
+}
+
+type Stream interface {
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	Close() error
+	Context() context.Context
+}
+
+type WebSocketStream struct {
+	Conn        *websocket.Conn
+	Ctx         context.Context
+	writeBuffer bytes.Buffer
 }
 
 func NewWebSocketStream(conn *websocket.Conn, ctx context.Context) *WebSocketStream {
@@ -480,22 +474,6 @@ func (ws *WebSocketStream) Close() error {
 
 func (ws *WebSocketStream) Context() context.Context {
 	return ws.Ctx
-}
-
-type AddressResponse struct {
-	IndexHornets string `json:"index"`
-	Address      string `json:"address"`
-}
-
-type DagContent struct {
-	Hash    string
-	Content []byte
-}
-
-type BlobContent struct {
-	Hash    string
-	PubKey  string
-	Content []byte
 }
 
 // PaidSubscriber represents a user with an active paid subscription
