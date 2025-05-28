@@ -46,7 +46,10 @@ func handleIncomingNegentropyEventStream(stream network.Stream, hostId string, s
 	// Perform the negentropy sync
 	err := listenNegentropy(&negentropy.Negentropy{}, stream, hostId, store, false)
 	if err != nil {
-		err = SendNegentropyMessage(hostId, stream, "NEG-ERR", nostr.Filter{}, []byte{}, err.Error(), []string{}, []byte{})
+		// Send error message but don't overwrite the original error
+		if sendErr := SendNegentropyMessage(hostId, stream, "NEG-ERR", nostr.Filter{}, []byte{}, err.Error(), []string{}, []byte{}); sendErr != nil {
+			log.Printf("Failed to send error message: %v", sendErr)
+		}
 		return
 	}
 
@@ -97,15 +100,16 @@ func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string
 	}
 
 	initialMsg, err := neg.Initiate()
+	if err != nil {
+		return fmt.Errorf("failed to initiate negentropy: %w", err)
+	}
 	log.Printf("%s is initiating with version %d", hostId, initialMsg[0])
 
-	err = SendNegentropyMessage(hostId, stream, "NEG-OPEN", filter, initialMsg, "", []string{}, []byte{})
-	if err != nil {
+	if err = SendNegentropyMessage(hostId, stream, "NEG-OPEN", filter, initialMsg, "", []string{}, []byte{}); err != nil {
 		return err
 	}
 
-	err = listenNegentropy(neg, stream, hostId, store, true)
-	return nil
+	return listenNegentropy(neg, stream, hostId, store, true)
 }
 
 func GetScionicRoot(event *nostr.Event) (string, bool) {
@@ -236,18 +240,22 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				return err
 			}
 			decodedBytes, err := hex.DecodeString(parsedData[4])
+			if err != nil {
+				return fmt.Errorf("failed to decode hex string: %w", err)
+			}
 			msg, err := neg.Reconcile(decodedBytes)
 			if err != nil {
 				return err
 			}
 
-			err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []byte{})
-			if err != nil {
+			if err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []byte{}); err != nil {
 				return err
 			}
-			break
 		case "NEG-MSG":
 			decodedBytes, err := hex.DecodeString(parsedData[2])
+			if err != nil {
+				return fmt.Errorf("failed to decode hex string: %w", err)
+			}
 			var msg []byte
 			var have, need []string
 
@@ -284,8 +292,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					}
 
 					// upload
-					err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveBytes)
-					if err != nil {
+					if err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveBytes); err != nil {
 						return err
 					}
 				}
@@ -296,8 +303,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					for i, s := range need {
 						needIds[i] = hex.EncodeToString([]byte(s))
 					}
-					err = SendNegentropyMessage(hostId, stream, "NEG-NEED", nostr.Filter{}, []byte{}, "", needIds, []byte{})
-					if err != nil {
+					if err = SendNegentropyMessage(hostId, stream, "NEG-NEED", nostr.Filter{}, []byte{}, "", needIds, []byte{}); err != nil {
 						return err
 					}
 				}
@@ -312,8 +318,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				log.Println(hostId, ": Sync complete")
 				if len(need) == 0 {
 					// we are done
-					err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []byte{})
-					if err != nil {
+					if err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []byte{}); err != nil {
 						return err
 					}
 					return nil
@@ -323,12 +328,10 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				}
 			} else {
 				log.Println(hostId, ": Sync incomplete, drilling down")
-				err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []byte{})
-				if err != nil {
+				if err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []byte{}); err != nil {
 					return err
 				}
 			}
-			break
 
 		case "NEG-HAVE":
 			var newEvents []*nostr.Event
@@ -346,7 +349,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				if event.Kind == 117 {
 					// do leaf sync
 					root, found := GetScionicRoot(event)
-					if found == false {
+					if !found {
 						log.Printf("Event of type 117 with no 'scionic_root' tag, skipping tree download %+v", event)
 						continue
 					}
@@ -355,8 +358,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				}
 			}
 			if final {
-				err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []byte{})
-				if err != nil {
+				if err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []byte{}); err != nil {
 					return err
 				}
 				return nil
@@ -365,6 +367,9 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			var needIds []string
 
 			err = json.Unmarshal([]byte(parsedData[2]), &needIds)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal need IDs: %w", err)
+			}
 			//log.Printf("other hos t sent %s\n", needIds)
 
 			filter := nostr.Filter{
@@ -385,8 +390,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			}
 
 			// upload
-			err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveBytes)
-			if err != nil {
+			if err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveBytes); err != nil {
 				log.Println(hostId, "Error uploading", err)
 				return err
 			}

@@ -432,7 +432,10 @@ func (store *GormStatisticsStore) SaveFile(root string, hash string, fileName st
 		LeafCount: leafCount,
 		Size:      size,
 	}
-	return store.DB.Create(&file).Error
+
+	// Use FirstOrCreate to avoid UNIQUE constraint violations on hash
+	result := store.DB.Where(types.FileInfo{Hash: hash}).FirstOrCreate(&file)
+	return result.Error
 }
 
 func (store *GormStatisticsStore) QueryFiles(criteria map[string]interface{}) ([]types.FileInfo, error) {
@@ -461,9 +464,15 @@ func (store *GormStatisticsStore) SaveTags(root string, leaf *merkle_dag.DagLeaf
 			Value: value,
 		}
 
-		tx := store.DB.FirstOrCreate(tag)
-		if tx.Error != nil {
-			return tx.Error
+		// Use pointer and specify search conditions for FirstOrCreate
+		result := store.DB.Where(&types.FileTag{
+			Root:  root,
+			Key:   key,
+			Value: value,
+		}).FirstOrCreate(&tag)
+
+		if result.Error != nil {
+			return result.Error
 		}
 	}
 
