@@ -3,6 +3,7 @@ package test
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -80,7 +81,7 @@ func GenerateRandomEvent() *nostr.Event {
 // randomHexString generates a random hex string of a given length
 func randomHexString(length int) string {
 	bytes := make([]byte, length/2)
-	if _, err := rand.Read(bytes); err != nil {
+	if _, err := cryptorand.Read(bytes); err != nil {
 		log.Fatal(err)
 	}
 	return hex.EncodeToString(bytes)
@@ -94,8 +95,8 @@ func selectRandomItems(arr []int, n int) []int {
 		n = len(arr)
 	}
 
-	// Seed the random number generator
-	rand.Seed(time.Now().UnixNano())
+	// Create a local random number generator with a specific seed
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Create a slice to store the selected items
 	selected := make([]int, n)
@@ -106,7 +107,7 @@ func selectRandomItems(arr []int, n int) []int {
 	for i := 0; i < n; i++ {
 		for {
 			// Generate a random index
-			index := rand.Intn(len(arr))
+			index := rng.Intn(len(arr))
 
 			// Ensure the index is not already selected
 			if !selectedIndices[index] {
