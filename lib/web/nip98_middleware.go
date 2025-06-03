@@ -182,11 +182,13 @@ func GetNIP98Pubkey(c *fiber.Ctx) (string, error) {
 
 // NIP98ProtectedHandler is a helper to create handlers that require NIP-98 auth
 func NIP98ProtectedHandler(handler fiber.Handler, config ...NIP98Config) fiber.Handler {
-	middleware := NIP98Middleware(config...)
 	return func(c *fiber.Ctx) error {
+		// Apply the middleware
+		middleware := NIP98Middleware(config...)
 		if err := middleware(c); err != nil {
 			return err
 		}
+		// If middleware passes, call the handler
 		return handler(c)
 	}
 }
