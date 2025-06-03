@@ -3,8 +3,8 @@ package blossom
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/fiber/v2"
@@ -20,8 +20,17 @@ func NewServer(store stores.Store) *Server {
 }
 
 func (s *Server) SetupRoutes(app *fiber.App) {
-	app.Get("/blossom/:hash", s.getBlob)
-	app.Put("/blossom/upload", s.uploadBlob)
+	// Routes will be set up in web/server.go with appropriate middleware
+}
+
+// GetBlobHandler returns the handler for getting blobs
+func (s *Server) GetBlobHandler() fiber.Handler {
+	return s.getBlob
+}
+
+// UploadBlobHandler returns the handler for uploading blobs
+func (s *Server) UploadBlobHandler() fiber.Handler {
+	return s.uploadBlob
 }
 
 func (s *Server) getBlob(c *fiber.Ctx) error {
@@ -30,24 +39,30 @@ func (s *Server) getBlob(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"message": "Blob not found"})
 	}
+
+	// Set appropriate content type if possible
+	mtype := mimetype.Detect(data)
+	c.Set("Content-Type", mtype.String())
+
 	return c.Send(data)
 }
 
 func (s *Server) uploadBlob(c *fiber.Ctx) error {
-	pubkey := c.Query("pubkey")
+	// Get authenticated pubkey from NIP-98 middleware context
+	pubkey, ok := c.Locals("nip98_pubkey").(string)
+	if !ok || pubkey == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "authentication required"})
+	}
 
 	data := c.Body()
+	if len(data) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"message": "empty request body"})
+	}
 
 	mtype := mimetype.Detect(data)
 
 	checkHash := sha256.Sum256(data)
 	encodedHash := hex.EncodeToString(checkHash[:])
-
-	// Ensure the public key is valid
-	_, err := signing.DeserializePublicKey(pubkey)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"message": "invalid public key"})
-	}
 
 	filter := nostr.Filter{
 		Kinds:   []int{117},
@@ -61,12 +76,14 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to query events"})
 	}
 
-	var event *nostr.Event
-	if len(events) <= 0 {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "no events match this file upload"})
+	if len(events) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "no matching kind 117 event found",
+			"detail":  fmt.Sprintf("Please create a kind 117 event with blossom_hash tag '%s' before uploading", encodedHash),
+		})
 	}
 
-	event = events[0]
+	event := events[0]
 
 	fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
 	if fileHash == nil {
@@ -76,7 +93,10 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 
 	// Check the submitted hash matches the data being submitted
 	if encodedHash != fileHash.Value() {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "submitted hex encoded hash does not match hex encoded hash of data"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "hash mismatch",
+			"detail":  fmt.Sprintf("calculated hash %s does not match event hash %s", encodedHash, fileHash.Value()),
+		})
 	}
 
 	// Store the blob
@@ -97,5 +117,11 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	// Store the file in the statistics database
 	s.storage.GetStatsStore().SaveFile("blossom", encodedHash, name, mtype.String(), 0, int64(len(data)))
 
-	return c.SendStatus(fiber.StatusOK)
+	// Return success with the hash for confirmation
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message": "File uploaded successfully",
+		"hash":    encodedHash,
+		"size":    len(data),
+		"type":    mtype.String(),
+	})
 }

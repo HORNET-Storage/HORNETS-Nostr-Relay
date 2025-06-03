@@ -50,6 +50,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	kind117handler "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1984"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
@@ -513,6 +514,7 @@ func main() {
 		nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
 		nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
 		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
+		nostr.RegisterHandler("kind/117", kind117handler.BuildKind117Handler(store))
 
 		// X-Nostr verification is now handled in the frontend
 	} else {

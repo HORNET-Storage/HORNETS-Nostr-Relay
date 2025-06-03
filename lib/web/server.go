@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/blossom"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -24,6 +25,17 @@ func StartServer(store stores.Store) error {
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, DELETE, PUT, OPTIONS",
 	}))
+
+	// Initialize and setup Blossom routes for file storage
+	blossomServer := blossom.NewServer(store)
+
+	// Public endpoint - no auth required for downloads
+	app.Get("/blossom/:hash", blossomServer.GetBlobHandler())
+
+	// Protected endpoint - requires NIP-98 auth for uploads
+	app.Put("/blossom/upload", NIP98Middleware(), blossomServer.UploadBlobHandler())
+
+	log.Println("Blossom file storage routes initialized with NIP-98 authentication")
 
 	// Rate limited routes
 	app.Post("/signup", func(c *fiber.Ctx) error {
