@@ -169,29 +169,48 @@ func markPaymentNotificationAsRead(c *fiber.Ctx, store stores.Store) error {
 
 // markAllPaymentNotificationsAsRead marks all payment notifications as read for a user
 func markAllPaymentNotificationsAsRead(c *fiber.Ctx, store stores.Store) error {
-	// Get user pubkey from request body
+	// Get user pubkey from request body if provided (for logging purposes)
 	var req struct {
 		Pubkey string `json:"pubkey"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
+		log.Printf("ERROR: Failed to parse request body: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
 	}
 
-	if req.Pubkey == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "User pubkey is required",
+	log.Println("Received mark all as read from: ", req.Pubkey)
+
+	// Check if store is available
+	if store == nil {
+		log.Printf("ERROR: Store is nil")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Store not available",
 		})
 	}
 
-	// Mark all notifications as read for the user
-	if err := store.GetStatsStore().MarkAllPaymentNotificationsAsRead(req.Pubkey); err != nil {
+	// Check if stats store is available
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		log.Printf("ERROR: Stats store is nil")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Stats store not available",
+		})
+	}
+
+	log.Printf("About to call MarkAllPaymentNotificationsAsRead")
+
+	// Mark all notifications as read globally
+	if err := statsStore.MarkAllPaymentNotificationsAsRead(); err != nil {
+		log.Printf("ERROR: Failed to mark notifications as read: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to mark notifications as read: " + err.Error(),
 		})
 	}
+
+	log.Printf("Successfully marked all notifications as read")
 
 	return c.JSON(fiber.Map{
 		"success": true,

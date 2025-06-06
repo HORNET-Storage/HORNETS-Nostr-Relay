@@ -113,7 +113,7 @@ type StatisticsStore interface {
 	GetUserPaymentNotifications(pubkey string, page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
 	GetUnreadPaymentNotifications(page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
 	MarkPaymentNotificationAsRead(id uint) error
-	MarkAllPaymentNotificationsAsRead(pubkey string) error
+	MarkAllPaymentNotificationsAsRead() error
 	DeletePaymentNotification(id uint) error
 
 	// Payment statistics
