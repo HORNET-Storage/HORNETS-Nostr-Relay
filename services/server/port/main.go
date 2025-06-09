@@ -50,6 +50,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1063"
 	kind117handler "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1984"
@@ -117,7 +118,7 @@ func init() {
 		"Audio":            []string{},
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
-		"KindWhitelist":    []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843"}, // Essential kinds always enabled
+		"KindWhitelist":    []string{"kind0", "kind1", "kind117", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind1063"}, // Essential kinds always enabled
 		"FreeTierEnabled":  true,
 		"FreeTierLimit":    "100 MB per month",
 		"ModerationMode":   "strict", // Default moderation mode to "strict"
@@ -515,6 +516,7 @@ func main() {
 		nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
 		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
 		nostr.RegisterHandler("kind/117", kind117handler.BuildKind117Handler(store))
+		nostr.RegisterHandler("kind/1063", kind1063.BuildKind1063Handler(store))
 
 		// X-Nostr verification is now handled in the frontend
 	} else {

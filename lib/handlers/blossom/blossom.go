@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gabriel-vasile/mimetype"
@@ -64,24 +65,47 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	checkHash := sha256.Sum256(data)
 	encodedHash := hex.EncodeToString(checkHash[:])
 
-	filter := nostr.Filter{
+	// WORKAROUND: Use broad search instead of tag filtering due to relay tag indexing issues
+	// The relay's tag indexing system doesn't work for blossom_hash tags, so we search broadly
+	// and manually filter the results
+	broadFilter := nostr.Filter{
 		Kinds:   []int{117},
 		Authors: []string{pubkey},
-		Tags:    nostr.TagMap{"blossom_hash": []string{encodedHash}},
 	}
 
-	// Ensure a kind 117 file information event was uploaded first
-	events, err := s.storage.QueryEvents(filter)
+	log.Printf("Blossom upload: Searching for kind 117 events (broad search) - Author: %s, Hash: %s", pubkey, encodedHash)
+
+	// Get all kind 117 events from this author
+	allEvents, err := s.storage.QueryEvents(broadFilter)
 	if err != nil {
+		log.Printf("Blossom upload: Error querying events: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to query events"})
 	}
 
-	if len(events) == 0 {
+	log.Printf("Blossom upload: Found %d total kind 117 events from author, filtering for hash %s", len(allEvents), encodedHash)
+
+	// Manually filter for events with matching blossom_hash
+	var matchingEvents []*nostr.Event
+	for _, event := range allEvents {
+		for _, tag := range event.Tags {
+			if len(tag) >= 2 && tag[0] == "blossom_hash" && tag[1] == encodedHash {
+				matchingEvents = append(matchingEvents, event)
+				log.Printf("Blossom upload: Found matching event - ID: %s, Hash: %s", event.ID, tag[1])
+				break
+			}
+		}
+	}
+
+	if len(matchingEvents) == 0 {
+		log.Printf("Blossom upload: No matching kind 117 event found for hash %s from author %s", encodedHash, pubkey)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "no matching kind 117 event found",
 			"detail":  fmt.Sprintf("Please create a kind 117 event with blossom_hash tag '%s' before uploading", encodedHash),
 		})
 	}
+
+	// Use the first matching event (most recent due to how events are typically ordered)
+	events := matchingEvents
 
 	event := events[0]
 
