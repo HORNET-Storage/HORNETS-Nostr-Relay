@@ -13,6 +13,13 @@ import (
 )
 
 func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connectionState, store stores.Store) {
+	write := func(messageType string, params ...interface{}) {
+		response := lib_nostr.BuildResponse(messageType, params)
+		if len(response) > 0 {
+			handleIncomingMessage(c, response)
+		}
+	}
+
 	// Always check if the event is from a blocked pubkey regardless of authentication
 	// Note: We use the pubkey from the event itself, not the connection state,
 	// as events could be relayed from other pubkeys or unauthenticated users
@@ -22,14 +29,21 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 			log.Printf("Error checking if pubkey is blocked: %v", err)
 		} else if isBlocked {
 			log.Printf("Rejected event from blocked pubkey: %s", env.Event.PubKey)
-			write := func(messageType string, params ...interface{}) {
-				response := lib_nostr.BuildResponse(messageType, params)
-				if len(response) > 0 {
-					handleIncomingMessage(c, response)
-				}
-			}
 			// Notify the client that their event was rejected
 			write("OK", env.Event.ID, false, "Event rejected: Pubkey is blocked")
+			return
+		}
+	}
+
+	// Check write access permissions using H.O.R.N.E.T Allowed Users system
+	if accessControl := GetAccessControl(); accessControl != nil {
+		canWrite, err := accessControl.CanWrite(env.Event.PubKey)
+		if err != nil {
+			log.Printf("Error checking write access for %s: %v", env.Event.PubKey, err)
+			// Continue on error to avoid blocking due to misconfiguration
+		} else if !canWrite {
+			log.Printf("Write access denied for pubkey: %s", env.Event.PubKey)
+			write("OK", env.Event.ID, false, "Event rejected: Write access denied")
 			return
 		}
 	}

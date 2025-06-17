@@ -386,17 +386,45 @@ func main() {
 
 	// Initialize the global subscription manager
 	log.Println("Initializing global subscription manager...")
-	var relaySettings lib.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-		log.Printf("Failed to load relay settings: %v", err)
+
+	// Load allowed users settings to get tiers (moved from relay settings)
+	var allowedUsersSettings lib.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		log.Printf("Failed to load allowed users settings, falling back to relay settings: %v", err)
+		// Fallback to relay settings for backward compatibility
+		var relaySettings lib.RelaySettings
+		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+			log.Printf("Failed to load relay settings: %v", err)
+		} else {
+			subscription.InitGlobalManager(
+				store,
+				privateKey,
+				viper.GetString("RelayDHTkey"),
+				relaySettings.SubscriptionTiers,
+			)
+			log.Println("Global subscription manager initialized successfully (from relay settings)")
+		}
 	} else {
+		// Use tiers from allowed users settings (new location)
 		subscription.InitGlobalManager(
 			store,
 			privateKey,
 			viper.GetString("RelayDHTkey"),
-			relaySettings.SubscriptionTiers,
+			allowedUsersSettings.Tiers,
 		)
-		log.Println("Global subscription manager initialized successfully")
+		log.Println("Global subscription manager initialized successfully (from allowed users settings)")
+	}
+
+	// Initialize the global access control
+	log.Println("Initializing global access control...")
+	if statsStore := store.GetStatsStore(); statsStore != nil {
+		if err := ws.InitializeAccessControl(statsStore); err != nil {
+			log.Printf("Failed to initialize access control: %v", err)
+		} else {
+			log.Println("Global access control initialized successfully")
+		}
+	} else {
+		log.Printf("Warning: Statistics store not available, access control not initialized")
 	}
 
 	// Create and store kind 411 event

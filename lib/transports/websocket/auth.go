@@ -78,6 +78,19 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
+	// Check read access permissions using H.O.R.N.E.T Allowed Users system
+	if accessControl := GetAccessControl(); accessControl != nil {
+		canRead, err := accessControl.CanRead(env.Event.PubKey)
+		if err != nil {
+			log.Printf("Error checking read access for %s: %v", env.Event.PubKey, err)
+			// Continue on error to avoid blocking due to misconfiguration
+		} else if !canRead {
+			log.Printf("Read access denied for pubkey: %s", env.Event.PubKey)
+			write("OK", env.Event.ID, false, "Authentication rejected: Read access denied")
+			return
+		}
+	}
+
 	// Create user session
 	if err := createUserSession(env.Event.PubKey, env.Event.Sig); err != nil {
 		log.Printf("Failed to create session for %s: %v", env.Event.PubKey, err)
