@@ -366,3 +366,8 @@ func (ac *AccessControl) GetAccessSummary() map[string]interface{} {
 
 	return summary
 }
+
+// GetSettings returns the current access control settings
+func (ac *AccessControl) GetSettings() *types.AllowedUsersSettings {
+	return ac.settings
+}

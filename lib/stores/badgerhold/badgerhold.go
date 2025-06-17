@@ -25,6 +25,7 @@ import (
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 
 	"github.com/timshannon/badgerhold/v4"
 )
@@ -710,12 +711,26 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 	// Extract image URLs from the event using our image extractor
 	imageURLs := ExtractImageURLsFromEvent(ev)
 	if len(imageURLs) > 0 {
-		// This event contains images, add it to the pending moderation queue
-		log.Printf("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
-		err = store.AddToPendingModeration(ev.ID, imageURLs)
-		if err != nil {
-			// Log the error but don't fail the operation
-			log.Printf("Failed to add event %s to pending moderation: %v", ev.ID, err)
+		// Check if we should bypass moderation for exclusive mode
+		if ac := websocket.GetAccessControl(); ac != nil {
+			if settings := ac.GetSettings(); settings != nil && strings.ToLower(settings.Mode) == "exclusive" {
+				log.Printf("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
+				// Skip moderation entirely for exclusive mode
+			} else {
+				// Continue with moderation for free and paid modes
+				log.Printf("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
+				err = store.AddToPendingModeration(ev.ID, imageURLs)
+				if err != nil {
+					log.Printf("Failed to add event %s to pending moderation: %v", ev.ID, err)
+				}
+			}
+		} else {
+			// Fallback to current behavior if access control not available
+			log.Printf("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
+			err = store.AddToPendingModeration(ev.ID, imageURLs)
+			if err != nil {
+				log.Printf("Failed to add event %s to pending moderation: %v", ev.ID, err)
+			}
 		}
 	}
 
