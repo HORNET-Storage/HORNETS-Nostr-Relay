@@ -110,11 +110,16 @@ func updateConfigSettings(c *fiber.Ctx, store stores.Store) error {
 	// Run any post-update hooks
 	if hook, hasHook := settingsUpdateHooks[groupName]; hasHook {
 		if err := hook(settings, store); err != nil {
-			return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
 		}
 	}
 
-	return c.SendStatus(fiber.StatusOK)
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Settings updated successfully",
+	})
 }
 
 // fetchSettingsFromViper retrieves settings for a group from Viper
