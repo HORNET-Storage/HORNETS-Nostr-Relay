@@ -9,6 +9,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
@@ -395,63 +396,30 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Add detailed logging
 		addLogging(&request, connPubkey)
 
-		// Check read access permissions based on allowed_users settings
-		var allowedUsersSettings lib.AllowedUsersSettings
-		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
-			log.Printf("Error loading allowed users settings: %v", err)
-			// If we can't load settings, default to allowing access for backward compatibility
-		} else if allowedUsersSettings.ReadAccess.Enabled {
-			// Check if read access is restricted
-			if allowedUsersSettings.ReadAccess.Scope == "allowed_users" {
-				// In exclusive mode with read restricted to allowed users
+		// Check read access permissions using the global access control system
+		accessControl := websocket.GetAccessControl()
+		if accessControl != nil {
+			// Check if user has read access
+			canRead, err := accessControl.CanRead(connPubkey)
+			if err != nil {
+				log.Printf(ColorRed+"[ACCESS CONTROL] Error checking read permissions: %v"+ColorReset, err)
+				write("NOTICE", "Read access denied: Permission check failed")
+				return
+			}
+
+			if !canRead {
+				// Determine the specific reason for denial
 				if connPubkey == "" {
 					log.Printf(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
 					write("NOTICE", "Read access denied: Authentication required")
-					return
-				}
-
-				// Check if the authenticated user is in the allowed read list
-				isAllowed, err := store.GetStatsStore().IsNpubInAllowedReadList(connPubkey)
-				if err != nil {
-					log.Printf(ColorRed+"[ACCESS CONTROL] Error checking read permissions for %s: %v"+ColorReset, connPubkey, err)
-					write("NOTICE", "Read access denied: Permission check failed")
-					return
-				}
-
-				if !isAllowed {
+				} else {
 					log.Printf(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
 					write("NOTICE", "Read access denied: User not in allowed list")
-					return
 				}
-
-				log.Printf(ColorGreen+"[ACCESS CONTROL] Read access granted for allowed user: %s"+ColorReset, connPubkey)
-			} else if allowedUsersSettings.ReadAccess.Scope == "paid_users" {
-				// In paid mode with read restricted to paid users
-				if connPubkey == "" {
-					log.Printf(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user (paid mode)" + ColorReset)
-					write("NOTICE", "Read access denied: Authentication required for paid access")
-					return
-				}
-
-				// Check if user has active subscription
-				subscriber, err := store.GetStatsStore().GetPaidSubscriberByNpub(connPubkey)
-				if err != nil {
-					log.Printf(ColorRed+"[ACCESS CONTROL] Error checking subscription for %s: %v"+ColorReset, connPubkey, err)
-					write("NOTICE", "Read access denied: Subscription check failed")
-					return
-				}
-
-				if subscriber == nil {
-					log.Printf(ColorRed+"[ACCESS CONTROL] Read access denied: User %s has no active subscription"+ColorReset, connPubkey)
-					write("NOTICE", "Read access denied: Active subscription required")
-					return
-				}
-
-				log.Printf(ColorGreen+"[ACCESS CONTROL] Read access granted for subscribed user: %s"+ColorReset, connPubkey)
-			} else {
-				// Scope is "all_users" - allow all access
-				log.Printf(ColorGreen + "[ACCESS CONTROL] Read access open to all users" + ColorReset)
+				return
 			}
+
+			log.Printf(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
 		}
 
 		// Apply mute word filtering if the user is authenticated
