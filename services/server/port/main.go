@@ -295,6 +295,61 @@ func generateDHTKey(privateKeyHex string) (string, error) {
 	return dhtKey, nil
 }
 
+// migrateSubscriptionTiers migrates subscription tiers from relay_settings to allowed_users
+func migrateSubscriptionTiers() {
+	var relaySettings lib.RelaySettings
+	var allowedUsersSettings lib.AllowedUsersSettings
+
+	// Load current settings
+	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
+		log.Printf("Failed to load relay settings for migration: %v", err)
+		return
+	}
+
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		log.Printf("Failed to load allowed users settings for migration: %v", err)
+		return
+	}
+
+	// Check if we need to migrate
+	needsMigration := false
+
+	// If relay_settings has tiers but allowed_users doesn't, migrate
+	if len(relaySettings.SubscriptionTiers) > 0 && len(allowedUsersSettings.Tiers) == 0 {
+		log.Println("Migrating subscription tiers from relay_settings to allowed_users...")
+		allowedUsersSettings.Tiers = relaySettings.SubscriptionTiers
+		needsMigration = true
+	}
+
+	// If relay_settings has free tier settings but allowed_users is in paid mode without tiers
+	if relaySettings.FreeTierEnabled && allowedUsersSettings.Mode == "paid" && len(allowedUsersSettings.Tiers) == 0 {
+		log.Println("Setting default tiers for allowed_users...")
+		// Use the default tiers from init
+		allowedUsersSettings.Tiers = []lib.SubscriptionTier{
+			{DataLimit: "1 GB per month", Price: "1000"},
+			{DataLimit: "5 GB per month", Price: "5000"},
+			{DataLimit: "10 GB per month", Price: "10000"},
+		}
+		needsMigration = true
+	}
+
+	if needsMigration {
+		// Save the migrated settings
+		viper.Set("allowed_users", allowedUsersSettings)
+
+		// Clear subscription_tiers from relay_settings to avoid confusion
+		relaySettings.SubscriptionTiers = nil
+		viper.Set("relay_settings.subscription_tiers", nil)
+
+		// Write config
+		if err := viper.WriteConfig(); err != nil {
+			log.Printf("Failed to write migrated config: %v", err)
+		} else {
+			log.Println("Successfully migrated subscription tiers to allowed_users")
+		}
+	}
+}
+
 func main() {
 	ctx := context.Background()
 	wg := new(sync.WaitGroup)
@@ -412,36 +467,26 @@ func main() {
 		log.Println("Image moderation system is disabled")
 	}
 
+	// Migrate subscription tiers from relay_settings to allowed_users if needed
+	migrateSubscriptionTiers()
+
 	// Initialize the global subscription manager
 	log.Println("Initializing global subscription manager...")
 
-	// Load allowed users settings to get tiers (moved from relay settings)
+	// Load allowed users settings to get tiers (primary location)
 	var allowedUsersSettings lib.AllowedUsersSettings
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
-		log.Printf("Failed to load allowed users settings, falling back to relay settings: %v", err)
-		// Fallback to relay settings for backward compatibility
-		var relaySettings lib.RelaySettings
-		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-			log.Printf("Failed to load relay settings: %v", err)
-		} else {
-			subscription.InitGlobalManager(
-				store,
-				privateKey,
-				viper.GetString("RelayDHTkey"),
-				relaySettings.SubscriptionTiers,
-			)
-			log.Println("Global subscription manager initialized successfully (from relay settings)")
-		}
-	} else {
-		// Use tiers from allowed users settings (new location)
-		subscription.InitGlobalManager(
-			store,
-			privateKey,
-			viper.GetString("RelayDHTkey"),
-			allowedUsersSettings.Tiers,
-		)
-		log.Println("Global subscription manager initialized successfully (from allowed users settings)")
+		log.Printf("Failed to load allowed users settings: %v", err)
 	}
+
+	// Initialize subscription manager with tiers from allowed_users
+	subscription.InitGlobalManager(
+		store,
+		privateKey,
+		viper.GetString("RelayDHTkey"),
+		allowedUsersSettings.Tiers,
+	)
+	log.Println("Global subscription manager initialized successfully")
 
 	// Initialize the global access control
 	log.Println("Initializing global access control...")

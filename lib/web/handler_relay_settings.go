@@ -52,8 +52,14 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to fetch settings")
 	}
 
+	// Load current allowed users settings to compare tiers
+	var currentAllowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &currentAllowedUsersSettings); err != nil {
+		log.Printf("Error unmarshaling allowed users settings: %s", err)
+	}
+
 	// Check if tiers or free tier settings have changed
-	needsKind411Update := tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers) ||
+	needsKind411Update := tiersChanged(currentAllowedUsersSettings.Tiers, relaySettings.SubscriptionTiers) ||
 		currentRelaySettings.FreeTierEnabled != relaySettings.FreeTierEnabled ||
 		currentRelaySettings.FreeTierLimit != relaySettings.FreeTierLimit
 
@@ -66,7 +72,24 @@ func updateRelaySettings(c *fiber.Ctx, store stores.Store) error {
 	relaySettings.LastUpdated = time.Now().Unix()
 	log.Printf("Setting LastUpdated timestamp to %d", relaySettings.LastUpdated)
 
-	// Store new settings first
+	// If subscription tiers are included in the update, also save them to allowed_users
+	if len(relaySettings.SubscriptionTiers) > 0 {
+		var allowedUsersSettings types.AllowedUsersSettings
+		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+			log.Printf("Error loading allowed users settings for tier update: %s", err)
+		} else {
+			// Update tiers in allowed_users (the new canonical location)
+			allowedUsersSettings.Tiers = relaySettings.SubscriptionTiers
+			allowedUsersSettings.LastUpdated = time.Now().Unix()
+			viper.Set("allowed_users", allowedUsersSettings)
+			log.Println("Updated subscription tiers in allowed_users settings")
+		}
+
+		// Clear subscription_tiers from relay_settings to avoid duplication
+		relaySettings.SubscriptionTiers = nil
+	}
+
+	// Store new settings
 	viper.Set("relay_settings", relaySettings)
 	if err := viper.WriteConfig(); err != nil {
 		log.Printf("Error writing config: %s", err)
@@ -137,14 +160,21 @@ func getRelaySettings(c *fiber.Ctx) error {
 	if relaySettings.Chunked == nil {
 		relaySettings.Chunked = []string{}
 	}
-	// Initialize subscription tiers if nil
-	if relaySettings.SubscriptionTiers == nil {
-		log.Println("SubscriptionTiers is nil.")
+
+	// Get subscription tiers from allowed_users instead of relay_settings
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		log.Printf("Error unmarshaling allowed users settings: %s", err)
+		// Fall back to default tiers if allowed_users is not configured
 		relaySettings.SubscriptionTiers = []types.SubscriptionTier{
 			{DataLimit: "1 GB per month", Price: "10000"},
 			{DataLimit: "5 GB per month", Price: "40000"},
 			{DataLimit: "10 GB per month", Price: "70000"},
 		}
+	} else {
+		// Use tiers from allowed_users (the new canonical location)
+		relaySettings.SubscriptionTiers = allowedUsersSettings.Tiers
+		log.Printf("Using subscription tiers from allowed_users: %+v", relaySettings.SubscriptionTiers)
 	}
 
 	if relaySettings.FreeTierLimit == "" {

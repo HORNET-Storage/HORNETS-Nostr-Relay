@@ -7,7 +7,57 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
+	"github.com/nbd-wtf/go-nostr/nip19"
 )
+
+// normalizePubkey converts both npub and hex formats to a consistent format for comparison
+// It tries both the input and the converted format when checking the database
+func normalizePubkey(pubkey string) (hex string, npub string, err error) {
+	if strings.HasPrefix(pubkey, "npub1") {
+		// Convert npub to hex
+		_, hexBytes, err := nip19.Decode(pubkey)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid npub format: %v", err)
+		}
+		return fmt.Sprintf("%x", hexBytes), pubkey, nil
+	} else if len(pubkey) == 64 {
+		// Assume it's hex, convert to npub
+		npubStr, err := nip19.EncodePublicKey(pubkey)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid hex format: %v", err)
+		}
+		return pubkey, npubStr, nil
+	}
+
+	return "", "", fmt.Errorf("invalid pubkey format: must be npub1... or 64-char hex")
+}
+
+// checkBothFormats checks the database using both npub and hex formats
+func (ac *AccessControl) checkBothFormats(pubkey string, checkFunc func(string) (bool, error)) (bool, error) {
+	hex, npub, err := normalizePubkey(pubkey)
+	if err != nil {
+		return false, err
+	}
+
+	log.Printf("[ACCESS DEBUG] Checking pubkey in both formats - hex: %s, npub: %s", hex, npub)
+
+	// Try hex format first
+	allowed, err := checkFunc(hex)
+	if err == nil && allowed {
+		log.Printf("[ACCESS DEBUG] Found match using hex format: %s", hex)
+		return true, nil
+	}
+
+	// Try npub format
+	allowed, err = checkFunc(npub)
+	if err == nil && allowed {
+		log.Printf("[ACCESS DEBUG] Found match using npub format: %s", npub)
+		return true, nil
+	}
+
+	log.Printf("[ACCESS DEBUG] No match found for either format - hex: %s, npub: %s", hex, npub)
+	return false, err
+}
 
 // AccessControl handles permission checking for H.O.R.N.E.T Allowed Users
 type AccessControl struct {
@@ -128,8 +178,8 @@ func (ac *AccessControl) canReadExclusiveMode(npub string) (bool, error) {
 		// Anyone can read (displays warning about public access)
 		return true, nil
 	case "allowed_users":
-		// Only NPUBs in the allowed read list can read
-		return ac.statsStore.IsNpubInAllowedReadList(npub)
+		// Only NPUBs in the allowed read list can read - check both formats
+		return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedReadList)
 	default:
 		log.Printf("Unknown read access scope for exclusive mode: %s", ac.settings.ReadAccess.Scope)
 		return false, nil
@@ -149,8 +199,8 @@ func (ac *AccessControl) canWritePaidMode(npub string) (bool, error) {
 }
 
 func (ac *AccessControl) canWriteExclusiveMode(npub string) (bool, error) {
-	// In exclusive mode, only NPUBs in the allowed write list can write
-	return ac.statsStore.IsNpubInAllowedWriteList(npub)
+	// In exclusive mode, only NPUBs in the allowed write list can write - check both formats
+	return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedWriteList)
 }
 
 // Mode-specific tier assignment methods
