@@ -63,6 +63,8 @@ func (store *GormStatisticsStore) Init() error {
 		&types.ModerationNotification{},
 		&types.PaymentNotification{},
 		&types.ReportNotification{}, // Add ReportNotification to be migrated
+		&types.AllowedReadNpub{},    // NEW: Add NPUB access control tables
+		&types.AllowedWriteNpub{},   // NEW: Add NPUB access control tables
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -1772,4 +1774,168 @@ func (store *GormStatisticsStore) UpdatePaidSubscriber(subscriber *types.PaidSub
 // DeletePaidSubscriber deletes a paid subscriber record by npub
 func (store *GormStatisticsStore) DeletePaidSubscriber(npub string) error {
 	return store.DB.Where("npub = ?", npub).Delete(&types.PaidSubscriber{}).Error
+}
+
+// NPUB access control management implementation
+
+// IsNpubInAllowedReadList checks if an NPUB is in the allowed read list
+func (store *GormStatisticsStore) IsNpubInAllowedReadList(npub string) (bool, error) {
+	var count int64
+	err := store.DB.Model(&types.AllowedReadNpub{}).Where("npub = ?", npub).Count(&count).Error
+	return count > 0, err
+}
+
+// IsNpubInAllowedWriteList checks if an NPUB is in the allowed write list
+func (store *GormStatisticsStore) IsNpubInAllowedWriteList(npub string) (bool, error) {
+	var count int64
+	err := store.DB.Model(&types.AllowedWriteNpub{}).Where("npub = ?", npub).Count(&count).Error
+	return count > 0, err
+}
+
+// AddNpubToReadList adds an NPUB to the allowed read list
+func (store *GormStatisticsStore) AddNpubToReadList(npub, tierName, addedBy string) error {
+	allowedNpub := types.AllowedReadNpub{
+		Npub:     npub,
+		TierName: tierName,
+		AddedBy:  addedBy,
+	}
+	return store.DB.Create(&allowedNpub).Error
+}
+
+// AddNpubToWriteList adds an NPUB to the allowed write list
+func (store *GormStatisticsStore) AddNpubToWriteList(npub, tierName, addedBy string) error {
+	allowedNpub := types.AllowedWriteNpub{
+		Npub:     npub,
+		TierName: tierName,
+		AddedBy:  addedBy,
+	}
+	return store.DB.Create(&allowedNpub).Error
+}
+
+// RemoveNpubFromReadList removes an NPUB from the allowed read list
+func (store *GormStatisticsStore) RemoveNpubFromReadList(npub string) error {
+	return store.DB.Where("npub = ?", npub).Delete(&types.AllowedReadNpub{}).Error
+}
+
+// RemoveNpubFromWriteList removes an NPUB from the allowed write list
+func (store *GormStatisticsStore) RemoveNpubFromWriteList(npub string) error {
+	return store.DB.Where("npub = ?", npub).Delete(&types.AllowedWriteNpub{}).Error
+}
+
+// GetAllowedReadNpubs retrieves paginated allowed read NPUBs
+func (store *GormStatisticsStore) GetAllowedReadNpubs(page, pageSize int) ([]types.AllowedReadNpub, *types.PaginationMetadata, error) {
+	var total int64
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 50
+	}
+
+	offset := (page - 1) * pageSize
+
+	// Count total records
+	if err := store.DB.Model(&types.AllowedReadNpub{}).Count(&total).Error; err != nil {
+		return nil, nil, err
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+
+	// Get paginated records
+	var npubs []types.AllowedReadNpub
+	if err := store.DB.Order("added_at DESC").Limit(pageSize).Offset(offset).Find(&npubs).Error; err != nil {
+		return nil, nil, err
+	}
+
+	metadata := &types.PaginationMetadata{
+		CurrentPage: page,
+		PageSize:    pageSize,
+		TotalItems:  total,
+		TotalPages:  totalPages,
+		HasNext:     page < totalPages,
+		HasPrevious: page > 1,
+	}
+
+	return npubs, metadata, nil
+}
+
+// GetAllowedWriteNpubs retrieves paginated allowed write NPUBs
+func (store *GormStatisticsStore) GetAllowedWriteNpubs(page, pageSize int) ([]types.AllowedWriteNpub, *types.PaginationMetadata, error) {
+	var total int64
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 50
+	}
+
+	offset := (page - 1) * pageSize
+
+	// Count total records
+	if err := store.DB.Model(&types.AllowedWriteNpub{}).Count(&total).Error; err != nil {
+		return nil, nil, err
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
+
+	// Get paginated records
+	var npubs []types.AllowedWriteNpub
+	if err := store.DB.Order("added_at DESC").Limit(pageSize).Offset(offset).Find(&npubs).Error; err != nil {
+		return nil, nil, err
+	}
+
+	metadata := &types.PaginationMetadata{
+		CurrentPage: page,
+		PageSize:    pageSize,
+		TotalItems:  total,
+		TotalPages:  totalPages,
+		HasNext:     page < totalPages,
+		HasPrevious: page > 1,
+	}
+
+	return npubs, metadata, nil
+}
+
+// GetNpubTierFromReadList gets the tier for an NPUB from the read list
+func (store *GormStatisticsStore) GetNpubTierFromReadList(npub string) (string, error) {
+	var allowedNpub types.AllowedReadNpub
+	err := store.DB.Where("npub = ?", npub).First(&allowedNpub).Error
+	if err != nil {
+		return "", err
+	}
+	return allowedNpub.TierName, nil
+}
+
+// GetNpubTierFromWriteList gets the tier for an NPUB from the write list
+func (store *GormStatisticsStore) GetNpubTierFromWriteList(npub string) (string, error) {
+	var allowedNpub types.AllowedWriteNpub
+	err := store.DB.Where("npub = ?", npub).First(&allowedNpub).Error
+	if err != nil {
+		return "", err
+	}
+	return allowedNpub.TierName, nil
+}
+
+// BulkAddNpubsToReadList adds multiple NPUBs to the read list in a batch
+func (store *GormStatisticsStore) BulkAddNpubsToReadList(npubs []types.AllowedReadNpub) error {
+	return store.DB.Transaction(func(tx *gorm.DB) error {
+		for _, npub := range npubs {
+			if err := tx.Create(&npub).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// BulkAddNpubsToWriteList adds multiple NPUBs to the write list in a batch
+func (store *GormStatisticsStore) BulkAddNpubsToWriteList(npubs []types.AllowedWriteNpub) error {
+	return store.DB.Transaction(func(tx *gorm.DB) error {
+		for _, npub := range npubs {
+			if err := tx.Create(&npub).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

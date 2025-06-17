@@ -64,3 +64,27 @@ type GeneralSettings struct {
 	ServiceTag   string `json:"service_tag" mapstructure:"service_tag"`
 	RelayStatsDB string `json:"relay_stats_db" mapstructure:"relay_stats_db"`
 }
+
+// AllowedUsersSettings represents the unified access control configuration
+type AllowedUsersSettings struct {
+	Mode        string             `json:"mode" mapstructure:"mode"` // "free", "paid", "exclusive"
+	ReadAccess  ReadAccessConfig   `json:"read_access" mapstructure:"read_access"`
+	WriteAccess WriteAccessConfig  `json:"write_access" mapstructure:"write_access"`
+	Tiers       []SubscriptionTier `json:"tiers" mapstructure:"tiers"` // Moved from RelaySettings
+	LastUpdated int64              `json:"last_updated" mapstructure:"last_updated"`
+}
+
+// ReadAccessConfig represents read access permissions
+type ReadAccessConfig struct {
+	Enabled bool   `json:"enabled" mapstructure:"enabled"`
+	Scope   string `json:"scope" mapstructure:"scope"` // "all_users", "paid_users", "allowed_users"
+}
+
+// WriteAccessConfig represents write access permissions
+type WriteAccessConfig struct {
+	Enabled bool `json:"enabled" mapstructure:"enabled"`
+	// Scope is mode-dependent:
+	// Free: "all_users" when enabled
+	// Paid: "paid_users" when enabled
+	// Exclusive: "allowed_users" when enabled
+}
