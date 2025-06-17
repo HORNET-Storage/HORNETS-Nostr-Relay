@@ -96,7 +96,7 @@ func (ac *AccessControl) GetUserTier(npub string) (string, error) {
 
 // Mode-specific read access methods
 
-func (ac *AccessControl) canReadFreeMode(npub string) (bool, error) {
+func (ac *AccessControl) canReadFreeMode(_ string) (bool, error) {
 	// In free mode, read access scope determines permissions
 	switch strings.ToLower(ac.settings.ReadAccess.Scope) {
 	case "all_users", "":
@@ -138,7 +138,7 @@ func (ac *AccessControl) canReadExclusiveMode(npub string) (bool, error) {
 
 // Mode-specific write access methods
 
-func (ac *AccessControl) canWriteFreeMode(npub string) (bool, error) {
+func (ac *AccessControl) canWriteFreeMode(_ string) (bool, error) {
 	// In free mode, write access is open to all users when enabled
 	return true, nil
 }
@@ -155,7 +155,7 @@ func (ac *AccessControl) canWriteExclusiveMode(npub string) (bool, error) {
 
 // Mode-specific tier assignment methods
 
-func (ac *AccessControl) getUserTierFreeMode(npub string) (string, error) {
+func (ac *AccessControl) getUserTierFreeMode(_ string) (string, error) {
 	// In free mode, tiers are assigned based on free tier configuration
 	// For now, return the first available free tier or "basic"
 	if len(ac.settings.Tiers) > 0 {
