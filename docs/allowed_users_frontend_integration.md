@@ -39,35 +39,99 @@ The Allowed Users page features three distinct operational modes with a consiste
 
 **Endpoint**: `/api/settings/allowed_users`
 
-```javascript
-// GET - Retrieve current settings
-const response = await fetch('/api/settings/allowed_users');
-const data = await response.json();
-const settings = data.allowed_users;
+The handler in `lib/web/handler_config_settings.go` supports both flat and nested formats:
 
-// POST - Update settings
+#### Flat Format (Compatible with existing frontend patterns):
+```javascript
+// POST - Update settings using flat format
+await fetch('/api/settings/allowed_users', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    "allowed_users_mode": "paid",
+    "allowed_users_read_access": {
+      "enabled": true,
+      "scope": "all_users"
+    },
+    "allowed_users_write_access": {
+      "enabled": true,
+      "scope": "paid_users"
+    },
+    "allowed_users_tiers": [
+      {
+        "datalimit": "1 GB per month",
+        "price": "1000"
+      },
+      {
+        "datalimit": "5 GB per month", 
+        "price": "5000"
+      }
+    ]
+  })
+});
+```
+
+#### Nested Format (Alternative approach):
+```javascript
+// POST - Update settings using nested format
 await fetch('/api/settings/allowed_users', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     allowed_users: {
-      mode: "free", // "free", "paid", "exclusive"
+      mode: "paid", // "free", "paid", "exclusive"
       read_access: {
         enabled: true,
         scope: "all_users" // "all_users", "paid_users", "allowed_users"
       },
       write_access: {
         enabled: true,
-        scope: "allowed_users" // "paid_users", "allowed_users"
+        scope: "paid_users" // "paid_users", "allowed_users"
       },
       tiers: [
-        { data_limit: "1 GB per month", price: "1000" },
-        { data_limit: "5 GB per month", price: "5000" }
+        { datalimit: "1 GB per month", price: "1000" },
+        { datalimit: "5 GB per month", price: "5000" }
       ]
     }
   })
 });
 ```
+
+#### GET Response Format:
+```javascript
+// GET - Retrieve current settings
+const response = await fetch('/api/settings/allowed_users');
+const data = await response.json();
+// Returns nested format:
+const settings = data.allowed_users;
+/* Example response:
+{
+  "allowed_users": {
+    "mode": "paid",
+    "read_access": {
+      "enabled": true,
+      "scope": "all_users"
+    },
+    "write_access": {
+      "enabled": true,
+      "scope": "paid_users"
+    },
+    "tiers": [
+      {
+        "datalimit": "1 GB per month",
+        "price": "1000"
+      }
+    ],
+    "last_updated": 1672531200
+  }
+}
+*/
+```
+
+**Important Field Naming:**
+- Use `"datalimit"` (no underscore) - matches existing relay settings format
+- Use `"price"` (string format for satoshi amounts)
+- Both formats are supported for updates, but GET always returns nested format
 
 ### 2. NPUB Management
 
