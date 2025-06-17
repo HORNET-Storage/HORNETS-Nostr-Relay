@@ -145,6 +145,34 @@ func init() {
 	}
 	viper.SetDefault("wallet_api_key", apiKey)
 
+	// Set default allowed users settings (defaults to paid mode for security)
+	viper.SetDefault("allowed_users", map[string]interface{}{
+		"mode": "paid", // Default to paid mode for security
+		"read_access": map[string]interface{}{
+			"enabled": true,
+			"scope":   "all_users", // Allow public reading by default
+		},
+		"write_access": map[string]interface{}{
+			"enabled": true,
+			"scope":   "paid_users", // Restrict writing to paid users
+		},
+		"tiers": []map[string]interface{}{
+			{
+				"data_limit": "1 GB per month",
+				"price":      "1000", // 1000 sats
+			},
+			{
+				"data_limit": "5 GB per month",
+				"price":      "5000", // 5000 sats
+			},
+			{
+				"data_limit": "10 GB per month",
+				"price":      "10000", // 10000 sats
+			},
+		},
+		"last_updated": 0,
+	})
+
 	// Free tier settings are only used from relay_settings now
 	viper.SetDefault("freeTierEnabled", true)
 	viper.SetDefault("freeTierLimit", "100 MB per month")
