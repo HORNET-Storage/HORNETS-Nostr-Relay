@@ -227,6 +227,29 @@ func StartServer(store stores.Store) error {
 		return unblockPubkey(c, store)
 	})
 
+	// Allowed users NPUB management routes
+	secured.Get("/allowed-npubs/read", func(c *fiber.Ctx) error {
+		return GetAllowedReadNpubs(c, store)
+	})
+	secured.Get("/allowed-npubs/write", func(c *fiber.Ctx) error {
+		return GetAllowedWriteNpubs(c, store)
+	})
+	secured.Post("/allowed-npubs/read", func(c *fiber.Ctx) error {
+		return AddAllowedReadNpub(c, store)
+	})
+	secured.Post("/allowed-npubs/write", func(c *fiber.Ctx) error {
+		return AddAllowedWriteNpub(c, store)
+	})
+	secured.Delete("/allowed-npubs/read/:npub", func(c *fiber.Ctx) error {
+		return RemoveAllowedReadNpub(c, store)
+	})
+	secured.Delete("/allowed-npubs/write/:npub", func(c *fiber.Ctx) error {
+		return RemoveAllowedWriteNpub(c, store)
+	})
+	secured.Post("/allowed-npubs/bulk-import", func(c *fiber.Ctx) error {
+		return BulkImportNpubs(c, store)
+	})
+
 	port := viper.GetString("port")
 	p, err := strconv.Atoi(port)
 	if err != nil {

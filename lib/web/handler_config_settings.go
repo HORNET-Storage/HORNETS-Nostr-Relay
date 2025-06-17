@@ -12,6 +12,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/gofiber/fiber/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/viper"
@@ -28,11 +29,13 @@ var settingsRegistry = map[string]interface{}{
 	"wallet":           types.WalletSettings{},
 	"general":          types.GeneralSettings{},
 	"query_cache":      map[string]interface{}{},
+	"allowed_users":    types.AllowedUsersSettings{},
 }
 
 // Settings hooks for groups that need special handling after update
 var settingsUpdateHooks = map[string]func(interface{}, stores.Store) error{
 	"relay_settings": handleRelaySettingsUpdate,
+	"allowed_users":  handleAllowedUsersUpdate,
 	// Add more hooks as needed
 }
 
@@ -288,6 +291,27 @@ func handleRelaySettingsUpdate(settings interface{}, store stores.Store) error {
 			return fmt.Errorf("error creating kind 411 event: %s", err)
 		}
 	}
+
+	return nil
+}
+
+// handleAllowedUsersUpdate implements special handling for allowed users settings
+func handleAllowedUsersUpdate(settings interface{}, store stores.Store) error {
+	allowedUsersSettings, ok := settings.(types.AllowedUsersSettings)
+	if !ok {
+		return fmt.Errorf("invalid allowed users settings type")
+	}
+
+	// Update the global access control settings
+	if ws.GetAccessControl() != nil {
+		if err := ws.UpdateAccessControlSettings(&allowedUsersSettings); err != nil {
+			return fmt.Errorf("failed to update access control settings: %v", err)
+		}
+		log.Printf("Access control settings updated to %s mode", allowedUsersSettings.Mode)
+	}
+
+	// Update timestamp
+	allowedUsersSettings.LastUpdated = time.Now().Unix()
 
 	return nil
 }
