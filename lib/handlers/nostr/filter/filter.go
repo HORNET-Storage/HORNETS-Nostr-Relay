@@ -175,10 +175,10 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			if err != nil {
 				log.Printf("Error loading private key: %v", err)
 			} else {
-				// Load relay settings
-				var settings lib.RelaySettings
-				if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-					log.Printf("Error loading relay settings: %v", err)
+				// Load allowed users settings to get tiers
+				var allowedUsersSettings lib.AllowedUsersSettings
+				if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+					log.Printf("Error loading allowed users settings: %v", err)
 				}
 
 				// Get relay DHT key
@@ -189,7 +189,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 					store,
 					relayPrivKey,
 					relayDHTKey,
-					settings.SubscriptionTiers,
+					allowedUsersSettings.Tiers,
 				)
 			}
 		}

@@ -222,9 +222,20 @@ func getSubscribersFromEvents(c *fiber.Ctx, store stores.Store) error {
 			continue
 		}
 
-		// Skip if it matches the free tier limit
-		if relaySettings.FreeTierEnabled && subscriptionTier == relaySettings.FreeTierLimit {
-			continue
+		// Load allowed users settings to check if this is a free tier
+		var allowedUsersSettings lib.AllowedUsersSettings
+		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err == nil {
+			// Skip if it matches a free tier (price = "0")
+			isFreeTier := false
+			for _, tier := range allowedUsersSettings.Tiers {
+				if tier.DataLimit == subscriptionTier && tier.Price == "0" {
+					isFreeTier = true
+					break
+				}
+			}
+			if isFreeTier {
+				continue
+			}
 		}
 
 		// Get the pubkey from the p tag

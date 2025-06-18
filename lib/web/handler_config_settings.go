@@ -163,9 +163,31 @@ func fetchSettingsFromViper(groupName string) interface{} {
 
 // storeSettingsInViper stores settings for a group in Viper
 func storeSettingsInViper(groupName string, settings interface{}) error {
-	// For grouped settings like relay_settings
-	if groupName == "relay_settings" {
+	log.Printf("[CONFIG DEBUG] Storing settings for group: %s", groupName)
+	
+	// For grouped settings like relay_settings and allowed_users
+	if groupName == "relay_settings" || groupName == "allowed_users" {
+		log.Printf("[CONFIG DEBUG] Using nested object storage for %s", groupName)
 		viper.Set(groupName, settings)
+		
+		// Clean up any existing flat keys for allowed_users to prevent conflicts
+		if groupName == "allowed_users" {
+			legacyKeys := []string{
+				"allowed_users_mode",
+				"allowed_users_read_access",
+				"allowed_users_write_access", 
+				"allowed_users_tiers",
+				"allowed_users_last_updated",
+			}
+			
+			for _, key := range legacyKeys {
+				if viper.IsSet(key) {
+					log.Printf("[CONFIG DEBUG] Removing legacy flat key during save: %s", key)
+					viper.Set(key, nil)
+				}
+			}
+		}
+		
 		return viper.WriteConfig()
 	}
 
@@ -198,13 +220,17 @@ func storeSettingsInViper(groupName string, settings interface{}) error {
 	}
 
 	// For other groups with prefixed keys
+	log.Printf("[CONFIG DEBUG] Using flat key storage for group: %s", groupName)
 	prefix := groupName + "_"
 	for key, value := range settingsMap {
 		// Check if the key already has the prefix to avoid double prefixing
 		if strings.HasPrefix(key, prefix) {
+			log.Printf("[CONFIG DEBUG] Setting flat key (pre-prefixed): %s", key)
 			viper.Set(key, value)
 		} else {
-			viper.Set(prefix+key, value)
+			flatKey := prefix + key
+			log.Printf("[CONFIG DEBUG] Setting flat key: %s", flatKey)
+			viper.Set(flatKey, value)
 		}
 	}
 
@@ -259,22 +285,59 @@ func convertToMap(obj interface{}) (map[string]interface{}, error) {
 
 // handleRelaySettingsUpdate implements special handling for relay settings
 func handleRelaySettingsUpdate(settings interface{}, store stores.Store) error {
-	relaySettings, ok := settings.(types.RelaySettings)
+	_, ok := settings.(types.RelaySettings)
 	if !ok {
 		return fmt.Errorf("invalid relay settings type")
 	}
 
-	// Get current settings to check if tiers have changed
-	var currentRelaySettings types.RelaySettings
-	err := viper.UnmarshalKey("relay_settings", &currentRelaySettings)
-	if err != nil {
-		return fmt.Errorf("error unmarshaling relay settings: %s", err)
+	// Note: Tier change detection has been moved to handleAllowedUsersUpdate
+	// Relay settings no longer handle subscription tiers
+
+	return nil
+}
+
+// tiersChanged compares existing tiers with new tiers to detect changes
+func tiersChanged(existing, new []types.SubscriptionTier) bool {
+	if len(existing) != len(new) {
+		return true
 	}
 
-	// Check if tiers or free tier settings have changed
-	needsKind411Update := tiersChanged(currentRelaySettings.SubscriptionTiers, relaySettings.SubscriptionTiers) ||
-		currentRelaySettings.FreeTierEnabled != relaySettings.FreeTierEnabled ||
-		currentRelaySettings.FreeTierLimit != relaySettings.FreeTierLimit
+	for i := range existing {
+		if existing[i].DataLimit != new[i].DataLimit || existing[i].Price != new[i].Price {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleAllowedUsersUpdate implements special handling for allowed users settings
+func handleAllowedUsersUpdate(settings interface{}, store stores.Store) error {
+	allowedUsersSettings, ok := settings.(types.AllowedUsersSettings)
+	if !ok {
+		return fmt.Errorf("invalid allowed users settings type")
+	}
+
+	// Get current settings to check if tiers have changed
+	var currentAllowedUsersSettings types.AllowedUsersSettings
+	err := viper.UnmarshalKey("allowed_users", &currentAllowedUsersSettings)
+	if err != nil {
+		log.Printf("Error loading current allowed users settings: %v", err)
+	}
+
+	// Check if tiers have changed
+	needsKind411Update := tiersChanged(currentAllowedUsersSettings.Tiers, allowedUsersSettings.Tiers)
+
+	// Update the global access control settings
+	if ws.GetAccessControl() != nil {
+		if err := ws.UpdateAccessControlSettings(&allowedUsersSettings); err != nil {
+			return fmt.Errorf("failed to update access control settings: %v", err)
+		}
+		log.Printf("Access control settings updated to %s mode", allowedUsersSettings.Mode)
+	}
+
+	// Update timestamp
+	allowedUsersSettings.LastUpdated = time.Now().Unix()
 
 	// Update events if tier settings have changed
 	if needsKind411Update {
@@ -296,27 +359,6 @@ func handleRelaySettingsUpdate(settings interface{}, store stores.Store) error {
 			return fmt.Errorf("error creating kind 411 event: %s", err)
 		}
 	}
-
-	return nil
-}
-
-// handleAllowedUsersUpdate implements special handling for allowed users settings
-func handleAllowedUsersUpdate(settings interface{}, store stores.Store) error {
-	allowedUsersSettings, ok := settings.(types.AllowedUsersSettings)
-	if !ok {
-		return fmt.Errorf("invalid allowed users settings type")
-	}
-
-	// Update the global access control settings
-	if ws.GetAccessControl() != nil {
-		if err := ws.UpdateAccessControlSettings(&allowedUsersSettings); err != nil {
-			return fmt.Errorf("failed to update access control settings: %v", err)
-		}
-		log.Printf("Access control settings updated to %s mode", allowedUsersSettings.Mode)
-	}
-
-	// Update timestamp
-	allowedUsersSettings.LastUpdated = time.Now().Unix()
 
 	return nil
 }

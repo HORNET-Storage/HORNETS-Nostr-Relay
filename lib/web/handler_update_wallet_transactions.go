@@ -180,9 +180,9 @@ func processTransaction(store stores.Store, subManager *subscription.Subscriptio
 		expirationDate = paidSubscriber.ExpirationDate
 	} else {
 		// Try to determine the tier based on the payment amount
-		var relaySettings types.RelaySettings
-		if err := viper.UnmarshalKey("relay_settings", &relaySettings); err == nil {
-			for _, tierInfo := range relaySettings.SubscriptionTiers {
+		var allowedUsersSettings types.AllowedUsersSettings
+		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err == nil {
+			for _, tierInfo := range allowedUsersSettings.Tiers {
 				// Extract price in satoshis
 				if price, err := strconv.ParseInt(tierInfo.Price, 10, 64); err == nil {
 					// If payment amount is within 10% of the tier price, consider it that tier
@@ -300,9 +300,16 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		return nil, fmt.Errorf("failed to load relay settings: %v", err)
 	}
 
+	// Load allowed users settings to get tiers
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		log.Printf("Failed to load allowed users settings: %v", err)
+		return nil, fmt.Errorf("failed to load allowed users settings: %v", err)
+	}
+
 	// Log the tiers for debugging
-	log.Printf("Loading subscription tiers from relay_settings: %+v", relaySettings.SubscriptionTiers)
-	for i, tier := range relaySettings.SubscriptionTiers {
+	log.Printf("Loading subscription tiers from allowed_users: %+v", allowedUsersSettings.Tiers)
+	for i, tier := range allowedUsersSettings.Tiers {
 		log.Printf("Tier %d: DataLimit='%s', Price='%s'", i, tier.DataLimit, tier.Price)
 	}
 
@@ -311,6 +318,6 @@ func initializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 		store,
 		privateKey,
 		viper.GetString("RelayDHTkey"),
-		relaySettings.SubscriptionTiers,
+		allowedUsersSettings.Tiers,
 	), nil
 }

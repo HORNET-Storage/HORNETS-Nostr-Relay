@@ -145,33 +145,8 @@ func init() {
 	}
 	viper.SetDefault("wallet_api_key", apiKey)
 
-	// Set default allowed users settings (defaults to paid mode for security)
-	viper.SetDefault("allowed_users", map[string]interface{}{
-		"mode": "paid", // Default to paid mode for security
-		"read_access": map[string]interface{}{
-			"enabled": true,
-			"scope":   "all_users", // Allow public reading by default
-		},
-		"write_access": map[string]interface{}{
-			"enabled": true,
-			"scope":   "paid_users", // Restrict writing to paid users
-		},
-		"tiers": []map[string]interface{}{
-			{
-				"data_limit": "1 GB per month",
-				"price":      "1000", // 1000 sats
-			},
-			{
-				"data_limit": "5 GB per month",
-				"price":      "5000", // 5000 sats
-			},
-			{
-				"data_limit": "10 GB per month",
-				"price":      "10000", // 10000 sats
-			},
-		},
-		"last_updated": 0,
-	})
+	// Note: Default allowed_users settings are now handled in migrateSubscriptionTiers()
+	// This prevents Viper from auto-creating flat keys like allowed_users_mode, etc.
 
 	// Free tier settings are only used from relay_settings now
 	viper.SetDefault("freeTierEnabled", true)
@@ -314,21 +289,42 @@ func migrateSubscriptionTiers() {
 	// Check if we need to migrate
 	needsMigration := false
 
-	// If relay_settings has tiers but allowed_users doesn't, migrate
-	if len(relaySettings.SubscriptionTiers) > 0 && len(allowedUsersSettings.Tiers) == 0 {
-		log.Println("Migrating subscription tiers from relay_settings to allowed_users...")
-		allowedUsersSettings.Tiers = relaySettings.SubscriptionTiers
-		needsMigration = true
-	}
+	// Migration no longer needed since SubscriptionTiers was removed from RelaySettings
+	// Just ensure default tiers are set based on mode
 
-	// If relay_settings has free tier settings but allowed_users is in paid mode without tiers
-	if relaySettings.FreeTierEnabled && allowedUsersSettings.Mode == "paid" && len(allowedUsersSettings.Tiers) == 0 {
-		log.Println("Setting default tiers for allowed_users...")
-		// Use the default tiers from init
-		allowedUsersSettings.Tiers = []lib.SubscriptionTier{
-			{DataLimit: "1 GB per month", Price: "1000"},
-			{DataLimit: "5 GB per month", Price: "5000"},
-			{DataLimit: "10 GB per month", Price: "10000"},
+	// Set up default tiers based on mode if no tiers exist
+	if len(allowedUsersSettings.Tiers) == 0 {
+		log.Printf("Setting default tiers for %s mode...", allowedUsersSettings.Mode)
+		
+		switch allowedUsersSettings.Mode {
+		case "free":
+			// Free Mode: Storage tiers with price 0 for storage management
+			allowedUsersSettings.Tiers = []lib.SubscriptionTier{
+				{DataLimit: "100 MB per month", Price: "0"},   // Basic
+				{DataLimit: "500 MB per month", Price: "0"},   // Standard
+				{DataLimit: "1 GB per month", Price: "0"},     // Premium
+			}
+		case "paid":
+			// Paid Mode: Bitcoin-gated tiers
+			allowedUsersSettings.Tiers = []lib.SubscriptionTier{
+				{DataLimit: "1 GB per month", Price: "1000"},
+				{DataLimit: "5 GB per month", Price: "5000"},
+				{DataLimit: "10 GB per month", Price: "10000"},
+			}
+		case "exclusive":
+			// Exclusive Mode: Manual tier assignment
+			allowedUsersSettings.Tiers = []lib.SubscriptionTier{
+				{DataLimit: "5 GB per month", Price: "0"},     // Basic
+				{DataLimit: "50 GB per month", Price: "0"},    // Premium
+				{DataLimit: "unlimited", Price: "0"},          // Enterprise
+			}
+		default:
+			// Default to paid mode tiers
+			allowedUsersSettings.Tiers = []lib.SubscriptionTier{
+				{DataLimit: "1 GB per month", Price: "1000"},
+				{DataLimit: "5 GB per month", Price: "5000"},
+				{DataLimit: "10 GB per month", Price: "10000"},
+			}
 		}
 		needsMigration = true
 	}
@@ -337,15 +333,30 @@ func migrateSubscriptionTiers() {
 		// Save the migrated settings
 		viper.Set("allowed_users", allowedUsersSettings)
 
-		// Clear subscription_tiers from relay_settings to avoid confusion
-		relaySettings.SubscriptionTiers = nil
+		// Clear legacy subscription_tiers from relay_settings config to avoid confusion
 		viper.Set("relay_settings.subscription_tiers", nil)
+
+		// Clean up legacy flat keys to prevent conflicts with nested object
+		legacyKeys := []string{
+			"allowed_users_mode",
+			"allowed_users_read_access",
+			"allowed_users_write_access", 
+			"allowed_users_tiers",
+			"allowed_users_last_updated",
+		}
+		
+		for _, key := range legacyKeys {
+			if viper.IsSet(key) {
+				log.Printf("Removing legacy flat key: %s", key)
+				viper.Set(key, nil)
+			}
+		}
 
 		// Write config
 		if err := viper.WriteConfig(); err != nil {
 			log.Printf("Failed to write migrated config: %v", err)
 		} else {
-			log.Println("Successfully migrated subscription tiers to allowed_users")
+			log.Println("Successfully migrated subscription tiers to allowed_users and cleaned up legacy keys")
 		}
 	}
 }

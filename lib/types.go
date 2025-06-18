@@ -241,9 +241,6 @@ type RelaySettings struct {
 	MaxFileSize         int                `json:"maxfilesize" mapstructure:"maxfilesize"`
 	MaxFileSizeUnit     string             `json:"maxfilesizeunit" mapstructure:"maxfilesizeunit"`
 	IsFileStorageActive bool               `json:"isFileStorageActive" mapstructure:"isFileStorageActive"`
-	SubscriptionTiers   []SubscriptionTier `json:"subscription_tiers" mapstructure:"subscription_tiers"`
-	FreeTierEnabled     bool               `json:"freeTierEnabled" mapstructure:"freeTierEnabled"`
-	FreeTierLimit       string             `json:"freeTierLimit" mapstructure:"freeTierLimit"`
 	ModerationMode      string             `json:"moderationMode" mapstructure:"moderationMode"` // "strict" or "passive"
 	LastUpdated         int64              `json:"lastUpdated" mapstructure:"lastUpdated"`
 	MimeTypeGroups      map[string][]string

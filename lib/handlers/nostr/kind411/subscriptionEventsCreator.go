@@ -40,15 +40,15 @@ type RelayInfo struct {
 }
 
 func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
-	var settings types.RelaySettings
+	var allowedUsersSettings types.AllowedUsersSettings
 
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
 		return err
 	}
 
 	// Transform to relay info format, excluding free tier
 	var tiers []types.SubscriptionTier
-	for _, tier := range settings.SubscriptionTiers {
+	for _, tier := range allowedUsersSettings.Tiers {
 		// Skip free tier (price = "0")
 		if tier.Price == "0" {
 			continue
