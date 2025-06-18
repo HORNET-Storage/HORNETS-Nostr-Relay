@@ -24,6 +24,7 @@ temp
 /gravitondb
 /immudb
 /hornet-storage
+/web
 
 config.json
 demo-config.json

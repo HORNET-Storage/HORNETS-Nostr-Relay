@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/nbd-wtf/go-nostr/nip19"
 )

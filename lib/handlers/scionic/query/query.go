@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/fxamacker/cbor/v2"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
+
+	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
+	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
 )
 
 func AddQueryHandler(libp2phost host.Host, store stores.Store) {
@@ -20,13 +21,13 @@ func AddQueryHandler(libp2phost host.Host, store stores.Store) {
 
 func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 	queryStreamHandler := func(stream network.Stream) {
-		enc := cbor.NewEncoder(stream)
+		ctx := context.Background()
 
-		libp2pStream := &types.Libp2pStream{Stream: stream, Ctx: context.Background()}
+		libp2pStream := libp2p_stream.New(stream, ctx)
 
-		message, err := utils.WaitForAdvancedQueryMessage(libp2pStream)
+		message, err := lib_stream.WaitForAdvancedQueryMessage(libp2pStream)
 		if err != nil {
-			utils.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", nil)
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", nil)
 
 			stream.Close()
 			return
@@ -34,7 +35,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 
 		hashes, err := store.QueryDag(message.Filter, false)
 		if err != nil {
-			utils.WriteErrorToStream(libp2pStream, "Failed to query database", nil)
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to query database", nil)
 
 			stream.Close()
 			return
@@ -46,8 +47,8 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 			Hashes: hashes,
 		}
 
-		if err := enc.Encode(&response); err != nil {
-			utils.WriteErrorToStream(libp2pStream, "Failed to encode response", nil)
+		if err := lib_stream.WriteMessageToStream(libp2pStream, response); err != nil {
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to encode response", nil)
 
 			stream.Close()
 			return

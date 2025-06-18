@@ -35,6 +35,7 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 	timeCheck := TimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !timeCheck {
 		write("OK", env.Event.ID, false, "The event creation date must be after January 1, 2019")
+		return false
 	}
 
 	// Validate the event signature
@@ -56,7 +57,7 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 func TimeCheck(eventCreatedAt int64) bool {
 	currentTime := time.Now()
 
-	return eventCreatedAt <= currentTime.Unix()
+	return eventCreatedAt <= currentTime.Add(2*time.Second).Unix()
 }
 
 func AuthTimeCheck(eventCreatedAt int64) (bool, string) {

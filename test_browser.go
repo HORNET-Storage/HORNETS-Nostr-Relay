@@ -43,7 +43,7 @@ func main() {
 
 	// Connect to the browser
 	browser := rod.New().ControlURL(url).Timeout(15 * time.Second)
-	
+
 	// Try to connect with proper error handling
 	err = browser.Connect()
 	if err != nil {

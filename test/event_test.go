@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/nbd-wtf/go-nostr"
 
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
@@ -35,7 +36,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
