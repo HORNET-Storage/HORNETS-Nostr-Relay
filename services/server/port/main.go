@@ -119,23 +119,7 @@ func init() {
 		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
 		"Chunked":          []string{},
 		"KindWhitelist":    []string{"kind0", "kind1", "kind117", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind1063"}, // Essential kinds always enabled
-		"FreeTierEnabled":  true,
-		"FreeTierLimit":    "100 MB per month",
 		"ModerationMode":   "strict", // Default moderation mode to "strict"
-		"subscription_tiers": []map[string]interface{}{
-			{
-				"DataLimit": "1 GB per month",
-				"Price":     "1000", // in sats
-			},
-			{
-				"DataLimit": "5 GB per month",
-				"Price":     "10000", // in sats
-			},
-			{
-				"DataLimit": "10 GB per month",
-				"Price":     "15000", // in sats
-			},
-		},
 	})
 
 	// Generate a random wallet API key
@@ -332,9 +316,6 @@ func migrateSubscriptionTiers() {
 	if needsMigration {
 		// Save the migrated settings
 		viper.Set("allowed_users", allowedUsersSettings)
-
-		// Clear legacy subscription_tiers from relay_settings config to avoid confusion
-		viper.Set("relay_settings.subscription_tiers", nil)
 
 		// Clean up legacy flat keys to prevent conflicts with nested object
 		legacyKeys := []string{
