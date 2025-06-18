@@ -6,30 +6,30 @@ import (
 	"strings"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/nbd-wtf/go-nostr/nip19"
 )
 
 // normalizePubkey converts both npub and hex formats to a consistent format for comparison
-// It tries both the input and the converted format when checking the database
+// It uses the signing package's robust DecodeKey function that handles both formats
 func normalizePubkey(pubkey string) (hex string, npub string, err error) {
-	if strings.HasPrefix(pubkey, "npub1") {
-		// Convert npub to hex
-		_, hexBytes, err := nip19.Decode(pubkey)
-		if err != nil {
-			return "", "", fmt.Errorf("invalid npub format: %v", err)
-		}
-		return fmt.Sprintf("%x", hexBytes), pubkey, nil
-	} else if len(pubkey) == 64 {
-		// Assume it's hex, convert to npub
-		npubStr, err := nip19.EncodePublicKey(pubkey)
-		if err != nil {
-			return "", "", fmt.Errorf("invalid hex format: %v", err)
-		}
-		return pubkey, npubStr, nil
+	// Use the signing package's DecodeKey which handles both hex and bech32
+	keyBytes, err := signing.DecodeKey(pubkey)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid pubkey format: %v", err)
 	}
 
-	return "", "", fmt.Errorf("invalid pubkey format: must be npub1... or 64-char hex")
+	// Convert to hex format
+	hexKey := fmt.Sprintf("%x", keyBytes)
+	
+	// Convert to npub format
+	npubKey, err := nip19.EncodePublicKey(hexKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encode as npub: %v", err)
+	}
+
+	return hexKey, npubKey, nil
 }
 
 // checkBothFormats checks the database using both npub and hex formats
