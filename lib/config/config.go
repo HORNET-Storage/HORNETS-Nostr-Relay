@@ -86,6 +86,7 @@ func setDefaults() {
 	viper.SetDefault("relay.supported_nips", []int{1, 2, 9, 11, 18, 23, 24, 25, 42, 45, 50, 51, 56, 57, 65, 116, 555, 888})
 	viper.SetDefault("relay.secret_key", "hornets-secret-key")
 	viper.SetDefault("relay.private_key", "")
+	viper.SetDefault("relay.public_key", "")
 	viper.SetDefault("relay.dht_key", "")
 
 	// Content filtering defaults

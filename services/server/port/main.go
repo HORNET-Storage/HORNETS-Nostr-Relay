@@ -145,8 +145,20 @@ func main() {
 			logging.Fatal("error generating or saving server private key")
 		} else {
 			viper.Set("relay.private_key", key)
-
 			serializedPrivateKey = *key
+
+			// Also derive and save the public key
+			_, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
+			if err != nil {
+				logging.Fatal("error deriving public key from generated private key")
+			}
+
+			serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+			if err != nil {
+				logging.Fatal("error serializing public key")
+			} else {
+				viper.Set("relay.public_key", serializedPublicKey)
+			}
 
 			err = config.SaveConfig()
 			if err != nil {
@@ -155,8 +167,9 @@ func main() {
 				})
 			}
 
-			logging.Info("Generated new server private key", map[string]interface{}{
+			logging.Info("Generated new server keys", map[string]interface{}{
 				"private_key": serializedPrivateKey,
+				"public_key":  serializedPublicKey,
 			})
 		}
 	}
@@ -209,6 +222,26 @@ func main() {
 	privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
 		logging.Fatal("failed to deserialize private key")
+	}
+
+	// Ensure public key is saved to config (in case it's missing)
+	existingPublicKey := viper.GetString("relay.public_key")
+	if len(existingPublicKey) <= 0 {
+		serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+		if err != nil {
+			logging.Errorf("Failed to serialize public key: %v", err)
+		} else {
+			viper.Set("relay.public_key", serializedPublicKey)
+			
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Errorf("Failed to save public key to config: %v", err)
+			} else {
+				logging.Info("Saved missing public key to configuration", map[string]interface{}{
+					"public_key": serializedPublicKey,
+				})
+			}
+		}
 	}
 
 	port := config.GetPort("hornets")
