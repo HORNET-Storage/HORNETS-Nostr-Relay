@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
+
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -145,8 +145,20 @@ func main() {
 			logging.Fatal("error generating or saving server private key")
 		} else {
 			viper.Set("relay.private_key", key)
-
 			serializedPrivateKey = *key
+
+			// Also derive and save the public key
+			_, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
+			if err != nil {
+				logging.Fatal("error deriving public key from generated private key")
+			}
+
+			serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+			if err != nil {
+				logging.Fatal("error serializing public key")
+			} else {
+				viper.Set("relay.public_key", serializedPublicKey)
+			}
 
 			err = config.SaveConfig()
 			if err != nil {
@@ -155,8 +167,9 @@ func main() {
 				})
 			}
 
-			logging.Info("Generated new server private key", map[string]interface{}{
+			logging.Info("Generated new server keys", map[string]interface{}{
 				"private_key": serializedPrivateKey,
+				"public_key":  serializedPublicKey,
 			})
 		}
 	}
@@ -183,9 +196,52 @@ func main() {
 		}
 	}
 
+	// Generate wallet API key if not set
+	walletAPIKey := viper.GetString("external_services.wallet.key")
+
+	if len(walletAPIKey) <= 0 {
+		newAPIKey, err := config.GenerateRandomAPIKey()
+		if err != nil {
+			logging.Errorf("Failed to generate wallet API key: %v", err)
+		} else {
+			viper.Set("external_services.wallet.key", newAPIKey)
+
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Fatal("Failed to save configuration", map[string]interface{}{
+					"error": err,
+				})
+			}
+
+			logging.Info("Generated new wallet API key", map[string]interface{}{
+				"wallet_api_key": newAPIKey,
+			})
+		}
+	}
+
 	privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
 		logging.Fatal("failed to deserialize private key")
+	}
+
+	// Ensure public key is saved to config (in case it's missing)
+	existingPublicKey := viper.GetString("relay.public_key")
+	if len(existingPublicKey) <= 0 {
+		serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+		if err != nil {
+			logging.Errorf("Failed to serialize public key: %v", err)
+		} else {
+			viper.Set("relay.public_key", serializedPublicKey)
+			
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Errorf("Failed to save public key to config: %v", err)
+			} else {
+				logging.Info("Saved missing public key to configuration", map[string]interface{}{
+					"public_key": serializedPublicKey,
+				})
+			}
+		}
 	}
 
 	port := config.GetPort("hornets")
@@ -488,14 +544,4 @@ func main() {
 	}()
 
 	wg.Wait()
-}
-
-// Helper function to generate a random 32-byte hexadecimal key
-func generateRandomAPIKey() (string, error) {
-	bytes := make([]byte, 32) // 32 bytes = 256 bits
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
 }

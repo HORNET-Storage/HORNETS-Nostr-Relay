@@ -27,6 +27,7 @@ temp
 /web
 
 config.json
+config.json.backup
 demo-config.json
 
 

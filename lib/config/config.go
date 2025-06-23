@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -58,6 +60,7 @@ func setDefaults() {
 	viper.SetDefault("server.web", true)
 	viper.SetDefault("server.demo", false)
 	viper.SetDefault("server.data_path", "/data")
+	viper.SetDefault("server.stats_db", "statistics.db")
 
 	// External services defaults
 	viper.SetDefault("external_services.ollama.url", "http://ollama:11434")
@@ -83,6 +86,7 @@ func setDefaults() {
 	viper.SetDefault("relay.supported_nips", []int{1, 2, 9, 11, 18, 23, 24, 25, 42, 45, 50, 51, 56, 57, 65, 116, 555, 888})
 	viper.SetDefault("relay.secret_key", "hornets-secret-key")
 	viper.SetDefault("relay.private_key", "")
+	viper.SetDefault("relay.public_key", "")
 	viper.SetDefault("relay.dht_key", "")
 
 	// Content filtering defaults
@@ -209,4 +213,14 @@ func GetExternalURL(service string) string {
 	default:
 		return ""
 	}
+}
+
+// GenerateRandomAPIKey generates a random 32-byte hexadecimal key
+func GenerateRandomAPIKey() (string, error) {
+	bytes := make([]byte, 32) // 32 bytes = 256 bits
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }

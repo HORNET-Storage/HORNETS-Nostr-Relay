@@ -23,7 +23,7 @@ func ApiKeyMiddleware(c *fiber.Ctx) error {
 		})
 	}
 
-	expectedAPIKey := viper.GetString("wallet_api_key")
+	expectedAPIKey := viper.GetString("external_services.wallet.key")
 	if apiKey != expectedAPIKey {
 		log.Println("Invalid API key")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
