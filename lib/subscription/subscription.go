@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,7 +95,7 @@ func NewSubscriptionManager(
 
 	// Log each tier in detail for debugging
 	for i, tier := range tiers {
-		log.Printf("DEBUG: Initial tier %d: MonthlyLimit='%s', PriceSats='%s'",
+		log.Printf("DEBUG: Initial tier %d: MonthlyLimit='%s', PriceSats='%d'",
 			i, tier.MonthlyLimit, tier.PriceSats)
 	}
 
@@ -108,7 +107,7 @@ func NewSubscriptionManager(
 			continue
 		}
 		validTiers = append(validTiers, tier)
-		log.Printf("Validated tier %d: MonthlyLimit='%s', PriceSats='%s'",
+		log.Printf("Validated tier %d: MonthlyLimit='%s', PriceSats='%d'",
 			i, tier.MonthlyLimit, tier.PriceSats)
 	}
 
@@ -906,7 +905,7 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 		}
 
 		PriceSats := int64(tier.PriceSats)
-		log.Printf("Checking tier: MonthlyLimit='%s', PriceSats='%s' (%d sats)",
+		log.Printf("Checking tier: MonthlyLimit='%s', PriceSats='%d' (%d sats)",
 			tier.MonthlyLimit, tier.PriceSats, PriceSats)
 
 		// Strict matching: Payment must be >= tier PriceSats exactly
@@ -920,7 +919,7 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 				PriceSats:    tier.PriceSats,
 			}
 			bestPriceSats = PriceSats
-			log.Printf("New best match: MonthlyLimit='%s', PriceSats='%s' (exact match)",
+			log.Printf("New best match: MonthlyLimit='%s', PriceSats='%d' (exact match)",
 				bestMatch.MonthlyLimit, bestMatch.PriceSats)
 		}
 	}
@@ -929,25 +928,9 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 		return nil, fmt.Errorf("no matching tier for payment of %d sats", amountSats)
 	}
 
-	log.Printf("Selected tier: MonthlyLimit='%s', PriceSats='%s'",
+	log.Printf("Selected tier: MonthlyLimit='%s', PriceSats='%d'",
 		bestMatch.MonthlyLimit, bestMatch.PriceSats)
 	return bestMatch, nil
-}
-
-// parseSats converts PriceSats string to satoshis with proper rounding
-func (m *SubscriptionManager) parseSats(PriceSats string) int64 {
-	var sats float64
-	if _, err := fmt.Sscanf(PriceSats, "%f", &sats); err != nil {
-		// Try parsing as integer if float parsing fails
-		var intSats int64
-		if _, err2 := fmt.Sscanf(PriceSats, "%d", &intSats); err2 != nil {
-			log.Printf("Warning: could not parse PriceSats '%s': %v", PriceSats, err)
-			return 0
-		}
-		return intSats
-	}
-	// Use proper rounding for floating point values
-	return int64(math.Round(sats))
 }
 
 // extractStorageInfo gets storage information from NIP-88 event
@@ -1007,7 +990,7 @@ func (m *SubscriptionManager) checkAddressPoolStatus() error {
 // requestNewAddresses sends a request to the wallet to generate new addresses
 func (m *SubscriptionManager) requestNewAddresses(count int) error {
 	// Get API key from config
-	apiKey := viper.GetString("wallet_api_key")
+	apiKey := viper.GetString("external_services.wallet.key")
 
 	// Generate JWT token using API key
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

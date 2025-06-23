@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
+
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -179,6 +179,29 @@ func main() {
 
 			logging.Info("Generated new server DHT key", map[string]interface{}{
 				"dht_key": dhtKey,
+			})
+		}
+	}
+
+	// Generate wallet API key if not set
+	walletAPIKey := viper.GetString("external_services.wallet.key")
+
+	if len(walletAPIKey) <= 0 {
+		newAPIKey, err := config.GenerateRandomAPIKey()
+		if err != nil {
+			logging.Errorf("Failed to generate wallet API key: %v", err)
+		} else {
+			viper.Set("external_services.wallet.key", newAPIKey)
+
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Fatal("Failed to save configuration", map[string]interface{}{
+					"error": err,
+				})
+			}
+
+			logging.Info("Generated new wallet API key", map[string]interface{}{
+				"wallet_api_key": newAPIKey,
 			})
 		}
 	}
@@ -488,14 +511,4 @@ func main() {
 	}()
 
 	wg.Wait()
-}
-
-// Helper function to generate a random 32-byte hexadecimal key
-func generateRandomAPIKey() (string, error) {
-	bytes := make([]byte, 32) // 32 bytes = 256 bits
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
 }
