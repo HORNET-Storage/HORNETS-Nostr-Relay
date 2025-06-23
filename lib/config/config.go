@@ -60,6 +60,7 @@ func setDefaults() {
 	viper.SetDefault("server.web", true)
 	viper.SetDefault("server.demo", false)
 	viper.SetDefault("server.data_path", "/data")
+	viper.SetDefault("server.stats_db", "statistics.db")
 
 	// External services defaults
 	viper.SetDefault("external_services.ollama.url", "http://ollama:11434")
