@@ -1,4 +1,4 @@
-package kind411creator
+package kind411
 
 import (
 	"crypto/sha256"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -40,23 +41,20 @@ type RelayInfo struct {
 }
 
 func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
-	var settings types.RelaySettings
-
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-		return err
+	settings, err := config.GetConfig()
+	if err != nil {
+		return fmt.Errorf("error getting config: %v", err)
 	}
 
 	// Transform to relay info format, excluding free tier
 	var tiers []types.SubscriptionTier
-	for _, tier := range settings.SubscriptionTiers {
-		// Skip free tier (price = "0")
-		if tier.Price == "0" {
+	for _, tier := range settings.AllowedUsersSettings.Tiers {
+		// Skip free tier (price = 0)
+		if tier.PriceSats <= 0 {
 			continue
 		}
-		tiers = append(tiers, types.SubscriptionTier{
-			DataLimit: tier.DataLimit,
-			Price:     tier.Price,
-		})
+
+		tiers = append(tiers, tier)
 	}
 
 	log.Println("Paid Tiers for kind 411:", tiers)

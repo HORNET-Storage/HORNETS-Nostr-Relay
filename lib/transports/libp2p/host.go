@@ -142,13 +142,12 @@ func (n *connectionNotifier) ListenClose(net network.Network, multiaddr multiadd
 }
 
 func GetHostOnPort(serializedPrivateKey string, port string) host.Host {
-	decodedKey, err := signing.DecodeKey(serializedPrivateKey)
-
+	privateKey, _, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	privateKey, err := crypto.UnmarshalSecp256k1PrivateKey(decodedKey)
+	libp2pPrivateKey, err := crypto.UnmarshalSecp256k1PrivateKey(privateKey.Serialize())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -167,7 +166,7 @@ func GetHostOnPort(serializedPrivateKey string, port string) host.Host {
 	}
 
 	host, err := libp2p.New(
-		libp2p.Identity(privateKey),
+		libp2p.Identity(libp2pPrivateKey),
 		libp2p.ListenAddrStrings(listenAddress, webtransportListenAddress),
 		libp2p.ConnectionManager(connManager),
 		libp2p.Muxer(yamux.ID, yamux.DefaultTransport),

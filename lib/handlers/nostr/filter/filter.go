@@ -5,15 +5,17 @@ import (
 	"strings"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
-	"github.com/HORNET-Storage/hornet-storage/lib"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
 )
@@ -30,14 +32,20 @@ func getAuthenticatedPubkey(data []byte) string {
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	if err := json.Unmarshal(data, &wrapper); err == nil {
+		log.Printf("Wrapper unmarshaled successfully - AuthPubkey: '%s', IsAuthenticated: %v", wrapper.AuthPubkey, wrapper.IsAuthenticated)
 		if wrapper.IsAuthenticated && wrapper.AuthPubkey != "" {
 			log.Printf("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
 			return wrapper.AuthPubkey
+		} else {
+			log.Printf("Wrapper found but not authenticated or empty pubkey")
 		}
+	} else {
+		log.Printf("Failed to unmarshal wrapper structure: %v", err)
 	}
 
 	// If we couldn't extract from wrapper, fall back to the old method
 	// Find currently authenticated pubkeys by scanning the session store
+	log.Printf("Falling back to session store check...")
 	var authenticatedPubkeys []string
 	sessions.Sessions.Range(func(key, value interface{}) bool {
 		pubkey, ok := key.(string)
@@ -168,10 +176,10 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			if err != nil {
 				log.Printf("Error loading private key: %v", err)
 			} else {
-				// Load relay settings
-				var settings lib.RelaySettings
-				if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-					log.Printf("Error loading relay settings: %v", err)
+				// Load allowed users settings to get tiers
+				config, err := config.GetConfig()
+				if err != nil {
+					log.Printf("Error loading allowed users settings: %v", err)
 				}
 
 				// Get relay DHT key
@@ -182,7 +190,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 					store,
 					relayPrivKey,
 					relayDHTKey,
-					settings.SubscriptionTiers,
+					config.AllowedUsersSettings.Tiers,
 				)
 			}
 		}
@@ -191,10 +199,10 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
 		var combinedEvents []*nostr.Event
 		var missingEventIDs []string
-		
+
 		// Get global relay store for missing note retrieval
 		relayStore := sync.GetRelayStore()
-		
+
 		for _, filter := range request.Filters {
 			events, err := store.QueryEvents(filter)
 			if err != nil {
@@ -208,7 +216,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				for _, event := range events {
 					foundIDs[event.ID] = true
 				}
-				
+
 				// Find missing event IDs
 				for _, requestedID := range filter.IDs {
 					if !foundIDs[requestedID] {
@@ -222,21 +230,21 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 			combinedEvents = append(combinedEvents, events...)
 		}
-		
+
 		// Attempt to retrieve missing events via DHT (with timeout protection)
 		if len(missingEventIDs) > 0 && relayStore != nil {
 			log.Printf(ColorCyan+"[MISSING NOTE] Attempting to retrieve %d missing events via DHT"+ColorReset, len(missingEventIDs))
-			
+
 			// Limit the number of missing events we try to retrieve to prevent excessive delays
 			maxMissingEvents := 5
 			if len(missingEventIDs) > maxMissingEvents {
 				log.Printf(ColorYellow+"[MISSING NOTE] Limiting DHT retrieval to %d events (requested %d)"+ColorReset, maxMissingEvents, len(missingEventIDs))
 				missingEventIDs = missingEventIDs[:maxMissingEvents]
 			}
-			
+
 			for _, eventID := range missingEventIDs {
 				log.Printf(ColorCyan+"[MISSING NOTE] Searching for event %s via DHT"+ColorReset, eventID)
-				
+
 				// Strategy 1: If we have author filters in any filter, use those for DHT lookup
 				var potentialAuthors []string
 				for _, filter := range request.Filters {
@@ -244,7 +252,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						potentialAuthors = append(potentialAuthors, filter.Authors...)
 					}
 				}
-				
+
 				// Try to retrieve from each potential author's relay list (limited attempts)
 				var foundEvent *nostr.Event
 				maxAuthors := 3 // Limit to prevent excessive DHT lookups
@@ -252,30 +260,30 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 					if i >= maxAuthors {
 						break
 					}
-					
+
 					response, err := sync.RetrieveMissingNote(eventID, authorPubkey, relayStore, store)
 					if err != nil {
 						log.Printf(ColorRed+"[MISSING NOTE] Error retrieving event %s for author %s: %v"+ColorReset, eventID, authorPubkey, err)
 						continue
 					}
-					
+
 					if response.Found && response.Event != nil {
 						log.Printf(ColorGreen+"[MISSING NOTE] Successfully retrieved event %s from %s"+ColorReset, eventID, response.RelayURL)
 						foundEvent = response.Event
 						break
 					}
 				}
-				
+
 				// Strategy 2: If no authors specified or no event found, try a broader DHT search
 				if foundEvent == nil {
 					log.Printf(ColorYellow+"[MISSING NOTE] Event %s not found via author-specific search, trying broader DHT search"+ColorReset, eventID)
-					
+
 					// Try to find the event by querying multiple known relay lists
 					// This could be enhanced to iterate through all DHT entries
 					// For now, we'll just log that we tried
 					log.Printf(ColorYellow+"[MISSING NOTE] Broader DHT search for event %s not yet implemented"+ColorReset, eventID)
 				}
-				
+
 				// If we found the event, add it to combined events
 				if foundEvent != nil {
 					combinedEvents = append(combinedEvents, foundEvent)
@@ -296,21 +304,10 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		var isStrict bool = true // Default to strict mode
 
 		// First try to get the moderation mode directly from viper
-		moderationMode := viper.GetString("relay_settings.moderationmode")
+		moderationMode := viper.GetString("content_filtering.image_moderation.mode")
 		if moderationMode == "passive" {
 			isStrict = false
-			log.Println("In Passive Mode.")
-		} else {
-			log.Println("In Strict Mode.")
-			// Fall back to struct unmarshal if direct access fails
-			var relaySettings lib.RelaySettings
-			if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-				log.Printf("Error loading relay settings: %v", err)
-				// Keep default strict mode if there's an error
-			} else {
-				// Use the moderation mode from relay settings
-				isStrict = relaySettings.ModerationMode == "strict" || relaySettings.ModerationMode == "" // Default to strict
-			}
+			logging.Info("[MODERATION] Using passive moderation mode")
 		}
 
 		// Filter out blocked events and handle pending moderation events based on mode
@@ -388,6 +385,33 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// Add detailed logging
 		addLogging(&request, connPubkey)
+
+		// Check read access permissions using the global access control system
+		accessControl := websocket.GetAccessControl()
+		if accessControl != nil {
+			// Only check access if we have a valid pubkey
+			if connPubkey == "" {
+				log.Printf(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
+				write("NOTICE", "Read access denied: Authentication required")
+				return
+			}
+
+			// Check if user has read access
+			canRead, err := accessControl.CanRead(connPubkey)
+			if err != nil {
+				log.Printf(ColorRed+"[ACCESS CONTROL] Error checking read permissions for pubkey '%s': %v"+ColorReset, connPubkey, err)
+				write("NOTICE", "Read access denied: Permission check failed")
+				return
+			}
+
+			if !canRead {
+				log.Printf(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
+				write("NOTICE", "Read access denied: User not in allowed list")
+				return
+			}
+
+			log.Printf(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
+		}
 
 		// Apply mute word filtering if the user is authenticated
 		if connPubkey != "" {

@@ -13,7 +13,7 @@ import (
 type StatisticsStore interface {
 	// Bitcoin-related statistics
 	SaveBitcoinRate(rate float64) error
-	GetBitcoinRatesLast30Days() ([]types.BitcoinRate, error)
+	GetBitcoinRates(days int) ([]types.BitcoinRate, error)
 
 	// Pending/Unconfirmed transactions
 	SavePendingTransaction(transaction types.PendingTransaction) error
@@ -113,7 +113,7 @@ type StatisticsStore interface {
 	GetUserPaymentNotifications(pubkey string, page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
 	GetUnreadPaymentNotifications(page, limit int) ([]types.PaymentNotification, *types.PaginationMetadata, error)
 	MarkPaymentNotificationAsRead(id uint) error
-	MarkAllPaymentNotificationsAsRead(pubkey string) error
+	MarkAllPaymentNotificationsAsRead() error
 	DeletePaymentNotification(id uint) error
 
 	// Payment statistics
@@ -141,4 +141,18 @@ type StatisticsStore interface {
 	GetTodayReportedCount() (int, error)
 	GetReportsByType() ([]types.TypeStat, error)
 	GetMostReportedContent(limit int) ([]types.ReportSummary, error)
+
+	// NPUB access control management
+	IsNpubInAllowedReadList(npub string) (bool, error)
+	IsNpubInAllowedWriteList(npub string) (bool, error)
+	AddNpubToReadList(npub, tierName, addedBy string) error
+	AddNpubToWriteList(npub, tierName, addedBy string) error
+	RemoveNpubFromReadList(npub string) error
+	RemoveNpubFromWriteList(npub string) error
+	GetAllowedReadNpubs(page, pageSize int) ([]types.AllowedReadNpub, *types.PaginationMetadata, error)
+	GetAllowedWriteNpubs(page, pageSize int) ([]types.AllowedWriteNpub, *types.PaginationMetadata, error)
+	GetNpubTierFromReadList(npub string) (string, error)
+	GetNpubTierFromWriteList(npub string) (string, error)
+	BulkAddNpubsToReadList(npubs []types.AllowedReadNpub) error
+	BulkAddNpubsToWriteList(npubs []types.AllowedWriteNpub) error
 }

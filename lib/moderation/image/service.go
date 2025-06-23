@@ -179,7 +179,7 @@ func (s *ModerationService) ModerateFile(filePath string) (*ModerationResponse, 
 	log.Printf("Request body size: %d bytes", requestBody.Len())
 
 	// Create and send the request
-	requestURL := fmt.Sprintf("%s?moderation_mode=%s&threshold=%f",
+	requestURL := fmt.Sprintf("%s/moderate?moderation_mode=%s&threshold=%f",
 		s.APIEndpoint, s.Mode, s.Threshold)
 
 	req, err := http.NewRequest("POST", requestURL, &requestBody)
@@ -509,10 +509,7 @@ func (s *ModerationService) ModerateDisputeFile(filePath string, disputeReason s
 	log.Printf("Dispute moderation request body size: %d bytes", requestBody.Len())
 
 	// Create and send the request
-	// Use the /moderate_dispute endpoint instead of /moderate
-	disputeEndpoint := strings.Replace(s.APIEndpoint, "/moderate", "/moderate_dispute", 1)
-	requestURL := fmt.Sprintf("%s?moderation_mode=full&threshold=0.35",
-		disputeEndpoint)
+	requestURL := fmt.Sprintf("%s/moderate_dispute?moderation_mode=%s&threshold=%f", s.APIEndpoint, s.Mode, s.Threshold)
 
 	req, err := http.NewRequest("POST", requestURL, &requestBody)
 	if err != nil {

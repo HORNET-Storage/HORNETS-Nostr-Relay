@@ -161,15 +161,18 @@ func (store *GormStatisticsStore) MarkPaymentNotificationAsRead(id uint) error {
 	return nil
 }
 
-// MarkAllPaymentNotificationsAsRead marks all notifications for a user as read
-func (store *GormStatisticsStore) MarkAllPaymentNotificationsAsRead(pubkey string) error {
+// MarkAllPaymentNotificationsAsRead marks all notifications as read
+func (store *GormStatisticsStore) MarkAllPaymentNotificationsAsRead() error {
 	result := store.DB.Model(&lib.PaymentNotification{}).
-		Where("pub_key = ?", pubkey).
+		Where("is_read = ?", false). // Only update notifications that are currently unread
 		Update("is_read", true)
 
 	if result.Error != nil {
 		return result.Error
 	}
+
+	// Log the number of rows affected to verify the update
+	fmt.Printf("Marked %d payment notifications as read\n", result.RowsAffected)
 
 	return nil
 }

@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
@@ -22,8 +20,11 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/blossom"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 )
 
 type connectionState struct {
@@ -147,24 +148,22 @@ func StartServer(app *fiber.App) error {
 		log.Fatalf("Failed to generate global challenge: %v", err)
 	}
 
-	port := viper.GetString("port")
-	p, err := strconv.Atoi(port)
+	address := viper.GetString("server.address")
+	port := config.GetPort("nostr")
+
+	err = app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
-		log.Fatalf("Error parsing port %s: %v", port, err)
+		log.Fatalf("error starting nostr server: %v\n", err)
 	}
 
-	for {
-		port := fmt.Sprintf(":%d", p+1)
-		err := app.Listen(port)
+	if viper.GetBool("server.upnp") {
+		upnp := upnp.Get()
+
+		err := upnp.ForwardPort(uint16(port), "Hornet Storage Nostr Relay")
 		if err != nil {
-			log.Printf("Error starting web-server: %v\n", err)
-			if strings.Contains(err.Error(), "address already in use") {
-				p += 1
-			} else {
-				break
-			}
-		} else {
-			break
+			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+				"port": port,
+			})
 		}
 	}
 
@@ -181,6 +180,7 @@ func handleRelayInfoRequests(c *fiber.Ctx) error {
 }
 
 func GetRelayInfo() NIP11RelayInfo {
+	// These values are set in main.go init() for backward compatibility
 	relayInfo := NIP11RelayInfo{
 		Name:          viper.GetString("RelayName"),
 		Description:   viper.GetString("RelayDescription"),
@@ -204,7 +204,7 @@ func GetRelayInfo() NIP11RelayInfo {
 			log.Printf("Error signing relay info: %v", err)
 		}
 	} else {
-		log.Printf("Not advertising hornet extenstion because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
+		log.Printf("Not advertising hornet extension because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
 	}
 
 	return relayInfo

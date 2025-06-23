@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,44 +13,48 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
-	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
-	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
+	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/fsnotify/fsnotify"
 	"github.com/ipfs/go-cid"
 	"github.com/spf13/viper"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/count"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/filter"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1063"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1984"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
@@ -59,7 +62,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30078"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
-	kind411creator "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -74,289 +77,166 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
-	//stores_memory "github.com/HORNET-Storage/hornet-storage/lib/stores/memory"
-
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
-	//negentropy "github.com/illuzen/go-negentropy"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 )
 
 func init() {
-	viper.SetDefault("private_key", "")
-	viper.SetDefault("web", true)
-	viper.SetDefault("proxy", true)
-	viper.SetDefault("port", "9000")
-	viper.SetDefault("demo_mode", false)
-	viper.SetDefault("full_Text_kinds", []int{1})
-	viper.SetDefault("relay_stats_db", "relay_stats.db")
-	viper.SetDefault("query_cache", map[string]string{})
-	viper.SetDefault("service_tag", "hornet-storage-service")
-	viper.SetDefault("RelayName", "HORNETS")
-	viper.SetDefault("RelayDescription", "The best relay ever.")
-	viper.SetDefault("RelayPubkey", "")
-	viper.SetDefault("RelaySupportedNips", []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116, 888, 555})
-	viper.SetDefault("RelayContact", "support@hornets.net")
-	viper.SetDefault("RelaySoftware", "golang")
-	viper.SetDefault("RelayVersion", "0.0.1")
-	viper.SetDefault("RelayDHTkey", "")
-	viper.SetDefault("wallet_name", "")
-
-	// Set default relay settings (including Mode)
-	viper.SetDefault("relay_settings", map[string]interface{}{
-		"Mode":             "whitelist", // Default mode to "whitelist"
-		"IsKindsActive":    false,       // Default to false for activity flags
-		"IsPhotosActive":   false,
-		"IsVideosActive":   false,
-		"IsGitNestrActive": false,
-		"IsAudioActive":    false,
-		"Kinds":            []string{}, // Default empty arrays for list fields
-		"DynamicKinds":     []string{},
-		"Photos":           []string{},
-		"Videos":           []string{},
-		"GitNestr":         []string{},
-		"Audio":            []string{},
-		"Protocol":         []string{}, // Default empty Protocol and Chunked lists
-		"Chunked":          []string{},
-		"KindWhitelist":    []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843"}, // Essential kinds always enabled
-		"FreeTierEnabled":  true,
-		"FreeTierLimit":    "100 MB per month",
-		"ModerationMode":   "strict", // Default moderation mode to "strict"
-		"subscription_tiers": []map[string]interface{}{
-			{
-				"DataLimit": "1 GB per month",
-				"Price":     "1000", // in sats
-			},
-			{
-				"DataLimit": "5 GB per month",
-				"Price":     "10000", // in sats
-			},
-			{
-				"DataLimit": "10 GB per month",
-				"Price":     "15000", // in sats
-			},
-		},
-	})
-
-	// Generate a random wallet API key
-	apiKey, err := generateRandomAPIKey()
+	// Initialze config system
+	err := config.InitConfig()
 	if err != nil {
-		log.Fatalf("Failed to generate wallet API key: %v", err)
+		logging.Fatalf("Failed to initialize config: %v", err)
 	}
-	viper.SetDefault("wallet_api_key", apiKey)
 
-	// Free tier settings are only used from relay_settings now
-	viper.SetDefault("freeTierEnabled", true)
-	viper.SetDefault("freeTierLimit", "100 MB per month")
+	// Initialize logging system
+	if err := logging.InitLogger(); err != nil {
+		logging.Fatalf("Failed to initialize logger: %v", err)
+	}
 
-	// Content filtering settings (direct Ollama integration)
-	viper.SetDefault("ollama_url", "http://localhost:11434/api/generate")
-	viper.SetDefault("ollama_model", "gemma3:1b")
-	viper.SetDefault("ollama_timeout", 10000)
-	viper.SetDefault("content_filter_cache_size", 10000)
-	viper.SetDefault("content_filter_cache_ttl", 60)
-	viper.SetDefault("content_filter_enabled", true)
-
-	// Image moderation settings
-	viper.SetDefault("image_moderation_enabled", true)
-	viper.SetDefault("image_moderation_api", "http://localhost:8000/api/moderate")
-	viper.SetDefault("image_moderation_threshold", 0.4)
-	viper.SetDefault("image_moderation_mode", "full")
-	viper.SetDefault("image_moderation_temp_dir", "/tmp/hornets-moderation")
-	viper.SetDefault("image_moderation_check_interval", 30) // seconds
-	viper.SetDefault("image_moderation_timeout", 60)        // seconds
-	viper.SetDefault("image_moderation_concurrency", 5)
-
-	// X-Nostr verification settings
-	viper.SetDefault("xnostr_enabled", true)
-	viper.SetDefault("xnostr_temp_dir", "/tmp/xnostr-verification")
-	viper.SetDefault("xnostr_browser_path", "/usr/bin/chromium") // Default browser path
-	viper.SetDefault("xnostr_browser_pool_size", 3)              // Default browser pool size
-	viper.SetDefault("xnostr_update_interval", 24)               // hours
-	viper.SetDefault("xnostr_check_interval", 30)                // seconds
-	viper.SetDefault("xnostr_concurrency", 3)                    // concurrent verifications
-
-	// X-Nostr verification intervals
-	viper.SetDefault("xnostr_verification_intervals", map[string]interface{}{
-		"full_verification_interval_days": 30,
-		"follower_update_interval_days":   7,
-		"max_verification_attempts":       5,
+	// Now use the logging system
+	logging.Info("HORNETS Nostr Relay starting up", map[string]interface{}{
+		"version": viper.GetString("relay.version"),
+		"name":    viper.GetString("relay.name"),
 	})
 
-	// X-Nostr Nitter settings
-	viper.SetDefault("xnostr_nitter", map[string]interface{}{
-		"instances": []map[string]interface{}{
-			{"url": "https://nitter.net/", "priority": 1},
-			{"url": "https://nitter.lacontrevoie.fr/", "priority": 2},
-			{"url": "https://nitter.1d4.us/", "priority": 3},
-			{"url": "https://nitter.kavin.rocks/", "priority": 4},
-			{"url": "https://nitter.unixfox.eu/", "priority": 5},
-			{"url": "https://nitter.fdn.fr/", "priority": 6},
-			{"url": "https://nitter.pussthecat.org/", "priority": 7},
-			{"url": "https://nitter.nixnet.services/", "priority": 8},
-		},
-		"requests_per_minute": 10,
-		"failure_threshold":   3,
-		"recovery_threshold":  2,
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// We no longer need to set the top-level moderation_mode as we're using the one in relay_settings
+	// Initialze upnp system if enabled
+	if viper.GetBool("server.upnp") {
+		upnp, err := upnp.Init(ctx)
+		if err != nil {
+			logging.Error("UPnP init failed", map[string]interface{}{
+				"error": err,
+			})
+		}
 
-	viper.AddConfigPath(".")
-	viper.SetConfigType("json")
-
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			viper.SafeWriteConfig()
+		ip, err := upnp.ExternalIP()
+		if err == nil {
+			logging.Info("UPnP External IP", map[string]interface{}{
+				"ip": ip,
+			})
 		}
 	}
-
-	// Always force demo mode to false for the production server
-	// This ensures authentication is enabled regardless of config.json settings
-	viper.Set("demo_mode", false)
-
-	viper.OnConfigChange(func(e fsnotify.Event) {
-		log.Println("Config file changed:", e.Name)
-	})
-
-	viper.WatchConfig()
-}
-
-// Helper function to generate a random 32-byte hexadecimal key
-func generateRandomAPIKey() (string, error) {
-	bytes := make([]byte, 32) // 32 bytes = 256 bits
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-func generateDHTKey(privateKeyHex string) (string, error) {
-	// Convert hex string to bytes
-	privateKeyBytes, err := hex.DecodeString(privateKeyHex)
-	if err != nil {
-		return "", fmt.Errorf("failed to decode private key hex: %v", err)
-	}
-
-	// Ensure we have the correct length
-	if len(privateKeyBytes) != 32 {
-		return "", fmt.Errorf("invalid private key length: expected 32 bytes, got %d", len(privateKeyBytes))
-	}
-
-	// Create a copy for clamping
-	clampedPrivateKey := make([]byte, len(privateKeyBytes))
-	copy(clampedPrivateKey, privateKeyBytes)
-
-	// Apply clamping as per Ed25519 specification
-	clampedPrivateKey[0] &= 248  // Clear the lowest 3 bits
-	clampedPrivateKey[31] &= 127 // Clear the highest bit
-	clampedPrivateKey[31] |= 64  // Set the second highest bit
-
-	// Calculate hash using SHA-512
-	hash := sha512.Sum512(clampedPrivateKey[:32])
-
-	// In Ed25519, the first 32 bytes of the hash are used as the scalar
-	// and the public key is derived using this scalar
-	scalar := hash[:32]
-
-	// For DHT key, we'll use the hex encoding of the scalar
-	// This matches the behavior of the TypeScript implementation
-	dhtKey := hex.EncodeToString(scalar)
-
-	return dhtKey, nil
 }
 
 func main() {
 	ctx := context.Background()
 	wg := new(sync.WaitGroup)
 
-	serializedPrivateKey := viper.GetString("private_key")
+	settings, err := config.GetConfig()
+	if err != nil {
+		logging.Fatal("Failed to load configuration", map[string]interface{}{
+			"error": err,
+		})
+	}
 
-	// Generate a new private key and save it to viper config if one doesn't exist
-	if serializedPrivateKey == "" {
+	serializedPrivateKey := viper.GetString("relay.private_key")
+
+	if len(serializedPrivateKey) <= 0 {
 		newKey, err := signing.GeneratePrivateKey()
 		if err != nil {
-			log.Printf("error generating or saving server private key")
+			logging.Fatal("error generating or saving server private key")
 		}
 
-		serializedPrivateKey, err := signing.SerializePrivateKey(newKey)
+		key, err := signing.SerializePrivateKey(newKey)
 		if err != nil {
-			log.Printf("error generating or saving server private key")
-		}
+			logging.Fatal("error generating or saving server private key")
+		} else {
+			viper.Set("relay.private_key", key)
 
-		viper.Set("private_key", serializedPrivateKey)
-		err = viper.WriteConfig()
-		if err != nil {
-			log.Println("Viper has failed to write the config")
+			serializedPrivateKey = *key
+
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Fatal("Failed to save configuration", map[string]interface{}{
+					"error": err,
+				})
+			}
+
+			logging.Info("Generated new server private key", map[string]interface{}{
+				"private_key": serializedPrivateKey,
+			})
 		}
 	}
 
-	if serializedPrivateKey != "" {
-		// Generate DHT key from private key
-		dhtKey, err := generateDHTKey(serializedPrivateKey)
-		if err != nil {
-			log.Printf("Failed to generate DHT key: %v", err)
-		} else {
-			err = viper.ReadInConfig()
-			if err != nil {
-				log.Println("Error reading viper config: ", err)
-			}
-			viper.Set("RelayDHTkey", dhtKey)
-			err = viper.WriteConfig()
-			if err != nil {
-				log.Println("Error reading viper config: ", err)
-			}
-			log.Println("DHT key: ", dhtKey)
+	dhtKey := viper.GetString("relay.dht_key")
 
+	if len(dhtKey) <= 0 {
+		dhtKey, err := negentropy.DeriveKeyFromNsec(serializedPrivateKey)
+		if err != nil {
+			logging.Errorf("Failed to generate DHT key: %v", err)
+		} else {
+			viper.Set("relay.dht_key", dhtKey)
+
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Fatal("Failed to save configuration", map[string]interface{}{
+					"error": err,
+				})
+			}
+
+			logging.Info("Generated new server DHT key", map[string]interface{}{
+				"dht_key": dhtKey,
+			})
 		}
 	}
 
 	privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
-		log.Printf("failed to deserialize private key")
+		logging.Fatal("failed to deserialize private key")
 	}
 
-	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
-	if err != nil {
-		log.Printf("failed to serialize public key")
+	port := config.GetPort("hornets")
+	portStr := fmt.Sprintf("%d", port)
+
+	host := libp2p.GetHostOnPort(serializedPrivateKey, portStr)
+
+	if viper.GetBool("server.upnp") {
+		upnp := upnp.Get()
+
+		err = upnp.ForwardPort(uint16(port), "LaterCondition")
+		if err != nil {
+			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+				"port": port,
+			})
+		}
 	}
-
-	viper.Set("RelayPubkey", serializedPublicKey)
-
-	host := libp2p.GetHostOnPort(serializedPrivateKey, viper.GetString("port"))
 
 	// Create and initialize database
-	store, err := badgerhold.InitStore("data")
+	store, err := badgerhold.InitStore(config.GetPath("store"))
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatal(err.Error())
 	}
 
-	defer func() {
-		err := store.Cleanup()
-		if err != nil {
-			log.Printf("Failed to cleanup temp database: %v", err)
-		}
-
-		// Shutdown moderation system if initialized
-		moderation.Shutdown()
-	}()
-
 	// Initialize image moderation system if enabled
-	if viper.GetBool("image_moderation_enabled") {
-		log.Println("Initializing image moderation system...")
+	if config.IsEnabled("image_moderation.enabled") {
+		defer func() {
+			err := store.Cleanup()
+			if err != nil {
+				logging.Infof("Failed to cleanup temp database: %v", err)
+			}
 
-		// Get moderation configuration from viper
-		apiEndpoint := viper.GetString("image_moderation_api")
-		threshold := viper.GetFloat64("image_moderation_threshold")
-		mode := viper.GetString("image_moderation_mode")
-		timeout := time.Duration(viper.GetInt("image_moderation_timeout")) * time.Second
-		checkInterval := time.Duration(viper.GetInt("image_moderation_check_interval")) * time.Second
-		tempDir := viper.GetString("image_moderation_temp_dir")
-		concurrency := viper.GetInt("image_moderation_concurrency")
+			// Shutdown moderation system if initialized
+			moderation.Shutdown()
+		}()
+
+		logging.Info("Initializing image moderation system...")
+
+		// Get moderation configuration from config
+		apiEndpoint := config.GetExternalURL("moderator")
+		threshold := viper.GetFloat64("content_filtering.image_moderation.threshold")
+		mode := viper.GetString("content_filtering.image_moderation.mode")
+		timeout := time.Duration(viper.GetInt("content_filtering.image_moderation.timeout_seconds")) * time.Second
+		checkInterval := time.Duration(viper.GetInt("content_filtering.image_moderation.check_interval_seconds")) * time.Second
+		tempDir := config.GetPath("moderation")
+		concurrency := viper.GetInt("content_filtering.image_moderation.concurrency")
 
 		// Make sure temp directory exists
 		if _, err := os.Stat(tempDir); os.IsNotExist(err) {
 			if err := os.MkdirAll(tempDir, 0755); err != nil {
-				log.Printf("Failed to create moderation temp directory: %v", err)
+				logging.Infof("Failed to create moderation temp directory: %v", err)
 				tempDir = os.TempDir() // Fallback to system temp dir
 			}
 		}
@@ -374,32 +254,42 @@ func main() {
 		)
 
 		if err != nil {
-			log.Printf("Failed to initialize image moderation: %v", err)
+			logging.Errorf("Failed to initialize image moderation: %v", err)
 		} else {
-			log.Println("Image moderation system initialized successfully")
+			logging.Info("Image moderation system initialized successfully")
 		}
 	} else {
-		log.Println("Image moderation system is disabled")
-	}
+		logging.Info("Image moderation system is disabled")
+	} // Initialize the global subscription manager
+	logging.Info("Initializing global subscription manager...")
 
 	// Initialize the global subscription manager
-	log.Println("Initializing global subscription manager...")
-	var relaySettings lib.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &relaySettings); err != nil {
-		log.Printf("Failed to load relay settings: %v", err)
+	logging.Info("Initializing global subscription manager...")
+
+	// Initialize subscription manager with tiers from allowed_users
+	subscription.InitGlobalManager(
+		store,
+		privateKey,
+		dhtKey,
+		settings.AllowedUsersSettings.Tiers,
+	)
+	logging.Info("Global subscription manager initialized successfully")
+
+	// Initialize the global access control
+	logging.Info("Initializing global access control...")
+	if statsStore := store.GetStatsStore(); statsStore != nil {
+		if err := ws.InitializeAccessControl(statsStore); err != nil {
+			logging.Errorf("Failed to initialize access control: %v", err)
+		} else {
+			logging.Info("Global access control initialized successfully")
+		}
 	} else {
-		subscription.InitGlobalManager(
-			store,
-			privateKey,
-			viper.GetString("RelayDHTkey"),
-			relaySettings.SubscriptionTiers,
-		)
-		log.Println("Global subscription manager initialized successfully")
+		logging.Warn("Warning: Statistics store not available, access control not initialized")
 	}
 
 	// Create and store kind 411 event
-	if err := kind411creator.CreateKind411Event(privateKey, publicKey, store); err != nil {
-		log.Printf("Failed to create kind 411 event: %v", err)
+	if err := kind411.CreateKind411Event(privateKey, publicKey, store); err != nil {
+		logging.Errorf("Failed to create kind 411 event: %v", err)
 		return
 	}
 
@@ -436,21 +326,17 @@ func main() {
 	handleUpload := func(dag *merkle_dag.Dag, pubKey *string) {}
 
 	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
-
 	query.AddQueryHandler(host, store)
 
-	settings, err := nostr.LoadRelaySettings()
-	if err != nil {
-		log.Fatalf("Failed to load relay settings: %v", err)
-		return
-	}
+	// Use config filtering mode instead of loading from nostr utils
+	filteringMode := viper.GetString("event_filtering.mode")
 
-	log.Printf("Host started with id: %s\n", host.ID())
-	log.Printf("Host started with address: %s\n", host.Addrs())
+	logging.Infof("Host started with id: %s\n", host.ID())
+	logging.Infof("Host started with address: %s\n", host.Addrs())
 
 	syncDB, err := negentropy.InitSyncDB()
 	if err != nil {
-		log.Fatal("failed to connect database: %w", err)
+		logging.Fatalf("failed to connect database: %s", err.Error())
 	}
 
 	negentropy.SetupNegentropyEventHandler(host, "host", store)
@@ -463,7 +349,7 @@ func main() {
 		viper.Set("LibP2PID", host.ID().String())
 		viper.Set("LibP2PAddrs", libp2pAddrs)
 		selfRelay := ws.GetRelayInfo()
-		log.Printf("Self Relay: %+v\n", selfRelay)
+		logging.Infof("Self Relay: %+v\n", selfRelay)
 
 		dhtServer := negentropy.DefaultDHTServer()
 		defer dhtServer.Close()
@@ -472,18 +358,14 @@ func main() {
 		uploadInterval := time.Hour * 2
 		syncInterval := time.Hour * 3
 		relayStore := negentropy.NewRelayStore(syncDB, dhtServer, host, store, uploadInterval, syncInterval)
-		log.Printf("Created relay store: %+v", relayStore)
-
+		logging.Infof("Created relay store: %+v", relayStore)
 	}
 
-	// X-Nostr verification is now handled in the frontend
-	log.Println("X-Nostr verification is now handled in the frontend")
-
 	// Register Our Nostr Stream Handlers
-	if settings.Mode == "blacklist" {
+	if filteringMode == "blacklist" {
 		log.Println("Using universal stream handler because Mode set to 'blacklist'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
-	} else if settings.Mode == "whitelist" {
+	} else if filteringMode == "whitelist" {
 		log.Println("Using specific stream handlers because Mode set to 'whitelist'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
@@ -513,10 +395,10 @@ func main() {
 		nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
 		nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
 		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
-
-		// X-Nostr verification is now handled in the frontend
+		nostr.RegisterHandler("kind/117", kind117.BuildKind117Handler(store))
+		nostr.RegisterHandler("kind/1063", kind1063.BuildKind1063Handler(store))
 	} else {
-		log.Fatalf("Unknown settings mode: %s, exiting", settings.Mode)
+		logging.Fatalf("Unknown settings mode: %s, exiting", filteringMode)
 	}
 
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
@@ -559,7 +441,7 @@ func main() {
 	}
 
 	// Web Panel
-	if viper.GetBool("web") {
+	if config.IsEnabled("web") {
 		wg.Add(1)
 
 		log.Println("Starting with web server enabled")
@@ -575,17 +457,14 @@ func main() {
 		}()
 	}
 
-	// Proxy web sockets
-	if viper.GetBool("proxy") {
+	// Nostr web sockets
+	if config.IsEnabled("nostr") {
 		wg.Add(1)
 
 		log.Println("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
 			app := ws.BuildServer(store)
-
-			//app.Get("/scionic/upload", fiber_websocket.New(upload.AddUploadHandlerForWebsockets(store, canUpload, handleUpload)))
-
 			err := ws.StartServer(app)
 
 			if err != nil {
@@ -609,4 +488,14 @@ func main() {
 	}()
 
 	wg.Wait()
+}
+
+// Helper function to generate a random 32-byte hexadecimal key
+func generateRandomAPIKey() (string, error) {
+	bytes := make([]byte, 32) // 32 bytes = 256 bits
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }

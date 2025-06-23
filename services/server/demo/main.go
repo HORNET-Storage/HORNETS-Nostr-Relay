@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
@@ -13,43 +15,18 @@ import (
 )
 
 func init() {
-	viper.SetDefault("key", "")
-	viper.SetDefault("web", true)
-	viper.SetDefault("proxy", false)    // No need for websocket proxy in demo mode
-	viper.SetDefault("port", "10000")   // Default to port 10000 for demo mode
-	viper.SetDefault("demo_mode", true) // Enable demo mode by default for the demo server
-	viper.SetDefault("relay_stats_db", "demo_statistics.db")
-	viper.SetDefault("service_tag", "hornet-storage-service-demo")
-	viper.SetDefault("RelayName", "HORNETS DEMO")
-	viper.SetDefault("RelayDescription", "DEMO RELAY - For demonstration purposes only")
-	viper.SetDefault("RelayContact", "demo@hornets.net")
-	viper.SetDefault("RelayVersion", "0.0.1-demo")
-
-	// First try to load demo-config.json from root directory
-	viper.SetConfigName("demo-config")
-	viper.AddConfigPath("../../../") // Root directory
-	viper.AddConfigPath(".")         // Current directory as fallback
-	viper.SetConfigType("json")
-
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// If config not found, create it in current directory
-			viper.SetConfigName("config")
-			if err := viper.ReadInConfig(); err != nil {
-				// If that also fails, create a default config
-				if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-					viper.SafeWriteConfig()
-				}
-			}
-		}
+	// Initialze config system
+	err := config.InitConfig()
+	if err != nil {
+		log.Fatalf("Failed to initialize config: %v", err)
 	}
 
-	// Log which config file was loaded
-	log.Printf("Using configuration file: %s", viper.ConfigFileUsed())
+	// Initialize logging system
+	if err := logging.InitLogger(); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
 
-	// Always force demo mode to true for the demo server
-	// This ensures demo mode is enabled regardless of config.json settings
-	viper.Set("demo_mode", true)
+	viper.Set("server.demo", true)
 }
 
 func main() {
@@ -104,13 +81,10 @@ func main() {
 			log.Println("Demo data cleanup successful")
 		}
 	}()
-
 	// Log which ports will be used
-	demoPortStr := viper.GetString("port")
-	var portNum int
-	_, err = fmt.Sscanf(demoPortStr, "%d", &portNum)
-	if err == nil && portNum > 0 {
-		log.Printf("Demo server will use port %d (web panel on port %d)", portNum, portNum+2)
+	demoPort := config.GetPort("web")
+	if demoPort > 0 {
+		log.Printf("Demo server will use port %d (web panel on port %d)", demoPort-2, demoPort)
 	}
 
 	log.Println("Starting demo web server...")

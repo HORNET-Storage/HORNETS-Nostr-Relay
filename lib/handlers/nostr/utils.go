@@ -6,13 +6,11 @@ import (
 
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/fxamacker/cbor/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
-
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 )
 
 // Gerneric event validation that almost all kinds will use
@@ -153,27 +151,8 @@ func CloseStream(stream network.Stream) {
 	}
 }
 
-func LoadRelaySettings() (*types.RelaySettings, error) {
-	viper.SetConfigName("config") // Name of config file (without extension)
-	viper.SetConfigType("json")   // Type of the config file
-	viper.AddConfigPath(".")      // Path to look for the config file in
-
-	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading config file: %s", err)
-		return nil, err
-	}
-
-	var settings types.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-		log.Fatalf("Error unmarshaling config into struct: %s (nostr/utils)", err)
-		return nil, err
-	}
-
-	return &settings, nil
-}
-
 func IsKindAllowed(kind int) bool {
-	settings, err := RetrieveSettings()
+	settings, err := config.GetConfig()
 	if err != nil {
 		return false
 	}
@@ -181,22 +160,13 @@ func IsKindAllowed(kind int) bool {
 	// Format the kind number to match the whitelist format
 	kindStr := fmt.Sprintf("kind%d", kind)
 
-	if len(settings.KindWhitelist) > 0 {
-		if !contains(settings.KindWhitelist, kindStr) {
+	if len(settings.EventFiltering.KindWhitelist) > 0 {
+		if !contains(settings.EventFiltering.KindWhitelist, kindStr) {
 			return false
 		}
 	}
 
 	return true
-}
-
-func RetrieveSettings() (*types.RelaySettings, error) {
-	var settings types.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-		return nil, err
-	}
-
-	return &settings, nil
 }
 
 func contains(list []string, item string) bool {

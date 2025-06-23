@@ -2,225 +2,349 @@ package web
 
 import (
 	"fmt"
-	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/blossom"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+
+	// Import the organized handlers
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/access"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/auth"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/bitcoin"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/moderation"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/settings"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/statistics"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/wallet"
+
+	// Import middleware
+	"github.com/HORNET-Storage/hornet-storage/lib/web/middleware"
+
+	// Import services
+	"github.com/HORNET-Storage/hornet-storage/lib/web/services"
 )
 
 func StartServer(store stores.Store) error {
-	app := fiber.New()
+	logging.Info("Starting web server", map[string]interface{}{
+		"port": config.GetPort("web"),
+		"demo": config.IsEnabled("demo"),
+	})
 
-	go pullBitcoinPrice(store)
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			logging.Error("Web server error", map[string]interface{}{
+				"error":  err.Error(),
+				"path":   c.Path(),
+				"method": c.Method(),
+			})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Internal server error",
+			})
+		},
+	})
 
+	// CORS middleware
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*", // You can restrict this to specific origins if needed, e.g., "http://localhost:3000"
+		AllowOrigins: "*",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, DELETE, PUT, OPTIONS",
 	}))
 
-	// Rate limited routes
-	app.Post("/signup", func(c *fiber.Ctx) error {
-		return signUpUser(c, store)
-	})
-	app.Post("/login", func(c *fiber.Ctx) error {
-		return loginUser(c, store)
-	})
-
-	app.Post("/verify", rateLimiterMiddleware(), func(c *fiber.Ctx) error {
-		return verifyLoginSignature(c, store)
+	// Request logging middleware
+	app.Use(func(c *fiber.Ctx) error {
+		logging.Debug("HTTP Request", map[string]interface{}{
+			"method": c.Method(),
+			"path":   c.Path(),
+			"ip":     c.IP(),
+		})
+		return c.Next()
 	})
 
-	// Open routes
+	/// ================================
+	// BLOSSOM FILE STORAGE ROUTES
+	// ================================
+
+	blossomServer := blossom.NewServer(store)
+	blossomServer.SetupRoutes(app)
+
+	// ================================
+	// AUTHENTICATION ROUTES
+	// ================================
+
+	app.Post("/signup", middleware.RateLimiterMiddleware(), func(c *fiber.Ctx) error {
+		return auth.SignUpUser(c, store)
+	})
+
+	app.Post("/login", middleware.RateLimiterMiddleware(), func(c *fiber.Ctx) error {
+		return auth.LoginUser(c, store)
+	})
+
+	app.Post("/verify", middleware.RateLimiterMiddleware(), func(c *fiber.Ctx) error {
+		return auth.VerifyLoginSignature(c, store)
+	})
+
 	app.Get("/user-exist", func(c *fiber.Ctx) error {
-		return checkUserExists(c, store)
-	})
-	app.Post("/logout", func(c *fiber.Ctx) error {
-		return logoutUser(c, store)
+		return handlers.CheckUserExists(c, store)
 	})
 
-	// Wallet-specific routes with API key authentication
+	app.Post("/logout", func(c *fiber.Ctx) error {
+		return auth.LogoutUser(c, store)
+	})
+
+	// ================================
+	// WALLET API ROUTES
+	// ================================
+
 	walletRoutes := app.Group("/api/wallet")
 
-	// Only apply API key middleware if not in demo mode
-	if !viper.GetBool("demo_mode") {
-		walletRoutes.Use(apiKeyMiddleware)
-		log.Println("API key authentication enabled for wallet routes")
+	if !config.IsEnabled("demo") {
+		walletRoutes.Use(func(c *fiber.Ctx) error {
+			return middleware.ApiKeyMiddleware(c)
+		})
+		logging.Info("API key authentication enabled for wallet routes")
 	} else {
-		log.Println("WARNING: Running in demo mode - wallet API routes are UNSECURED!")
+		logging.Warn("Running in demo mode - wallet API routes are UNSECURED!")
 	}
+
 	walletRoutes.Post("/balance", func(c *fiber.Ctx) error {
-		return updateWalletBalance(c, store)
+		return wallet.UpdateWalletBalance(c, store)
 	})
+
 	walletRoutes.Post("/transactions", func(c *fiber.Ctx) error {
-		return updateWalletTransactions(c, store)
+		return wallet.UpdateWalletTransactions(c, store)
 	})
+
 	walletRoutes.Post("/addresses", func(c *fiber.Ctx) error {
-		return saveWalletAddresses(c, store) // Pass the store instance
+		return wallet.SaveWalletAddresses(c, store)
 	})
+
+	// ================================
+	// SECURED API ROUTES
+	// ================================
 
 	secured := app.Group("/api")
 
-	// Only apply JWT middleware if not in demo mode
-	if !viper.GetBool("demo_mode") {
+	if !config.IsEnabled("demo") {
 		secured.Use(func(c *fiber.Ctx) error {
-			return jwtMiddleware(c, store)
+			return middleware.JwtMiddleware(c, store)
 		})
-		log.Println("JWT authentication enabled for API routes")
+		logging.Info("JWT authentication enabled for API routes")
 	} else {
-		log.Println("WARNING: Running in demo mode - API routes are UNSECURED!")
+		logging.Warn("Running in demo mode - API routes are UNSECURED!")
 	}
 
-	// Dedicated routes for each handler
-	secured.Get("/relaycount", func(c *fiber.Ctx) error {
-		return getRelayCount(c, store)
-	})
-	secured.Post("/relay-settings", func(c *fiber.Ctx) error {
-		return updateRelaySettings(c, store)
-	})
-
-	secured.Get("/relay-settings", getRelaySettings)
-
-	// Generic settings endpoints
-	secured.Get("/settings/:group", getConfigSettings)
-	secured.Post("/settings/:group", func(c *fiber.Ctx) error {
-		return updateConfigSettings(c, store)
-	})
+	// Statistics routes
 	secured.Get("/timeseries", func(c *fiber.Ctx) error {
-		return getProfilesTimeSeriesData(c, store)
+		return statistics.GetProfilesTimeSeriesData(c, store)
 	})
+
 	secured.Get("/activitydata", func(c *fiber.Ctx) error {
-		return getMonthlyStorageStats(c, store)
+		return statistics.GetMonthlyStorageStats(c, store)
 	})
+
 	secured.Get("/barchartdata", func(c *fiber.Ctx) error {
-		return getNotesMediaStorageData(c, store)
+		return statistics.GetNotesMediaStorageData(c, store)
 	})
+
+	secured.Get("/kinds", func(c *fiber.Ctx) error {
+		return statistics.GetKindData(c, store)
+	})
+
+	secured.Get("/kind-trend/:kindNumber", func(c *fiber.Ctx) error {
+		return statistics.GetKindTrendData(c, store)
+	})
+
+	// Bitcoin routes
 	secured.Post("/updateRate", func(c *fiber.Ctx) error {
-		return updateBitcoinRate(c, store)
+		return bitcoin.UpdateBitcoinRate(c, store)
 	})
+
+	secured.Get("/bitcoin-rates/last-30-days", func(c *fiber.Ctx) error {
+		return bitcoin.GetBitcoinRatesLast30Days(c, store)
+	})
+
+	// Wallet routes
 	secured.Get("/balance/usd", func(c *fiber.Ctx) error {
-		return getWalletBalanceUSD(c, store)
+		return wallet.GetWalletBalanceUSD(c, store)
 	})
 
 	secured.Get("/transactions/latest", func(c *fiber.Ctx) error {
-		return getLatestWalletTransactions(c, store)
+		return wallet.GetLatestWalletTransactions(c, store)
 	})
-	secured.Get("/bitcoin-rates/last-30-days", func(c *fiber.Ctx) error {
-		return getBitcoinRatesLast30Days(c, store)
-	})
+
 	secured.Get("/addresses", func(c *fiber.Ctx) error {
-		return pullWalletAddresses(c, store)
+		return wallet.PullWalletAddresses(c, store)
 	})
-	secured.Get("/kinds", func(c *fiber.Ctx) error {
-		return getKindData(c, store)
-	})
-	secured.Get("/kind-trend/:kindNumber", func(c *fiber.Ctx) error {
-		return getKindTrendData(c, store)
-	})
+
 	secured.Post("/pending-transactions", func(c *fiber.Ctx) error {
-		return saveUnconfirmedTransaction(c, store)
+		return wallet.SaveUnconfirmedTransaction(c, store)
 	})
+
 	secured.Post("/replacement-transactions", func(c *fiber.Ctx) error {
-		return replaceTransaction(c, store)
+		return wallet.ReplaceTransaction(c, store)
 	})
+
 	secured.Get("/pending-transactions", func(c *fiber.Ctx) error {
-		return getPendingTransactions(c, store)
+		return wallet.GetPendingTransactions(c, store)
 	})
+
+	// Auth routes
 	secured.Get("/paid-subscriber-profiles", func(c *fiber.Ctx) error {
-		return HandleGetPaidSubscriberProfiles(c, store)
+		return handlers.HandleGetPaidSubscriberProfiles(c, store)
 	})
-	secured.Post("/refresh-token", refreshToken)
 
+	secured.Post("/refresh-token", func(c *fiber.Ctx) error {
+		return auth.RefreshToken(c)
+	})
+
+	// General handlers routes
 	secured.Get("/files", func(c *fiber.Ctx) error {
-		return HandleGetFilesByType(c, store)
+		return handlers.HandleGetFilesByType(c, store)
 	})
 
-	// Moderation notification routes
+	// Settings routes
+	app.Get("/api/settings", settings.GetSettings)
+	app.Post("/api/settings", settings.UpdateSettings)
+
+	// Individual setting routes (optional - for granular control)
+	app.Get("/api/settings/:key", settings.GetSettingValue)
+	app.Put("/api/settings/:key", settings.UpdateSettingValue)
+
+	// Relay count route
+	app.Get("/api/relay/count", func(c *fiber.Ctx) error {
+		return settings.GetRelayCount(c, store)
+	})
+
+	// ================================
+	// MODERATION ROUTES
+	// ================================
+
 	secured.Get("/moderation/notifications", func(c *fiber.Ctx) error {
-		return getModerationNotifications(c, store)
+		return moderation.GetModerationNotifications(c, store)
 	})
+
 	secured.Post("/moderation/notifications/read", func(c *fiber.Ctx) error {
-		return markNotificationAsRead(c, store)
+		return moderation.MarkNotificationAsRead(c, store)
 	})
+
 	secured.Post("/moderation/notifications/read-all", func(c *fiber.Ctx) error {
-		return markAllNotificationsAsRead(c, store)
+		return moderation.MarkAllNotificationsAsRead(c, store)
 	})
+
 	secured.Get("/moderation/stats", func(c *fiber.Ctx) error {
-		return getModerationStats(c, store)
+		return moderation.GetModerationStats(c, store)
 	})
+
 	secured.Post("/moderation/notifications", func(c *fiber.Ctx) error {
-		return createModerationNotification(c, store)
+		return moderation.CreateModerationNotification(c, store)
 	})
+
 	secured.Get("/moderation/blocked-event/:id", func(c *fiber.Ctx) error {
-		return getBlockedEvent(c, store)
+		return moderation.GetBlockedEvent(c, store)
 	})
+
 	secured.Post("/moderation/unblock", func(c *fiber.Ctx) error {
-		return unblockEvent(c, store)
+		return moderation.UnblockEvent(c, store)
 	})
+
 	secured.Delete("/moderation/event/:id", func(c *fiber.Ctx) error {
-		return deleteModeratedEvent(c, store)
+		return moderation.DeleteModeratedEvent(c, store)
 	})
 
-	// Payment notification routes
-	secured.Get("/payment/notifications", func(c *fiber.Ctx) error {
-		return getPaymentNotifications(c, store)
-	})
-	secured.Post("/payment/notifications/read", func(c *fiber.Ctx) error {
-		return markPaymentNotificationAsRead(c, store)
-	})
-	secured.Post("/payment/notifications/read-all", func(c *fiber.Ctx) error {
-		return markAllPaymentNotificationsAsRead(c, store)
-	})
-	secured.Get("/payment/stats", func(c *fiber.Ctx) error {
-		return getPaymentStats(c, store)
-	})
-	secured.Post("/payment/notifications", func(c *fiber.Ctx) error {
-		return createPaymentNotification(c, store)
-	})
-
-	// Report notification routes
-	secured.Get("/reports/notifications", func(c *fiber.Ctx) error {
-		return getReportNotifications(c, store)
-	})
-	secured.Post("/reports/notifications/read", func(c *fiber.Ctx) error {
-		return markReportNotificationAsRead(c, store)
-	})
-	secured.Post("/reports/notifications/read-all", func(c *fiber.Ctx) error {
-		return markAllReportNotificationsAsRead(c, store)
-	})
-	secured.Get("/reports/stats", func(c *fiber.Ctx) error {
-		return getReportStats(c, store)
-	})
-	secured.Get("/reports/event/:id", func(c *fiber.Ctx) error {
-		return getReportedEvent(c, store)
-	})
-	secured.Delete("/reports/event/:id", func(c *fiber.Ctx) error {
-		return deleteReportedEvent(c, store)
-	})
-
-	// Blocked pubkeys routes
 	secured.Get("/blocked-pubkeys", func(c *fiber.Ctx) error {
-		return getBlockedPubkeys(c, store)
+		return handlers.GetBlockedPubkeys(c, store)
 	})
+
 	secured.Post("/blocked-pubkeys", func(c *fiber.Ctx) error {
-		return blockPubkey(c, store)
+		return handlers.BlockPubkey(c, store)
 	})
+
 	secured.Delete("/blocked-pubkeys/:pubkey", func(c *fiber.Ctx) error {
-		return unblockPubkey(c, store)
+		return handlers.UnblockPubkey(c, store)
 	})
 
-	port := viper.GetString("port")
-	p, err := strconv.Atoi(port)
-	if err != nil {
-		log.Fatal("Error parsing port port")
-	}
+	// ================================
+	// GENERAL HANDLER ROUTES
+	// ================================
 
+	// These are in the main handlers package
+	secured.Get("/reports/notifications", func(c *fiber.Ctx) error {
+		return handlers.GetReportNotifications(c, store)
+	})
+
+	secured.Post("/reports/notifications/read", func(c *fiber.Ctx) error {
+		return handlers.MarkReportNotificationAsRead(c, store)
+	})
+
+	secured.Post("/reports/notifications/read-all", func(c *fiber.Ctx) error {
+		return handlers.MarkAllReportNotificationsAsRead(c, store)
+	})
+
+	secured.Get("/reports/stats", func(c *fiber.Ctx) error {
+		return handlers.GetReportStats(c, store)
+	})
+
+	secured.Get("/reports/event/:id", func(c *fiber.Ctx) error {
+		return handlers.GetReportedEvent(c, store)
+	})
+
+	secured.Delete("/reports/event/:id", func(c *fiber.Ctx) error {
+		return handlers.DeleteReportedEvent(c, store)
+	})
+
+	secured.Get("/payment/notifications", func(c *fiber.Ctx) error {
+		return handlers.GetPaymentNotifications(c, store)
+	})
+
+	secured.Post("/payment/notifications/read", func(c *fiber.Ctx) error {
+		return handlers.MarkPaymentNotificationAsRead(c, store)
+	})
+
+	secured.Post("/payment/notifications/read-all", func(c *fiber.Ctx) error {
+		return handlers.MarkAllPaymentNotificationsAsRead(c, store)
+	})
+
+	secured.Get("/payment/stats", func(c *fiber.Ctx) error {
+		return handlers.GetPaymentStats(c, store)
+	})
+
+	secured.Post("/payment/notifications", func(c *fiber.Ctx) error {
+		return handlers.CreatePaymentNotification(c, store)
+	})
+
+	// Allowed users NPUB management routes
+	secured.Get("/allowed-npubs/read", func(c *fiber.Ctx) error {
+		return access.GetAllowedReadNpubs(c, store)
+	})
+	secured.Get("/allowed-npubs/write", func(c *fiber.Ctx) error {
+		return access.GetAllowedWriteNpubs(c, store)
+	})
+	secured.Post("/allowed-npubs/read", func(c *fiber.Ctx) error {
+		return access.AddAllowedReadNpub(c, store)
+	})
+	secured.Post("/allowed-npubs/write", func(c *fiber.Ctx) error {
+		return access.AddAllowedWriteNpub(c, store)
+	})
+	secured.Delete("/allowed-npubs/read/:npub", func(c *fiber.Ctx) error {
+		return access.RemoveAllowedReadNpub(c, store)
+	})
+	secured.Delete("/allowed-npubs/write/:npub", func(c *fiber.Ctx) error {
+		return access.RemoveAllowedWriteNpub(c, store)
+	})
+	secured.Post("/allowed-npubs/bulk-import", func(c *fiber.Ctx) error {
+		return access.BulkImportNpubs(c, store)
+	})
+
+	// ================================
+	// STATIC FILE SERVING
+	// ================================
 	app.Use(filesystem.New(filesystem.Config{
 		Root:   http.Dir("./web"),
 		Browse: false,
@@ -231,5 +355,29 @@ func StartServer(store stores.Store) error {
 		return c.SendFile("./web/index.html")
 	})
 
-	return app.Listen(fmt.Sprintf(":%d", p+2))
+	// ================================
+	// BACKGROUND SERVICES
+	// ================================
+	go services.PullBitcoinPrice(store)
+
+	// Start the server
+	port := config.GetPort("web")
+	address := fmt.Sprintf("%s:%d", viper.GetString("server.bind_address"), port)
+
+	logging.Info("Web server starting", map[string]interface{}{
+		"address": address,
+	})
+
+	//if viper.GetBool("server.upnp") {
+	//	upnp := upnp.Get()
+	//
+	//	err := upnp.ForwardPort(uint16(port), "Hornet Storage Web Panel")
+	//	if err != nil {
+	//		logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+	//			"port": port,
+	//		})
+	//	}
+	//}
+
+	return app.Listen(address)
 }
