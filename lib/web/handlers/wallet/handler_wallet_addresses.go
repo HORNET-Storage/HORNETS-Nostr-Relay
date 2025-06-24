@@ -45,7 +45,7 @@ func SaveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 		addresses = append(addresses, addr)
 	}
 
-	expectedWalletName := viper.GetString("wallet_name")
+	expectedWalletName := viper.GetString("wallet.name")
 	if expectedWalletName == "" {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Wallet name not configured"})
 	}

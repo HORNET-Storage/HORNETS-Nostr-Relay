@@ -81,11 +81,11 @@ func UpdateWalletBalance(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	// Get the configured wallet name, if it's empty use the one from the request
-	expectedWalletName := viper.GetString("wallet_name")
+	expectedWalletName := viper.GetString("wallet.name")
 	if expectedWalletName == "" {
 		log.Printf("No wallet name configured, using wallet name from request: %s", walletName)
 		// Update the config with the wallet name from the request
-		viper.Set("wallet_name", walletName)
+		viper.Set("wallet.name", walletName)
 		if err := viper.WriteConfig(); err != nil {
 			log.Printf("Warning: Failed to write wallet name to config: %v", err)
 			// Continue processing even if writing to config fails
