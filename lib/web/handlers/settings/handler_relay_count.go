@@ -29,14 +29,14 @@ func GetRelayCount(c *fiber.Ctx, store stores.Store) error {
 	// Dynamically count files for each media type defined in config
 	for mediaType, definition := range mediaDefinitions {
 		totalCount := 0
-		
-		// Count files by extensions for this media type
-		for _, ext := range definition.Extensions {
-			if count, err := store.GetStatsStore().FetchFileCountByType(ext); err == nil {
+
+		// Count files by MIME types (not extensions) for this media type
+		for _, mimeType := range definition.MimePatterns {
+			if count, err := store.GetStatsStore().FetchFileCountByType(mimeType); err == nil {
 				totalCount += count
 			}
 		}
-		
+
 		// Add to response with the media type name as key
 		responseData[mediaType] = totalCount
 	}
