@@ -222,7 +222,7 @@ func GetSubscribersFromEvents(c *fiber.Ctx, store stores.Store) error {
 		// Skip if it matches a free tier (price = "0")
 		isFreeTier := false
 		for _, tier := range settings.AllowedUsersSettings.Tiers {
-			if tier.MonthlyLimit == subscriptionTier && tier.PriceSats <= 0 {
+			if tier.Name == subscriptionTier && tier.PriceSats <= 0 {
 				isFreeTier = true
 				break
 			}

@@ -130,11 +130,18 @@ type SubscriptionTiers struct {
 	Tiers []SubscriptionTier `mapstructure:"tiers"`
 }
 
-// PaidTierConfig holds paid tier configuration
+// Validation constants for subscription tier limits
+const (
+	MinMonthlyLimitBytes = 1048576         // 1 MB minimum
+	MaxMonthlyLimitBytes = 1099511627776   // 1 TB maximum
+)
+
+// SubscriptionTier holds subscription tier configuration
 type SubscriptionTier struct {
-	Name         string `mapstructure:"name"`
-	PriceSats    int    `mapstructure:"price_sats"`
-	MonthlyLimit string `mapstructure:"monthly_limit"`
+	Name              string `mapstructure:"name" json:"name"`
+	PriceSats         int    `mapstructure:"price_sats" json:"price_sats"`
+	MonthlyLimitBytes int64  `mapstructure:"monthly_limit_bytes" json:"monthly_limit_bytes"`
+	Unlimited         bool   `mapstructure:"unlimited" json:"unlimited"`
 }
 
 // AllowedUsersSettings represents the unified access control configuration
