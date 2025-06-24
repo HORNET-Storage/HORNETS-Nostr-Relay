@@ -142,9 +142,10 @@ func verifyAuthTags(tags nostr.Tags, challenge string) bool {
 	var hasRelayTag, hasChallengeTag bool
 	for _, tag := range tags {
 		if len(tag) >= 2 {
-			if tag[0] == "relay" {
+			switch tag[0] {
+			case "relay":
 				hasRelayTag = true
-			} else if tag[0] == "challenge" {
+			case "challenge":
 				hasChallengeTag = true
 				if tag[1] != challenge {
 					return false
