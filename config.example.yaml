@@ -119,20 +119,26 @@ event_filtering:
     allowed_protocols: []
 
 # ==================================================
-# SUBSCRIPTION TIERS (Dynamic - web panel can modify)
+# ALLOWED USERS SETTINGS (Dynamic - web panel can modify)
 # ==================================================
-# Remove these to disable subscription tiers, remove the free tier if it's not wanted
-subscriptions:
+allowed_users:
+  mode: "paid"  # free, paid, exclusive
+  read_access:
+    enabled: true
+    scope: "all_users"  # all_users, paid_users, allowed_users
+  write_access:
+    enabled: true
+    scope: "paid_users"  # all_users (free mode), paid_users (paid mode), allowed_users (exclusive mode)
   tiers:
-    - name: "Free"
-      price_sats: 0
-      monthly_limit: "100 MB"
-    - name: "Basic"
+    - name: "Starter"
       price_sats: 1000
-      monthly_limit: "1 GB"
-    - name: "Standard"
+      monthly_limit_bytes: 1073741824  # 1 GB
+      unlimited: false
+    - name: "Professional"
+      price_sats: 5000
+      monthly_limit_bytes: 5368709120  # 5 GB
+      unlimited: false
+    - name: "Business"
       price_sats: 10000
-      monthly_limit: "5 GB"
-    - name: "Premium"
-      price_sats: 15000
-      monthly_limit: "10 GB"
+      monthly_limit_bytes: 10737418240  # 10 GB
+      unlimited: false

@@ -3,9 +3,15 @@ package settings
 import (
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
+
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 )
 
 // GetSettings returns the entire configuration
@@ -18,50 +24,50 @@ func GetSettings(c *fiber.Ctx) error {
 	// Log the complete settings structure being sent to frontend
 	log.Printf("=== SETTINGS RESPONSE START ===")
 	log.Printf("Settings structure being sent to frontend:")
-	
+
 	// Log each major section
 	if subscriptions, ok := settings["subscriptions"]; ok {
 		log.Printf("subscriptions: %+v", subscriptions)
 	} else {
 		log.Printf("subscriptions: NOT FOUND")
 	}
-	
+
 	if allowedUsers, ok := settings["allowed_users"]; ok {
 		log.Printf("allowed_users: %+v", allowedUsers)
 	} else {
 		log.Printf("allowed_users: NOT FOUND")
 	}
-	
+
 	if eventFiltering, ok := settings["event_filtering"]; ok {
 		log.Printf("event_filtering: %+v", eventFiltering)
 	} else {
 		log.Printf("event_filtering: NOT FOUND")
 	}
-	
+
 	if contentFiltering, ok := settings["content_filtering"]; ok {
 		log.Printf("content_filtering: %+v", contentFiltering)
 	} else {
 		log.Printf("content_filtering: NOT FOUND")
 	}
-	
+
 	if relay, ok := settings["relay"]; ok {
 		log.Printf("relay: %+v", relay)
 	} else {
 		log.Printf("relay: NOT FOUND")
 	}
-	
+
 	if server, ok := settings["server"]; ok {
 		log.Printf("server: %+v", server)
 	} else {
 		log.Printf("server: NOT FOUND")
 	}
-	
+
 	if externalServices, ok := settings["external_services"]; ok {
 		log.Printf("external_services: %+v", externalServices)
 	} else {
 		log.Printf("external_services: NOT FOUND")
 	}
-	
+
 	if logging, ok := settings["logging"]; ok {
 		log.Printf("logging: %+v", logging)
 	} else {
@@ -75,9 +81,9 @@ func GetSettings(c *fiber.Ctx) error {
 	response := fiber.Map{
 		"settings": settings,
 	}
-	
+
 	log.Printf("Final response structure: %+v", response)
-	
+
 	return c.JSON(response)
 }
 
@@ -96,7 +102,7 @@ func normalizeDataTypes(settings map[string]interface{}) {
 	if relay, ok := settings["relay"].(map[string]interface{}); ok {
 		if supportedNipsRaw, ok := relay["supported_nips"]; ok {
 			var normalizedNips []int
-			
+
 			switch v := supportedNipsRaw.(type) {
 			case []interface{}:
 				for _, item := range v {
@@ -131,7 +137,7 @@ func normalizeDataTypes(settings map[string]interface{}) {
 			case []int:
 				normalizedNips = v // Already correct type
 			}
-			
+
 			if len(normalizedNips) > 0 {
 				relay["supported_nips"] = normalizedNips
 				log.Printf("Normalized supported_nips to integers: %v", normalizedNips)
@@ -140,9 +146,8 @@ func normalizeDataTypes(settings map[string]interface{}) {
 	}
 }
 
-
 // UpdateSettings updates configuration values
-func UpdateSettings(c *fiber.Ctx) error {
+func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Update settings request received")
 
 	var data map[string]interface{}
@@ -171,6 +176,16 @@ func UpdateSettings(c *fiber.Ctx) error {
 	// NORMALIZATION: Ensure proper data types before saving
 	normalizeDataTypes(settings)
 
+	// Check if allowed_users settings are being updated (affects subscription tiers)
+	allowedUsersUpdated := false
+	if _, exists := settings["allowed_users"]; exists {
+		allowedUsersUpdated = true
+		// Set the last updated timestamp for allowed_users
+		if allowedUsersMap, ok := settings["allowed_users"].(map[string]interface{}); ok {
+			allowedUsersMap["last_updated"] = time.Now().Unix()
+		}
+	}
+
 	// Update each setting
 	for key, value := range settings {
 		log.Printf("Setting %s = %v (type: %T)", key, value, value)
@@ -185,6 +200,45 @@ func UpdateSettings(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save settings",
 		})
+	}
+
+	// If allowed_users settings were updated, trigger event regeneration
+	if allowedUsersUpdated {
+		log.Println("Allowed users settings updated, triggering event regeneration...")
+
+		// Schedule batch update of kind 888 events after a short delay
+		// This allows for multiple rapid setting changes to be batched together
+		subscription.ScheduleBatchUpdateAfter(5 * time.Second)
+
+		// Regenerate kind 411 event immediately in a goroutine
+		if store != nil {
+			go func() {
+				log.Println("Regenerating kind 411 event due to subscription tier changes...")
+
+				// Get the private and public keys from viper (same way as main.go does)
+				serializedPrivateKey := viper.GetString("relay.private_key")
+				if len(serializedPrivateKey) <= 0 {
+					log.Printf("Error: No private key found in configuration")
+					return
+				}
+
+				privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
+				if err != nil {
+					log.Printf("Error deserializing private key: %v", err)
+					return
+				}
+
+				// Use the existing store instance passed from the web server
+				// This avoids the database lock issue
+				if err := kind411.CreateKind411Event(privateKey, publicKey, store); err != nil {
+					log.Printf("Error regenerating kind 411 event: %v", err)
+				} else {
+					log.Printf("Successfully regenerated kind 411 event")
+				}
+			}()
+		} else {
+			log.Printf("Warning: Store not available, skipping kind 411 regeneration")
+		}
 	}
 
 	log.Println("Settings updated successfully")

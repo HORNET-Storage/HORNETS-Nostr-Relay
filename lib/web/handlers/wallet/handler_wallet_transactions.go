@@ -302,12 +302,11 @@ func ProcessWalletTransaction(store stores.Store, subManager *subscription.Subsc
 
 		for _, tierInfo := range settings.AllowedUsersSettings.Tiers {
 			// Extract price in satoshis
-			if price := int64(tierInfo.PriceSats); err == nil {
-				// If payment amount is within 10% of the tier price, consider it that tier
-				if satoshis >= price*9/10 && satoshis <= price*11/10 {
-					tier = tierInfo.MonthlyLimit
-					break
-				}
+			price := int64(tierInfo.PriceSats)
+			// If payment amount is within 10% of the tier price, consider it that tier
+			if satoshis >= price*9/10 && satoshis <= price*11/10 {
+				tier = tierInfo.Name
+				break
 			}
 		}
 
@@ -356,7 +355,8 @@ func InitializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 	// Log the tiers for debugging
 	log.Printf("Loading subscription tiers from relay_settings: %+v", settings.AllowedUsersSettings)
 	for i, tier := range settings.AllowedUsersSettings.Tiers {
-		log.Printf("Tier %d: DataLimit='%s', Price='%d'", i, tier.MonthlyLimit, tier.PriceSats)
+		log.Printf("Tier %d: Name='%s', MonthlyLimitBytes='%d', Price='%d', Unlimited='%t'",
+			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
 
 	// Create and return the subscription manager

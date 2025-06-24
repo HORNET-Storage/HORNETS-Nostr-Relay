@@ -106,27 +106,14 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.mode", "whitelist")
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
 	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843"})
-	viper.SetDefault("event_filtering.media_definitions", map[string]types.MediaDefinition{
-		"image": {
-			MimePatterns: []string{"image/jpeg", "image/png", "image/gif"},
-			Extensions:   []string{".jpg", ".jpeg", ".png", ".gif"},
-			MaxSizeMB:    100,
-		},
-	})
+	// Note: media_definitions defaults removed to prevent field name conflicts
+	// The config.yaml file contains the complete media definitions
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
 	viper.SetDefault("event_filtering.protocols.allowed_protocols", []string{})
 
-	// Subscription tiers defaults
-	viper.SetDefault("subscriptions.tiers", []types.SubscriptionTier{
-		{Name: "Free", PriceSats: 0, MonthlyLimit: "100 MB"},
-		{Name: "Basic", PriceSats: 1000, MonthlyLimit: "1 GB"},
-		{Name: "Standard", PriceSats: 10000, MonthlyLimit: "5 GB"},
-		{Name: "Premium", PriceSats: 15000, MonthlyLimit: "10 GB"},
-	})
-
-	/// // Allowed users defaults
+	// Allowed users defaults
 	viper.SetDefault("allowed_users.mode", "free")
 	viper.SetDefault("allowed_users.read_access.enabled", true)
 	viper.SetDefault("allowed_users.read_access.scope", "all_users")

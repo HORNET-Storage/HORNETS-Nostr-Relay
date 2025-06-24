@@ -95,20 +95,20 @@ func NewSubscriptionManager(
 
 	// Log each tier in detail for debugging
 	for i, tier := range tiers {
-		log.Printf("DEBUG: Initial tier %d: MonthlyLimit='%s', PriceSats='%d'",
-			i, tier.MonthlyLimit, tier.PriceSats)
+		log.Printf("DEBUG: Initial tier %d: MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
+			i, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
 
 	// Validate tiers data
 	validTiers := make([]types.SubscriptionTier, 0)
 	for i, tier := range tiers {
-		if tier.MonthlyLimit == "" {
-			log.Printf("Warning: skipping tier %d with empty MonthlyLimit: '%s'", i, tier.MonthlyLimit)
+		if tier.MonthlyLimitBytes <= 0 && !tier.Unlimited {
+			log.Printf("Warning: skipping tier %d with invalid MonthlyLimitBytes: '%d'", i, tier.MonthlyLimitBytes)
 			continue
 		}
 		validTiers = append(validTiers, tier)
-		log.Printf("Validated tier %d: MonthlyLimit='%s', PriceSats='%d'",
-			i, tier.MonthlyLimit, tier.PriceSats)
+		log.Printf("Validated tier %d: MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
+			i, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
 
 	return &SubscriptionManager{
@@ -148,7 +148,7 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	}
 
 	// Step 3: Determine appropriate tier for new user
-	tierLimit := m.findAppropriateTierForUser(npub, "", &settings.AllowedUsersSettings)
+	tierLimit := m.findAppropriateTierForUser(npub, nil, &settings.AllowedUsersSettings)
 
 	// Create initial NIP-88 event with storage usage based on assigned tier
 	storageInfo := StorageInfo{
@@ -156,9 +156,9 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 		UpdatedAt: time.Now(),
 	}
 
-	if tierLimit != "" {
-		storageInfo.TotalBytes = m.calculateStorageLimit(tierLimit)
-		log.Printf("Setting initial storage limit to %d bytes for tier: %s", storageInfo.TotalBytes, tierLimit)
+	if tierLimit != nil {
+		storageInfo.TotalBytes = tierLimit.MonthlyLimitBytes
+		log.Printf("Setting initial storage limit to %d bytes for tier: %s", storageInfo.TotalBytes, tierLimit.Name)
 	} else {
 		storageInfo.TotalBytes = 0
 		log.Printf("No tier assigned. Setting initial storage limit to 0 bytes")
@@ -166,20 +166,32 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 
 	// Set expiration date (1 month for all initial subscriptions)
 	expirationDate := time.Now().AddDate(0, 1, 0)
-	log.Printf("Setting tier limit: %s with expiration: %v", tierLimit, expirationDate)
+	if tierLimit != nil {
+		log.Printf("Setting tier limit: %s with expiration: %v", tierLimit.Name, expirationDate)
+	} else {
+		log.Printf("Setting no tier limit with expiration: %v", expirationDate)
+	}
 
 	// Step 4: Create the NIP-88 event
+	var tierLimitStr string
+	if tierLimit != nil {
+		tierLimitStr = tierLimit.Name
+	}
 	err = m.createNIP88EventIfNotExists(&types.Subscriber{
 		Npub:    npub,
 		Address: address.Address,
-	}, tierLimit, expirationDate, &storageInfo)
+	}, tierLimitStr, expirationDate, &storageInfo)
 
 	if err != nil {
 		log.Printf("Error creating NIP-88 event: %v", err)
 		return err
 	}
 
-	log.Printf("Successfully initialized subscriber %s with tier: %s", npub, tierLimit)
+	if tierLimit != nil {
+		log.Printf("Successfully initialized subscriber %s with tier: %s", npub, tierLimit.Name)
+	} else {
+		log.Printf("Successfully initialized subscriber %s with no tier", npub)
+	}
 	return nil
 }
 
@@ -215,8 +227,10 @@ func (m *SubscriptionManager) ProcessPayment(
 			if PriceSats > highestTierPriceSats {
 				highestTierPriceSats = PriceSats
 				highestTier = &types.SubscriptionTier{
-					MonthlyLimit: t.MonthlyLimit,
-					PriceSats:    t.PriceSats,
+					Name:              t.Name,
+					MonthlyLimitBytes: t.MonthlyLimitBytes,
+					PriceSats:         t.PriceSats,
+					Unlimited:         t.Unlimited,
 				}
 			}
 		}
@@ -320,11 +334,11 @@ func (m *SubscriptionManager) ProcessPayment(
 	}
 
 	// Validate that the paid tier has reasonable storage limits
-	paidTierBytes := m.calculateStorageLimit(tier.MonthlyLimit)
-	if paidTierBytes <= 0 {
-		return fmt.Errorf("invalid paid tier storage limit: %s", tier.MonthlyLimit)
+	paidTierBytes := tier.MonthlyLimitBytes
+	if paidTierBytes <= 0 && !tier.Unlimited {
+		return fmt.Errorf("invalid paid tier storage limit: %d bytes", paidTierBytes)
 	}
-	log.Printf("Processing payment for tier: %s (%d bytes)", tier.MonthlyLimit, paidTierBytes)
+	log.Printf("Processing payment for tier: %s (%d bytes, unlimited: %t)", tier.Name, paidTierBytes, tier.Unlimited)
 
 	// Get current expiration date from event
 	expirationUnix := getTagUnixValue(currentEvent.Tags, "active_subscription")
@@ -364,14 +378,14 @@ func (m *SubscriptionManager) ProcessPayment(
 	err = m.createOrUpdateNIP88Event(&types.Subscriber{
 		Npub:    npub,
 		Address: address,
-	}, tier.MonthlyLimit, endDate, &storageInfo)
+	}, tier, endDate, &storageInfo)
 
 	if err != nil {
 		return fmt.Errorf("failed to update NIP-88 event: %v", err)
 	}
 
 	// Also update the paid subscribers table
-	m.updatePaidSubscriberRecord(npub, tier.MonthlyLimit, endDate, &storageInfo)
+	m.updatePaidSubscriberRecord(npub, tier, endDate, &storageInfo)
 
 	// Verify the update
 	updatedEvents, err := m.store.QueryEvents(nostr.Filter{
@@ -412,7 +426,7 @@ func (m *SubscriptionManager) ProcessPayment(
 				if err := m.createOrUpdateNIP88Event(&types.Subscriber{
 					Npub:    npub,
 					Address: address,
-				}, tier.MonthlyLimit, endDate, &storageInfo); err != nil {
+				}, tier, endDate, &storageInfo); err != nil {
 					log.Printf("Warning: failed to update final NIP-88 event with credit: %v", err)
 				} else {
 					log.Printf("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
@@ -423,7 +437,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 	// Add transaction processing log
 	log.Printf("Successfully processed payment for %s: %d sats for tier %s",
-		npub, amountSats, tier.MonthlyLimit)
+		npub, amountSats, tier.Name)
 
 	return nil
 }
@@ -437,7 +451,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 	highestTier *types.SubscriptionTier,
 ) error {
 	log.Printf("Processing high-tier payment (tx: %s) for %s: %d sats for tier %s",
-		transactionID, npub, amountSats, highestTier.MonthlyLimit)
+		transactionID, npub, amountSats, highestTier.Name)
 
 	// Fetch current NIP-88 event to get existing state
 	events, err := m.store.QueryEvents(nostr.Filter{
@@ -468,7 +482,10 @@ func (m *SubscriptionManager) processHighTierPayment(
 	}
 
 	// Calculate the storage for one period of highest tier
-	highestTierStorageBytes := m.calculateStorageLimit(highestTier.MonthlyLimit)
+	highestTierStorageBytes := highestTier.MonthlyLimitBytes
+	if highestTier.Unlimited {
+		highestTierStorageBytes = types.MaxMonthlyLimitBytes // Use max limit for unlimited
+	}
 
 	// Calculate total new storage for all periods purchased
 	totalNewStorage := highestTierStorageBytes * fullPeriods
@@ -479,7 +496,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 	storageInfo.UpdatedAt = time.Now()
 
 	log.Printf("Upgrading storage from %d to %d bytes (adding %d bytes for %d periods of tier: %s)",
-		prevBytes, storageInfo.TotalBytes, totalNewStorage, fullPeriods, highestTier.MonthlyLimit)
+		prevBytes, storageInfo.TotalBytes, totalNewStorage, fullPeriods, highestTier.Name)
 
 	// Calculate end date based on multiple periods
 	var endDate time.Time
@@ -508,14 +525,14 @@ func (m *SubscriptionManager) processHighTierPayment(
 	err = m.createOrUpdateNIP88Event(&types.Subscriber{
 		Npub:    npub,
 		Address: address,
-	}, highestTier.MonthlyLimit, endDate, &storageInfo)
+	}, highestTier, endDate, &storageInfo)
 
 	if err != nil {
 		return fmt.Errorf("failed to update NIP-88 event: %v", err)
 	}
 
 	// Also update the paid subscribers table
-	m.updatePaidSubscriberRecord(npub, highestTier.MonthlyLimit, endDate, &storageInfo)
+	m.updatePaidSubscriberRecord(npub, highestTier, endDate, &storageInfo)
 
 	// Try to use remaining sats for lower tiers (cascading approach)
 	// Sort tiers by PriceSats (descending)
@@ -531,7 +548,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 		sortedTiers := make([]tierInfo, 0)
 		for _, tier := range m.subscriptionTiers {
 			// Skip free tiers and the highest tier (already processed)
-			if tier.PriceSats <= 0 || tier.MonthlyLimit == highestTier.MonthlyLimit {
+			if tier.PriceSats <= 0 || (tier.MonthlyLimitBytes == highestTier.MonthlyLimitBytes && tier.Unlimited == highestTier.Unlimited) {
 				continue
 			}
 
@@ -560,13 +577,16 @@ func (m *SubscriptionManager) processHighTierPayment(
 		for _, tierInfo := range sortedTiers {
 			if remainingSats >= tierInfo.PriceSats {
 				// We can afford this tier
-				tierBytes := m.calculateStorageLimit(tierInfo.tier.MonthlyLimit)
+				tierBytes := tierInfo.tier.MonthlyLimitBytes
+				if tierInfo.tier.Unlimited {
+					tierBytes = types.MaxMonthlyLimitBytes // Use max limit for unlimited
+				}
 
 				// Add storage
 				storageInfo.TotalBytes += tierBytes
 
 				log.Printf("Using %d sats for additional tier: %s (adding %d bytes)",
-					tierInfo.PriceSats, tierInfo.tier.MonthlyLimit, tierBytes)
+					tierInfo.PriceSats, tierInfo.tier.Name, tierBytes)
 
 				// Subtract from remaining sats
 				remainingSats -= tierInfo.PriceSats
@@ -583,14 +603,14 @@ func (m *SubscriptionManager) processHighTierPayment(
 			err = m.createOrUpdateNIP88Event(&types.Subscriber{
 				Npub:    npub,
 				Address: address,
-			}, highestTier.MonthlyLimit, endDate, &storageInfo)
+			}, highestTier, endDate, &storageInfo)
 
 			if err != nil {
 				return fmt.Errorf("failed to update NIP-88 event with additional storage: %v", err)
 			}
 
 			// Update the paid subscribers table
-			m.updatePaidSubscriberRecord(npub, highestTier.MonthlyLimit, endDate, &storageInfo)
+			m.updatePaidSubscriberRecord(npub, highestTier, endDate, &storageInfo)
 		}
 	}
 
@@ -616,7 +636,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 		err = m.createOrUpdateNIP88Event(&types.Subscriber{
 			Npub:    npub,
 			Address: address,
-		}, highestTier.MonthlyLimit, endDate, &storageInfo)
+		}, highestTier, endDate, &storageInfo)
 
 		if err != nil {
 			log.Printf("Warning: failed to update final NIP-88 event with credit: %v", err)
@@ -626,7 +646,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 	}
 
 	log.Printf("Successfully processed high-tier payment: %d sats for %d months of %s tier",
-		amountSats, fullPeriods, highestTier.MonthlyLimit)
+		amountSats, fullPeriods, highestTier.Name)
 
 	return nil
 }
@@ -787,12 +807,21 @@ func (m *SubscriptionManager) createEvent(
 // createOrUpdateNIP88Event creates or updates a subscriber's NIP-88 event
 func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	subscriber *types.Subscriber,
-	activeTier string,
+	activeTier interface{}, // Can be string or *types.SubscriptionTier
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) error {
+	var tierName string
+	switch t := activeTier.(type) {
+	case string:
+		tierName = t
+	case *types.SubscriptionTier:
+		tierName = t.Name
+	default:
+		tierName = ""
+	}
 	log.Printf("Creating/updating NIP-88 event for %s with tier %s",
-		subscriber.Npub, activeTier)
+		subscriber.Npub, tierName)
 
 	// Delete existing NIP-88 event if it exists
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
@@ -809,7 +838,7 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	}
 
 	// Create new event
-	event, err := m.createEvent(subscriber, activeTier, expirationDate, storageInfo)
+	event, err := m.createEvent(subscriber, tierName, expirationDate, storageInfo)
 	if err != nil {
 		return err
 	}
@@ -898,15 +927,19 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 	var bestPriceSats int64
 
 	for _, tier := range m.subscriptionTiers {
-		if tier.MonthlyLimit == "" || tier.PriceSats == 0 {
-			log.Printf("Warning: skipping invalid tier: MonthlyLimit='%s', PriceSats='%d'",
-				tier.MonthlyLimit, tier.PriceSats)
+		if tier.MonthlyLimitBytes <= 0 && !tier.Unlimited {
+			log.Printf("Warning: skipping invalid tier: Name='%s', MonthlyLimitBytes='%d', Unlimited='%t'",
+				tier.Name, tier.MonthlyLimitBytes, tier.Unlimited)
+			continue
+		}
+		if tier.PriceSats == 0 {
+			log.Printf("Warning: skipping free tier: Name='%s'", tier.Name)
 			continue
 		}
 
 		PriceSats := int64(tier.PriceSats)
-		log.Printf("Checking tier: MonthlyLimit='%s', PriceSats='%d' (%d sats)",
-			tier.MonthlyLimit, tier.PriceSats, PriceSats)
+		log.Printf("Checking tier: Name='%s', PriceSats='%d' (%d sats)",
+			tier.Name, tier.PriceSats, PriceSats)
 
 		// Strict matching: Payment must be >= tier PriceSats exactly
 		// No tolerance - exact matches only
@@ -915,12 +948,14 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 		// Must match exactly AND be better than current best match
 		if exactMatch && PriceSats > bestPriceSats {
 			bestMatch = &types.SubscriptionTier{
-				MonthlyLimit: tier.MonthlyLimit,
-				PriceSats:    tier.PriceSats,
+				Name:              tier.Name,
+				MonthlyLimitBytes: tier.MonthlyLimitBytes,
+				PriceSats:         tier.PriceSats,
+				Unlimited:         tier.Unlimited,
 			}
 			bestPriceSats = PriceSats
-			log.Printf("New best match: MonthlyLimit='%s', PriceSats='%d' (exact match)",
-				bestMatch.MonthlyLimit, bestMatch.PriceSats)
+			log.Printf("New best match: Name='%s', PriceSats='%d' (exact match)",
+				bestMatch.Name, bestMatch.PriceSats)
 		}
 	}
 
@@ -928,8 +963,8 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 		return nil, fmt.Errorf("no matching tier for payment of %d sats", amountSats)
 	}
 
-	log.Printf("Selected tier: MonthlyLimit='%s', PriceSats='%d'",
-		bestMatch.MonthlyLimit, bestMatch.PriceSats)
+	log.Printf("Selected tier: Name='%s', PriceSats='%d'",
+		bestMatch.Name, bestMatch.PriceSats)
 	return bestMatch, nil
 }
 
@@ -1067,36 +1102,8 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 	return "active"
 }
 
-// calculateStorageLimit converts tier string to bytes
-func (m *SubscriptionManager) calculateStorageLimit(tier string) int64 {
-	log.Printf("Calculating storage limit for tier: %s", tier)
-
-	var amount int64
-	var unit string
-
-	// Parse the string to get amount and unit (MB or GB)
-	_, err := fmt.Sscanf(tier, "%d %2s per month", &amount, &unit)
-	if err != nil {
-		log.Printf("Warning: could not parse storage limit from tier '%s': %v", tier, err)
-		return 0
-	}
-
-	// Convert to bytes based on unit
-	var bytes int64
-	switch strings.ToUpper(unit) {
-	case "MB":
-		bytes = amount * 1024 * 1024 // MB to bytes
-		log.Printf("Converted %d MB to %d bytes", amount, bytes)
-	case "GB":
-		bytes = amount * 1024 * 1024 * 1024 // GB to bytes
-		log.Printf("Converted %d GB to %d bytes", amount, bytes)
-	default:
-		log.Printf("Warning: unknown unit '%s' in tier '%s'", unit, tier)
-		return 0
-	}
-
-	return bytes
-}
+// This method is no longer needed as we now use tier.MonthlyLimitBytes directly
+// Keeping for backward compatibility if needed in the future
 
 func getTagValue(tags []nostr.Tag, key string) string {
 	for _, tag := range tags {
@@ -1202,21 +1209,32 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	needsUpdate := false
 
 	// Check if tier needs updating based on current mode
-	expectedTier := m.findAppropriateTierForUser(pubkey, activeTier, &allowedUsersSettings)
+	// Convert activeTier string to tier object for comparison
+	var currentTierObj *types.SubscriptionTier
+	if activeTier != "" {
+		for i := range allowedUsersSettings.Tiers {
+			if allowedUsersSettings.Tiers[i].Name == activeTier {
+				currentTierObj = &allowedUsersSettings.Tiers[i]
+				break
+			}
+		}
+	}
 
-	if expectedTier == "" {
+	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, &allowedUsersSettings)
+
+	if expectedTier == nil {
 		// User should not have access in current mode
 		if allowedUsersSettings.Mode == "exclusive" {
 			log.Printf("User %s no longer in allowed lists for exclusive mode, but keeping existing allocation", pubkey)
 			// Don't remove existing allocations, just don't give new ones
 		}
-	} else if expectedTier != activeTier {
+	} else if expectedTier.Name != activeTier {
 		// Tier has changed
-		log.Printf("Expected tier changed for %s: %s -> %s", pubkey, activeTier, expectedTier)
+		log.Printf("Expected tier changed for %s: %s -> %s", pubkey, activeTier, expectedTier.Name)
 		needsUpdate = true
 	} else if status == "inactive" || storageInfo.TotalBytes == 0 {
 		// User should have active allocation but doesn't
-		log.Printf("User %s should have active %s tier but status is %s", pubkey, expectedTier, status)
+		log.Printf("User %s should have active %s tier but status is %s", pubkey, expectedTier.Name, status)
 		needsUpdate = true
 	}
 
@@ -1225,14 +1243,17 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	}
 
 	// Update the event based on expected tier
-	if expectedTier != "" {
+	if expectedTier != nil {
 		// Set expiration if not set (monthly renewal)
 		if expirationDate.IsZero() || expirationDate.Before(time.Now()) {
 			expirationDate = time.Now().AddDate(0, 1, 0) // 1 month from now
 		}
 
 		// Calculate storage based on expected tier
-		expectedTierBytes := m.calculateStorageLimit(expectedTier)
+		expectedTierBytes := expectedTier.MonthlyLimitBytes
+		if expectedTier.Unlimited {
+			expectedTierBytes = types.MaxMonthlyLimitBytes
+		}
 
 		// Don't reduce storage if they already have more (graceful transition)
 		if storageInfo.TotalBytes < expectedTierBytes {
@@ -1240,7 +1261,7 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 		}
 
 		// Update active tier
-		activeTier = expectedTier
+		activeTier = expectedTier.Name
 	}
 
 	// Create a new updated event
@@ -1293,7 +1314,10 @@ func (m *SubscriptionManager) checkAndApplyCredit(
 
 	// We found a tier! Apply it
 	tierPriceSats := int64(tier.PriceSats)
-	tierBytes := m.calculateStorageLimit(tier.MonthlyLimit)
+	tierBytes := tier.MonthlyLimitBytes
+	if tier.Unlimited {
+		tierBytes = types.MaxMonthlyLimitBytes
+	}
 
 	// Add storage
 	prevBytes := storageInfo.TotalBytes
@@ -1301,20 +1325,20 @@ func (m *SubscriptionManager) checkAndApplyCredit(
 	storageInfo.UpdatedAt = time.Now()
 
 	log.Printf("Using credit of %d sats for tier: %s (adding %d bytes to existing %d bytes, new total: %d bytes)",
-		tierPriceSats, tier.MonthlyLimit, tierBytes, prevBytes, storageInfo.TotalBytes)
+		tierPriceSats, tier.Name, tierBytes, prevBytes, storageInfo.TotalBytes)
 
 	// Update the NIP-88 event
 	err = m.createOrUpdateNIP88Event(&types.Subscriber{
 		Npub:    npub,
 		Address: address,
-	}, tier.MonthlyLimit, endDate, storageInfo)
+	}, tier, endDate, storageInfo)
 
 	if err != nil {
 		return credit, fmt.Errorf("failed to update NIP-88 event with credit-purchased tier: %v", err)
 	}
 
 	// Update paid subscriber record
-	m.updatePaidSubscriberRecord(npub, tier.MonthlyLimit, endDate, storageInfo)
+	m.updatePaidSubscriberRecord(npub, tier, endDate, storageInfo)
 
 	// Update credit in database
 	remainingCredit := credit - tierPriceSats
@@ -1323,7 +1347,7 @@ func (m *SubscriptionManager) checkAndApplyCredit(
 	}
 
 	log.Printf("Successfully used %d sats from credit for tier %s, remaining credit: %d",
-		tierPriceSats, tier.MonthlyLimit, remainingCredit)
+		tierPriceSats, tier.Name, remainingCredit)
 
 	// Check if remaining credit can be used for another tier recursively
 	if remainingCredit > 0 {
@@ -1421,7 +1445,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 }
 
 // processSingleSubscriptionEvent handles the storage adjustment logic for a single kind 888 event
-// Only handling tier adjustments based on mode, as paid tiers are automatically updated when users purchase them
+// During migration, preserve existing free allocations until expiration, only upgrade actual paid users
 func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event, allowedUsersSettings *types.AllowedUsersSettings) error {
 	// Extract pubkey
 	pubkey := getTagValue(event.Tags, "p")
@@ -1440,55 +1464,112 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event,
 	expirationUnix := getTagUnixValue(event.Tags, "active_subscription")
 	expirationDate := time.Unix(expirationUnix, 0)
 	address := getTagValue(event.Tags, "relay_bitcoin_address")
+	currentBytes := storageInfo.TotalBytes
 
-	needsUpdate := false
+	// Determine if this is a free tier user based on current allocation
+	// Users with 100MB (104857600 bytes) are likely free tier users
+	// Users with larger allocations (450MB, 10GB) were likely paid users
+	isFreeUser := currentBytes <= 104857600 // 100 MB or less = free user
 
-	// Handle tier adjustments based on mode
-	// Find appropriate tier for this user based on mode and current status
-	newTierMonthlyLimit := m.findAppropriateTierForUser(pubkey, activeTier, allowedUsersSettings)
+	var newTier *types.SubscriptionTier
+	var needsUpdate bool
 
-	if newTierMonthlyLimit == "" {
-		log.Printf("No appropriate tier found for user %s in %s mode", pubkey, allowedUsersSettings.Mode)
-		return nil
-	}
+	if isFreeUser {
+		// For free users: preserve their current free allocation until expiration
+		// Don't upgrade them to paid tiers during migration
+		log.Printf("Preserving free tier allocation for %s (%d bytes) until expiration: %s",
+			pubkey, currentBytes, expirationDate.Format("2006-01-02"))
 
-	newTierBytes := m.calculateStorageLimit(newTierMonthlyLimit)
-	oldTierBytes := storageInfo.TotalBytes
-
-	// Only update if tier has actually changed
-	if newTierMonthlyLimit != activeTier || newTierBytes != oldTierBytes {
-		log.Printf("Updating tier for %s from %s (%d bytes) to %s (%d bytes)",
-			pubkey, activeTier, oldTierBytes, newTierMonthlyLimit, newTierBytes)
-
-		// Update storage allocation
-		if newTierBytes > oldTierBytes {
-			// Tier increased - add the difference
-			storageInfo.TotalBytes = newTierBytes
-		} else {
-			// Tier decreased - set new limit but don't reduce below current usage
-			if newTierBytes < storageInfo.UsedBytes {
-				storageInfo.TotalBytes = storageInfo.UsedBytes // Can't go below current usage
-				log.Printf("Warning: New tier limit (%d) is below current usage (%d) for %s",
-					newTierBytes, storageInfo.UsedBytes, pubkey)
-			} else {
-				storageInfo.TotalBytes = newTierBytes
+		// Find a free tier that matches their current allocation
+		for i := range allowedUsersSettings.Tiers {
+			tier := &allowedUsersSettings.Tiers[i]
+			if tier.PriceSats <= 0 { // Free tier
+				tierBytes := tier.MonthlyLimitBytes
+				if tierBytes >= currentBytes {
+					newTier = tier
+					break
+				}
 			}
 		}
 
-		// Update active tier
-		activeTier = newTierMonthlyLimit
+		// If no matching free tier, create a temporary free tier to preserve their allocation
+		if newTier == nil {
+			newTier = &types.SubscriptionTier{
+				Name:              "Basic Free",
+				MonthlyLimitBytes: currentBytes,
+				PriceSats:         0,
+				Unlimited:         false,
+			}
+		}
+
+		// Only update if tier name changed, preserve storage allocation
+		if newTier.Name != activeTier {
+			needsUpdate = true
+			storageInfo.TotalBytes = currentBytes // Keep current allocation
+		}
+
+	} else {
+		// For users with larger allocations (likely paid users): map to appropriate paid tier
+		log.Printf("Mapping paid user %s with %d bytes to appropriate paid tier", pubkey, currentBytes)
+
+		// Find the smallest paid tier that can accommodate their current storage
+		for i := range allowedUsersSettings.Tiers {
+			tier := &allowedUsersSettings.Tiers[i]
+			if tier.PriceSats > 0 { // Paid tier
+				tierBytes := tier.MonthlyLimitBytes
+				if tier.Unlimited {
+					tierBytes = types.MaxMonthlyLimitBytes
+				}
+
+				// If this tier can accommodate current storage, use it
+				if tierBytes >= currentBytes {
+					if newTier == nil || tierBytes < newTier.MonthlyLimitBytes {
+						newTier = tier
+					}
+				}
+			}
+		}
+
+		// If no paid tier found, keep their current allocation as a custom tier
+		if newTier == nil {
+			log.Printf("No paid tier found for %d bytes, preserving current allocation", currentBytes)
+			return nil // Don't update, keep as-is
+		}
+
+		newTierBytes := newTier.MonthlyLimitBytes
+		if newTier.Unlimited {
+			newTierBytes = types.MaxMonthlyLimitBytes
+		}
+
+		// Update storage allocation
+		storageInfo.TotalBytes = newTierBytes
 		needsUpdate = true
+
+		log.Printf("Updating paid user %s from %s (%d bytes) to %s (%d bytes)",
+			pubkey, activeTier, currentBytes, newTier.Name, newTierBytes)
 	}
 
-	// Update the event if needed
-	if needsUpdate {
-		return m.createOrUpdateNIP88Event(&types.Subscriber{
-			Npub:    pubkey,
-			Address: address,
-		}, activeTier, expirationDate, &storageInfo)
+	if !needsUpdate || newTier == nil {
+		return nil
 	}
 
-	return nil
+	// Ensure we don't go below current usage
+	if storageInfo.TotalBytes < storageInfo.UsedBytes {
+		storageInfo.TotalBytes = storageInfo.UsedBytes
+		log.Printf("Warning: New tier limit (%d) is below current usage (%d) for %s, keeping current usage as limit",
+			storageInfo.TotalBytes, storageInfo.UsedBytes, pubkey)
+	}
+
+	// Preserve existing expiration date, don't extend free periods
+	if expirationDate.IsZero() {
+		expirationDate = time.Now().AddDate(0, 1, 0) // 1 month from now only if no expiration set
+	}
+
+	// Update the event with appropriate tier
+	return m.createOrUpdateNIP88Event(&types.Subscriber{
+		Npub:    pubkey,
+		Address: address,
+	}, newTier.Name, expirationDate, &storageInfo)
 }
 
 // InitDailyFreeSubscriptionRenewal sets up a daily job to refresh expired free tier subscriptions
@@ -1571,7 +1652,7 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 			activeTier := getTagValue(event.Tags, "active_subscription")
 			isFreeTier := false
 			for _, tier := range allowedUsersSettings.Tiers {
-				if tier.MonthlyLimit == activeTier && tier.PriceSats <= 0 {
+				if tier.Name == activeTier && tier.PriceSats <= 0 {
 					isFreeTier = true
 					break
 				}
@@ -1616,9 +1697,22 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 
 			// Apply pending adjustment if found
 			if pendingTierLimit != "" {
-				storageInfo.TotalBytes = m.calculateStorageLimit(pendingTierLimit)
-				log.Printf("Applying pending adjustment for %s: new limit %s",
-					pubkey, pendingTierLimit)
+				// Find the tier by name
+				var pendingTier *types.SubscriptionTier
+				for i := range allowedUsersSettings.Tiers {
+					if allowedUsersSettings.Tiers[i].Name == pendingTierLimit {
+						pendingTier = &allowedUsersSettings.Tiers[i]
+						break
+					}
+				}
+				if pendingTier != nil {
+					storageInfo.TotalBytes = pendingTier.MonthlyLimitBytes
+					if pendingTier.Unlimited {
+						storageInfo.TotalBytes = types.MaxMonthlyLimitBytes
+					}
+					log.Printf("Applying pending adjustment for %s: new limit %s (%d bytes)",
+						pubkey, pendingTierLimit, storageInfo.TotalBytes)
+				}
 			}
 
 			// Determine which tier to use (keep current free tier or use pending adjustment)
@@ -1657,7 +1751,7 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 // This should be called after successfully updating a NIP-88 event
 func (m *SubscriptionManager) updatePaidSubscriberRecord(
 	npub string,
-	tier string,
+	tier interface{}, // Can be string or *types.SubscriptionTier
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) {
@@ -1668,12 +1762,28 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 		return
 	}
 
-	// Skip free tier subscriptions (PriceSats = "0")
-	for _, allowedTier := range allowedUsersSettings.Tiers {
-		if allowedTier.MonthlyLimit == tier && allowedTier.PriceSats <= 0 {
-			log.Printf("Skipping paid subscriber record update for free tier: %s", tier)
-			return
+	// Determine tier name and check if it's free
+	var tierName string
+	var isFree bool
+
+	switch t := tier.(type) {
+	case string:
+		tierName = t
+		// Check if this tier name is free
+		for _, allowedTier := range allowedUsersSettings.Tiers {
+			if allowedTier.Name == tierName && allowedTier.PriceSats <= 0 {
+				isFree = true
+				break
+			}
 		}
+	case *types.SubscriptionTier:
+		tierName = t.Name
+		isFree = t.PriceSats <= 0
+	}
+
+	if isFree {
+		log.Printf("Skipping paid subscriber record update for free tier: %s", tierName)
+		return
 	}
 
 	// Try to get the existing subscriber
@@ -1686,7 +1796,7 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 	// Create or update the paid subscriber record
 	paidSubscriber := &types.PaidSubscriber{
 		Npub:           npub,
-		Tier:           tier,
+		Tier:           tierName,
 		ExpirationDate: expirationDate,
 		StorageBytes:   storageInfo.TotalBytes,
 		UsedBytes:      storageInfo.UsedBytes,
@@ -1709,48 +1819,53 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 }
 
 // findAppropriateTierForUser determines the appropriate tier for a user based on mode and current status
-func (m *SubscriptionManager) findAppropriateTierForUser(pubkey, currentTier string, allowedUsersSettings *types.AllowedUsersSettings) string {
+func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentTier *types.SubscriptionTier, allowedUsersSettings *types.AllowedUsersSettings) *types.SubscriptionTier {
 	switch allowedUsersSettings.Mode {
 	case "free":
 		// In free mode, assign users to the first available free tier
-		for _, tier := range allowedUsersSettings.Tiers {
-			if tier.PriceSats <= 0 {
-				return tier.MonthlyLimit
+		for i := range allowedUsersSettings.Tiers {
+			if allowedUsersSettings.Tiers[i].PriceSats <= 0 {
+				return &allowedUsersSettings.Tiers[i]
 			}
 		}
 		// Fallback to basic free allocation
-		return "100 MB per month"
+		return &types.SubscriptionTier{
+			Name:              "Basic Free",
+			MonthlyLimitBytes: 100 * 1024 * 1024, // 100 MB
+			PriceSats:         0,
+			Unlimited:         false,
+		}
 
 	case "paid":
-		// In paid mode, check if user has active subscription
-		// If not, give them basic free tier if available
-		if currentTier == "" || currentTier == "0" {
-			// Look for free tier in paid mode
-			for _, tier := range allowedUsersSettings.Tiers {
-				if tier.PriceSats <= 0 {
-					return tier.MonthlyLimit
-				}
+		// In paid mode, give users the basic free tier by default
+		// They can upgrade by making payments
+		for i := range allowedUsersSettings.Tiers {
+			if allowedUsersSettings.Tiers[i].PriceSats <= 0 {
+				return &allowedUsersSettings.Tiers[i]
 			}
-			// No free tier available, use minimal allocation
-			return "100 MB per month"
 		}
-		// User has active subscription, keep current tier
-		return currentTier
+		// No free tier configured, use minimal allocation
+		return &types.SubscriptionTier{
+			Name:              "Basic Free",
+			MonthlyLimitBytes: 100 * 1024 * 1024, // 100 MB
+			PriceSats:         0,
+			Unlimited:         false,
+		}
 
 	case "exclusive":
 		// In exclusive mode, tier is manually assigned
 		// Check if user is still in allowed lists
 		if m.isUserInAllowedLists(pubkey) {
-			if currentTier != "" {
+			if currentTier != nil {
 				return currentTier
 			}
-			// User is allowed but no tier assigned, give basic tier
-			for _, tier := range allowedUsersSettings.Tiers {
-				return tier.MonthlyLimit // Use first available tier
+			// User is allowed but no tier assigned, give first available tier
+			if len(allowedUsersSettings.Tiers) > 0 {
+				return &allowedUsersSettings.Tiers[0]
 			}
 		}
 		// User not in allowed lists, no tier
-		return ""
+		return nil
 
 	default:
 		log.Printf("Unknown mode: %s", allowedUsersSettings.Mode)

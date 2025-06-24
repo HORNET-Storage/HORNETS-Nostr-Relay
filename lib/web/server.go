@@ -211,7 +211,9 @@ func StartServer(store stores.Store) error {
 
 	// Settings routes
 	app.Get("/api/settings", settings.GetSettings)
-	app.Post("/api/settings", settings.UpdateSettings)
+	app.Post("/api/settings", func(c *fiber.Ctx) error {
+		return settings.UpdateSettings(c, store)
+	})
 
 	// Individual setting routes (optional - for granular control)
 	app.Get("/api/settings/:key", settings.GetSettingValue)
