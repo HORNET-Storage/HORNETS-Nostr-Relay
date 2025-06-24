@@ -67,12 +67,12 @@ func ExtractTransactionDetails(transaction map[string]interface{}) (*transaction
 
 // validateWalletName ensures the wallet name is valid and consistent
 func ValidateWalletName(transactions []map[string]interface{}) string {
-	expectedWalletName := viper.GetString("wallet_name")
+	expectedWalletName := viper.GetString("wallet.name")
 
 	// Set wallet name from first transaction if not set
 	if expectedWalletName == "" && len(transactions) > 0 {
 		if walletName, ok := transactions[0]["wallet_name"].(string); ok {
-			viper.Set("wallet_name", walletName)
+			viper.Set("wallet.name", walletName)
 			expectedWalletName = walletName
 		}
 	}
