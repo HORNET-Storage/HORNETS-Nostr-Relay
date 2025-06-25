@@ -186,6 +186,13 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
+	// Check if relay settings are being updated (affects kind 411 relay info)
+	relaySettingsUpdated := false
+	if _, exists := settings["relay"]; exists {
+		relaySettingsUpdated = true
+		log.Println("Relay settings updated, will regenerate kind 411 event...")
+	}
+
 	// Update each setting
 	for key, value := range settings {
 		log.Printf("Setting %s = %v (type: %T)", key, value, value)
@@ -209,11 +216,23 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		// Schedule batch update of kind 888 events after a short delay
 		// This allows for multiple rapid setting changes to be batched together
 		subscription.ScheduleBatchUpdateAfter(5 * time.Second)
+	}
 
+	// If either allowed_users or relay settings were updated, regenerate kind 411 event
+	if allowedUsersUpdated || relaySettingsUpdated {
 		// Regenerate kind 411 event immediately in a goroutine
 		if store != nil {
 			go func() {
-				log.Println("Regenerating kind 411 event due to subscription tier changes...")
+				var reason string
+				if allowedUsersUpdated && relaySettingsUpdated {
+					reason = "subscription tier and relay settings changes"
+				} else if allowedUsersUpdated {
+					reason = "subscription tier changes"
+				} else {
+					reason = "relay settings changes"
+				}
+
+				log.Printf("Regenerating kind 411 event due to %s...", reason)
 
 				// Get the private and public keys from viper (same way as main.go does)
 				serializedPrivateKey := viper.GetString("relay.private_key")
