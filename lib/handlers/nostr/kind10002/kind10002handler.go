@@ -75,8 +75,9 @@ func BuildKind10002Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 // validateRelayListTags checks if the tags array contains valid 'r' tags for relay list metadata.
 func validateRelayListTags(tags nostr.Tags) error {
+	// Allow empty tags since this is a replaceable event - users can update later
 	if len(tags) == 0 {
-		return fmt.Errorf("relay list event must contain at least one 'r' tag")
+		return nil
 	}
 
 	for _, tag := range tags {
