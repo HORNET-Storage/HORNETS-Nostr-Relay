@@ -96,6 +96,8 @@ func (ac *AccessControl) CanRead(npub string) (bool, error) {
 		return ac.canReadPaidMode(npub)
 	case "exclusive":
 		return ac.canReadExclusiveMode(npub)
+	case "personal":
+		return ac.canReadPersonalMode(npub)
 	default:
 		log.Printf("Unknown access control mode: %s", ac.settings.Mode)
 		return false, fmt.Errorf("unknown access control mode: %s", ac.settings.Mode)
@@ -120,6 +122,8 @@ func (ac *AccessControl) CanWrite(npub string) (bool, error) {
 		return ac.canWritePaidMode(npub)
 	case "exclusive":
 		return ac.canWriteExclusiveMode(npub)
+	case "personal":
+		return ac.canWritePersonalMode(npub)
 	default:
 		log.Printf("Unknown access control mode: %s", ac.settings.Mode)
 		return false, fmt.Errorf("unknown access control mode: %s", ac.settings.Mode)
@@ -139,6 +143,8 @@ func (ac *AccessControl) GetUserTier(npub string) (string, error) {
 		return ac.getUserTierPaidMode(npub)
 	case "exclusive":
 		return ac.getUserTierExclusiveMode(npub)
+	case "personal":
+		return ac.getUserTierPersonalMode(npub)
 	default:
 		return "", fmt.Errorf("unknown access control mode: %s", ac.settings.Mode)
 	}
@@ -186,6 +192,17 @@ func (ac *AccessControl) canReadExclusiveMode(npub string) (bool, error) {
 	}
 }
 
+func (ac *AccessControl) canReadPersonalMode(npub string) (bool, error) {
+	switch strings.ToLower(ac.settings.ReadAccess.Scope) {
+	case "allowed_users":
+		// Only NPUBs in the allowed read list can read - check both formats
+		return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedReadList)
+	default:
+		// Personal mode defaults to allowed_users scope
+		return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedReadList)
+	}
+}
+
 // Mode-specific write access methods
 
 func (ac *AccessControl) canWriteFreeMode(_ string) (bool, error) {
@@ -200,6 +217,11 @@ func (ac *AccessControl) canWritePaidMode(npub string) (bool, error) {
 
 func (ac *AccessControl) canWriteExclusiveMode(npub string) (bool, error) {
 	// In exclusive mode, only NPUBs in the allowed write list can write - check both formats
+	return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedWriteList)
+}
+
+func (ac *AccessControl) canWritePersonalMode(npub string) (bool, error) {
+	// In personal mode, only NPUBs in the allowed write list can write - check both formats
 	return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedWriteList)
 }
 
@@ -237,6 +259,33 @@ func (ac *AccessControl) getUserTierExclusiveMode(npub string) (string, error) {
 	tier, err = ac.statsStore.GetNpubTierFromWriteList(npub)
 	if err == nil && tier != "" {
 		return tier, nil
+	}
+
+	return "", fmt.Errorf("no tier assignment found for npub: %s", npub)
+}
+
+func (ac *AccessControl) getUserTierPersonalMode(npub string) (string, error) {
+	// In personal mode, tier is manually assigned and stored in NPUB lists
+	// Check both read and write lists for tier assignment
+	tier, err := ac.statsStore.GetNpubTierFromReadList(npub)
+	if err == nil && tier != "" {
+		return tier, nil
+	}
+
+	tier, err = ac.statsStore.GetNpubTierFromWriteList(npub)
+	if err == nil && tier != "" {
+		return tier, nil
+	}
+
+	// Default to "Personal" tier if configured
+	if len(ac.settings.Tiers) > 0 {
+		for _, t := range ac.settings.Tiers {
+			if t.Name == "Personal" {
+				return "Personal", nil
+			}
+		}
+		// Return first tier as fallback
+		return ac.settings.Tiers[0].Name, nil
 	}
 
 	return "", fmt.Errorf("no tier assignment found for npub: %s", npub)
@@ -302,8 +351,8 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 
 	// Validate mode
 	mode := strings.ToLower(settings.Mode)
-	if mode != "free" && mode != "paid" && mode != "exclusive" {
-		return fmt.Errorf("invalid mode: %s, must be 'free', 'paid', or 'exclusive'", settings.Mode)
+	if mode != "free" && mode != "paid" && mode != "exclusive" && mode != "personal" {
+		return fmt.Errorf("invalid mode: %s, must be 'free', 'paid', 'exclusive', or 'personal'", settings.Mode)
 	}
 
 	// Validate read access scope based on mode
@@ -325,6 +374,12 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 			scope := strings.ToLower(settings.ReadAccess.Scope)
 			if scope != "all_users" && scope != "allowed_users" {
 				return fmt.Errorf("exclusive mode read access scope must be 'all_users' or 'allowed_users'")
+			}
+		case "personal":
+			// Personal mode supports "allowed_users" scope
+			scope := strings.ToLower(settings.ReadAccess.Scope)
+			if scope != "allowed_users" && scope != "" {
+				return fmt.Errorf("personal mode read access scope must be 'allowed_users' or empty (defaults to 'allowed_users')")
 			}
 		}
 	}
@@ -362,6 +417,8 @@ func (ac *AccessControl) GetAccessSummary() map[string]interface{} {
 		summary["description"] = "Bitcoin payment-gated access with automatic tier assignment"
 	case "exclusive":
 		summary["description"] = "Invitation-based access with manual NPUB curation"
+	case "personal":
+		summary["description"] = "Single-user access for relay owner only"
 	}
 
 	return summary

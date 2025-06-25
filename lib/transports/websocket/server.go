@@ -182,16 +182,16 @@ func handleRelayInfoRequests(c *fiber.Ctx) error {
 func GetRelayInfo() NIP11RelayInfo {
 	// These values are set in main.go init() for backward compatibility
 	relayInfo := NIP11RelayInfo{
-		Name:          viper.GetString("RelayName"),
-		Description:   viper.GetString("RelayDescription"),
-		Pubkey:        viper.GetString("RelayPubkey"),
-		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: viper.GetIntSlice("RelaySupportedNips"),
-		Software:      viper.GetString("RelaySoftware"),
-		Version:       viper.GetString("RelayVersion"),
+		Name:          viper.GetString("relay.name"),
+		Description:   viper.GetString("relay.description"),
+		Pubkey:        viper.GetString("relay.public_key"),
+		Contact:       viper.GetString("relay.contact"),
+		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
+		Software:      viper.GetString("relay.software"),
+		Version:       viper.GetString("relay.version"),
 	}
 
-	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("key"))
+	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("relay.private_key"))
 	libp2pId := viper.GetString("LibP2PID")
 	libp2pAddrs := viper.GetStringSlice("LibP2PAddrs")
 	if libp2pId != "" && len(libp2pAddrs) > 0 && err == nil {
@@ -224,6 +224,7 @@ func SignRelay(relay *NIP11RelayInfo, privKey *btcec.PrivateKey) error {
 	}
 
 	relay.HornetExtension.Signature = hex.EncodeToString(signature.Serialize())
+	relay.HornetExtension.LastUpdated = time.Now()
 	return nil
 }
 
