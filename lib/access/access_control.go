@@ -387,7 +387,7 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 	// Write access validation: scope is mode-dependent and handled automatically
 	// Free: "all_users" when enabled
 	// Paid: "paid_users" when enabled
-	// Exclusive: "allowed_users" when enabled
+	// Invite-Only: "allowed_users" when enabled
 
 	return nil
 }

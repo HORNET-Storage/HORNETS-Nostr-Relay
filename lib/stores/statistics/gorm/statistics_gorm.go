@@ -12,6 +12,7 @@ import (
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 	"golang.org/x/crypto/bcrypt"
@@ -1799,14 +1800,33 @@ func (store *GormStatisticsStore) AddNpubToReadList(npub, tierName, addedBy stri
 	return store.DB.Create(&allowedNpub).Error
 }
 
-// AddNpubToWriteList adds an NPUB to the allowed write list
+// AddNpubToWriteList adds an NPUB to the allowed write list and updates the corresponding kind 888 event
 func (store *GormStatisticsStore) AddNpubToWriteList(npub, tierName, addedBy string) error {
+	log.Printf("[DEBUG] AddNpubToWriteList called with npub='%s', tierName='%s', addedBy='%s'", npub, tierName, addedBy)
+	
+	// First, add to the database
 	allowedNpub := types.AllowedWriteNpub{
 		Npub:     npub,
 		TierName: tierName,
 		AddedBy:  addedBy,
 	}
-	return store.DB.Create(&allowedNpub).Error
+	if err := store.DB.Create(&allowedNpub).Error; err != nil {
+		return err
+	}
+
+	// Then, update the kind 888 event to reflect the new tier assignment
+	subManager := subscription.GetGlobalManager()
+	if subManager != nil {
+		if err := subManager.UpdateNpubSubscriptionEvent(npub, tierName); err != nil {
+			log.Printf("Warning: Failed to update kind 888 event for npub %s: %v", npub, err)
+			// Don't return error since the database update succeeded
+			// The kind 888 event can be updated later via batch update
+		}
+	} else {
+		log.Printf("Warning: Global subscription manager not available, kind 888 event for npub %s will not be updated", npub)
+	}
+
+	return nil
 }
 
 // RemoveNpubFromReadList removes an NPUB from the allowed read list
