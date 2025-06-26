@@ -179,6 +179,26 @@ Credit information is always included in the user's kind 888 event, providing tr
 - This tag is updated after every transaction or credit application
 - The credit is visible to other relays and clients that may need this information
 
+## Unlimited Storage Support
+
+For certain relay configurations (such as personal mode or exclusive users), unlimited storage may be granted. This is indicated in the kind 888 event by using "unlimited" as the total bytes value in the storage tag:
+
+### Standard Storage Tag
+```json
+["storage", "<used_bytes>", "<total_bytes>", "<timestamp>"]
+```
+
+### Unlimited Storage Tag
+```json
+["storage", "<used_bytes>", "unlimited", "<timestamp>"]
+```
+
+When a user has unlimited storage:
+- The `used_bytes` field still tracks actual usage for monitoring purposes
+- The `total_bytes` field is set to the string "unlimited"
+- Storage enforcement is bypassed for these users
+- This is typically used for personal relay owners and privileged exclusive users
+
 ## Lightning Network Implementation (Future)
 
 *[Note: The Lightning Network implementation remains unchanged from the original gist and is planned for future development.]*

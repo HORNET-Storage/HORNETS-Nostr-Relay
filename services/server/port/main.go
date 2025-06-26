@@ -232,7 +232,7 @@ func main() {
 			logging.Errorf("Failed to serialize public key: %v", err)
 		} else {
 			viper.Set("relay.public_key", serializedPublicKey)
-			
+
 			err = config.SaveConfig()
 			if err != nil {
 				logging.Errorf("Failed to save public key to config: %v", err)
@@ -418,10 +418,11 @@ func main() {
 	}
 
 	// Register Our Nostr Stream Handlers
-	if filteringMode == "blacklist" {
+	switch filteringMode {
+	case "blacklist":
 		log.Println("Using universal stream handler because Mode set to 'blacklist'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
-	} else if filteringMode == "whitelist" {
+	case "whitelist":
 		log.Println("Using specific stream handlers because Mode set to 'whitelist'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
@@ -453,7 +454,7 @@ func main() {
 		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
 		nostr.RegisterHandler("kind/117", kind117.BuildKind117Handler(store))
 		nostr.RegisterHandler("kind/1063", kind1063.BuildKind1063Handler(store))
-	} else {
+	default:
 		logging.Fatalf("Unknown settings mode: %s, exiting", filteringMode)
 	}
 

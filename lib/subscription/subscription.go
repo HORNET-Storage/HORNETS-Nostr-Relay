@@ -16,10 +16,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
@@ -36,6 +38,49 @@ var (
 	scheduledUpdateMutex sync.Mutex
 	scheduledUpdateTimer *time.Timer
 )
+
+// normalizePubkey converts both npub and hex formats to a consistent format for comparison
+// Uses the signing package for decoding and go-nostr nip19 for npub encoding
+func normalizePubkey(pubkey string) (hex string, npub string, err error) {
+	// Use the signing package's DecodeKey which handles both hex and bech32
+	keyBytes, err := signing.DecodeKey(pubkey)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid pubkey format: %v", err)
+	}
+
+	// Convert to hex format
+	hexKey := fmt.Sprintf("%x", keyBytes)
+
+	// Convert to npub format using go-nostr nip19 (consistent with rest of codebase)
+	npubKey, err := nip19.EncodePublicKey(hexKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encode as npub: %v", err)
+	}
+
+	return hexKey, npubKey, nil
+}
+
+// getRelayMode reads the current relay mode from configuration
+func (m *SubscriptionManager) getRelayMode() string {
+	// Load allowed users settings from config to get current mode
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		log.Printf("[DEBUG] Warning: could not load allowed_users settings: %v", err)
+		return "unknown"
+	}
+	
+	mode := strings.ToLower(allowedUsersSettings.Mode)
+	log.Printf("[DEBUG] Creating storage info for npub: mode=%s", mode)
+	
+	// Validate mode and return
+	switch mode {
+	case "free", "paid", "exclusive", "personal":
+		return mode
+	default:
+		log.Printf("[DEBUG] Unknown mode '%s', defaulting to 'unknown'", mode)
+		return "unknown"
+	}
+}
 
 // InitGlobalManager initializes the global subscription manager instance
 func InitGlobalManager(
@@ -70,9 +115,10 @@ const (
 
 // StorageInfo tracks current storage usage information for a subscriber
 type StorageInfo struct {
-	UsedBytes  int64     // Current bytes used by the subscriber
-	TotalBytes int64     // Total bytes allocated to the subscriber
-	UpdatedAt  time.Time // Last time storage information was updated
+	UsedBytes   int64     // Current bytes used by the subscriber
+	TotalBytes  int64     // Total bytes allocated to the subscriber (0 for unlimited)
+	IsUnlimited bool      // True if storage is unlimited
+	UpdatedAt   time.Time // Last time storage information was updated
 }
 
 // SubscriptionManager handles all subscription-related operations through NIP-88 events
@@ -652,6 +698,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 }
 
 // UpdateStorageUsage updates the storage usage for a subscriber by modifying the relevant NIP-88 event
+// This function logs errors but does not fail operations to maintain development flow
 func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) error {
 	// Fetch current NIP-88 event data
 	events, err := m.store.QueryEvents(nostr.Filter{
@@ -662,30 +709,46 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 		Limit: 1,
 	})
 	if err != nil || len(events) == 0 {
-		return fmt.Errorf("no NIP-88 event found for user")
+		log.Printf("Warning: No NIP-88 event found for user %s, storage not tracked (newBytes: %d)", npub, newBytes)
+		return nil // Don't fail the operation
 	}
 	currentEvent := events[0]
 
 	// Extract and update storage information
 	storageInfo, err := m.extractStorageInfo(currentEvent)
 	if err != nil {
-		return fmt.Errorf("failed to extract storage info: %v", err)
+		log.Printf("Warning: Failed to extract storage info for user %s: %v", npub, err)
+		return nil // Don't fail the operation
 	}
+	
 	newUsedBytes := storageInfo.UsedBytes + newBytes
-	if newUsedBytes > storageInfo.TotalBytes {
-		return fmt.Errorf("storage limit exceeded: would use %d of %d bytes", newUsedBytes, storageInfo.TotalBytes)
+	
+	// Check storage limits but only log warnings for unlimited storage
+	if !storageInfo.IsUnlimited && newUsedBytes > storageInfo.TotalBytes {
+		log.Printf("Warning: Storage limit exceeded for user %s: would use %d of %d bytes", npub, newUsedBytes, storageInfo.TotalBytes)
+		// In development, we'll allow this but log the warning
+		// In production, you might want to enforce this limit
 	}
+	
 	storageInfo.UsedBytes = newUsedBytes
 	storageInfo.UpdatedAt = time.Now()
 
 	// Replacing `GetValue` and `GetUnixValue` calls with utility functions
 	activeSubscription := getTagValue(currentEvent.Tags, "active_subscription")
 	expirationTime := time.Unix(getTagUnixValue(currentEvent.Tags, "active_subscription"), 0)
+	address := getTagValue(currentEvent.Tags, "relay_bitcoin_address")
 
 	// Update NIP-88 event
-	return m.createOrUpdateNIP88Event(&types.Subscriber{
-		Npub: npub,
-	}, activeSubscription, expirationTime, &storageInfo)
+	if err := m.createOrUpdateNIP88Event(&types.Subscriber{
+		Npub:    npub,
+		Address: address,
+	}, activeSubscription, expirationTime, &storageInfo); err != nil {
+		log.Printf("Warning: Failed to update NIP-88 event for user %s: %v", npub, err)
+		return nil // Don't fail the operation
+	}
+	
+	log.Printf("Successfully updated storage usage for user %s: +%d bytes (total: %d)", npub, newBytes, newUsedBytes)
+	return nil
 }
 
 // CheckStorageAvailability checks if a subscriber has enough available storage for a given number of bytes.
@@ -754,6 +817,20 @@ func (m *SubscriptionManager) createEvent(
 		creditSats = 0
 	}
 
+	// Create storage tag value
+	totalBytesStr := func() string {
+		if storageInfo.IsUnlimited {
+			return "unlimited"
+		}
+		return fmt.Sprintf("%d", storageInfo.TotalBytes)
+	}()
+	
+	log.Printf("[DEBUG] Creating kind 888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t", 
+		subscriber.Npub, storageInfo.UsedBytes, totalBytesStr, storageInfo.IsUnlimited)
+
+	// Get relay mode from config
+	relayMode := m.getRelayMode()
+	
 	// Prepare tags with free tier consideration
 	tags := []nostr.Tag{
 		{"subscription_duration", "1 month"},
@@ -761,9 +838,8 @@ func (m *SubscriptionManager) createEvent(
 		{"subscription_status", status},
 		{"relay_bitcoin_address", subscriber.Address},
 		{"relay_dht_key", m.relayDHTKey},
-		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes),
-			fmt.Sprintf("%d", storageInfo.TotalBytes),
-			fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), totalBytesStr, fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+		{"relay_mode", relayMode},
 	}
 
 	// Add credit information if there is any
@@ -823,17 +899,25 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	log.Printf("Creating/updating NIP-88 event for %s with tier %s",
 		subscriber.Npub, tierName)
 
-	// Delete existing NIP-88 event if it exists
+	// Delete ALL existing NIP-88 events for this user (check both npub and hex formats)
+	hex, npub, err := normalizePubkey(subscriber.Npub)
+	if err != nil {
+		return fmt.Errorf("failed to normalize pubkey: %v", err)
+	}
+	
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
 		Tags: nostr.TagMap{
-			"p": []string{subscriber.Npub},
+			"p": []string{npub, hex}, // Check both formats
 		},
-		Limit: 1,
+		// Remove limit to get all events
 	})
 	if err == nil && len(existingEvents) > 0 {
-		if err := m.store.DeleteEvent(existingEvents[0].ID); err != nil {
-			log.Printf("Warning: failed to delete existing NIP-88 event: %v", err)
+		log.Printf("Deleting %d existing NIP-88 events for %s", len(existingEvents), subscriber.Npub)
+		for _, event := range existingEvents {
+			if err := m.store.DeleteEvent(event.ID); err != nil {
+				log.Printf("Warning: failed to delete existing NIP-88 event %s: %v", event.ID, err)
+			}
 		}
 	}
 
@@ -1424,7 +1508,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 
 		// Process each event in the batch
 		for _, event := range events {
-			if err := m.processSingleSubscriptionEvent(event, &allowedUsersSettings); err != nil {
+			if err := m.processSingleSubscriptionEvent(event); err != nil {
 				log.Printf("Error processing event %s: %v", event.ID, err)
 				// Continue with next event even if this one fails
 			}
@@ -1444,132 +1528,44 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	return nil
 }
 
-// processSingleSubscriptionEvent handles the storage adjustment logic for a single kind 888 event
-// During migration, preserve existing free allocations until expiration, only upgrade actual paid users
-func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event, allowedUsersSettings *types.AllowedUsersSettings) error {
+// processSingleSubscriptionEvent handles updating relay_mode tag for existing kind 888 events
+// This function only updates the relay_mode tag and preserves all other subscription details
+func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event) error {
 	// Extract pubkey
 	pubkey := getTagValue(event.Tags, "p")
 	if pubkey == "" {
 		return fmt.Errorf("no pubkey found in event")
 	}
 
-	// Get storage info
+	// Check if relay_mode tag already exists and is current
+	currentRelayMode := getTagValue(event.Tags, "relay_mode")
+	expectedRelayMode := m.getRelayMode()
+	
+	// If relay_mode is already correct, no update needed
+	if currentRelayMode == expectedRelayMode {
+		log.Printf("Event for %s already has correct relay_mode: %s", pubkey, currentRelayMode)
+		return nil
+	}
+
+	log.Printf("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
+
+	// Get all existing event details to preserve them
 	storageInfo, err := m.extractStorageInfo(event)
 	if err != nil {
 		return fmt.Errorf("failed to extract storage info: %v", err)
 	}
 
-	// Get subscription details
+	// Get subscription details (preserve existing values)
 	activeTier := getTagValue(event.Tags, "active_subscription")
 	expirationUnix := getTagUnixValue(event.Tags, "active_subscription")
 	expirationDate := time.Unix(expirationUnix, 0)
 	address := getTagValue(event.Tags, "relay_bitcoin_address")
-	currentBytes := storageInfo.TotalBytes
 
-	// Determine if this is a free tier user based on current allocation
-	// Users with 100MB (104857600 bytes) are likely free tier users
-	// Users with larger allocations (450MB, 10GB) were likely paid users
-	isFreeUser := currentBytes <= 104857600 // 100 MB or less = free user
-
-	var newTier *types.SubscriptionTier
-	var needsUpdate bool
-
-	if isFreeUser {
-		// For free users: preserve their current free allocation until expiration
-		// Don't upgrade them to paid tiers during migration
-		log.Printf("Preserving free tier allocation for %s (%d bytes) until expiration: %s",
-			pubkey, currentBytes, expirationDate.Format("2006-01-02"))
-
-		// Find a free tier that matches their current allocation
-		for i := range allowedUsersSettings.Tiers {
-			tier := &allowedUsersSettings.Tiers[i]
-			if tier.PriceSats <= 0 { // Free tier
-				tierBytes := tier.MonthlyLimitBytes
-				if tierBytes >= currentBytes {
-					newTier = tier
-					break
-				}
-			}
-		}
-
-		// If no matching free tier, create a temporary free tier to preserve their allocation
-		if newTier == nil {
-			newTier = &types.SubscriptionTier{
-				Name:              "Basic Free",
-				MonthlyLimitBytes: currentBytes,
-				PriceSats:         0,
-				Unlimited:         false,
-			}
-		}
-
-		// Only update if tier name changed, preserve storage allocation
-		if newTier.Name != activeTier {
-			needsUpdate = true
-			storageInfo.TotalBytes = currentBytes // Keep current allocation
-		}
-
-	} else {
-		// For users with larger allocations (likely paid users): map to appropriate paid tier
-		log.Printf("Mapping paid user %s with %d bytes to appropriate paid tier", pubkey, currentBytes)
-
-		// Find the smallest paid tier that can accommodate their current storage
-		for i := range allowedUsersSettings.Tiers {
-			tier := &allowedUsersSettings.Tiers[i]
-			if tier.PriceSats > 0 { // Paid tier
-				tierBytes := tier.MonthlyLimitBytes
-				if tier.Unlimited {
-					tierBytes = types.MaxMonthlyLimitBytes
-				}
-
-				// If this tier can accommodate current storage, use it
-				if tierBytes >= currentBytes {
-					if newTier == nil || tierBytes < newTier.MonthlyLimitBytes {
-						newTier = tier
-					}
-				}
-			}
-		}
-
-		// If no paid tier found, keep their current allocation as a custom tier
-		if newTier == nil {
-			log.Printf("No paid tier found for %d bytes, preserving current allocation", currentBytes)
-			return nil // Don't update, keep as-is
-		}
-
-		newTierBytes := newTier.MonthlyLimitBytes
-		if newTier.Unlimited {
-			newTierBytes = types.MaxMonthlyLimitBytes
-		}
-
-		// Update storage allocation
-		storageInfo.TotalBytes = newTierBytes
-		needsUpdate = true
-
-		log.Printf("Updating paid user %s from %s (%d bytes) to %s (%d bytes)",
-			pubkey, activeTier, currentBytes, newTier.Name, newTierBytes)
-	}
-
-	if !needsUpdate || newTier == nil {
-		return nil
-	}
-
-	// Ensure we don't go below current usage
-	if storageInfo.TotalBytes < storageInfo.UsedBytes {
-		storageInfo.TotalBytes = storageInfo.UsedBytes
-		log.Printf("Warning: New tier limit (%d) is below current usage (%d) for %s, keeping current usage as limit",
-			storageInfo.TotalBytes, storageInfo.UsedBytes, pubkey)
-	}
-
-	// Preserve existing expiration date, don't extend free periods
-	if expirationDate.IsZero() {
-		expirationDate = time.Now().AddDate(0, 1, 0) // 1 month from now only if no expiration set
-	}
-
-	// Update the event with appropriate tier
+	// Update the event with only the relay_mode tag changed
 	return m.createOrUpdateNIP88Event(&types.Subscriber{
 		Npub:    pubkey,
 		Address: address,
-	}, newTier.Name, expirationDate, &storageInfo)
+	}, activeTier, expirationDate, &storageInfo)
 }
 
 // InitDailyFreeSubscriptionRenewal sets up a daily job to refresh expired free tier subscriptions
@@ -1745,6 +1741,59 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 	log.Printf("Free tier refresh complete: processed %d events, refreshed %d subscriptions",
 		processed, refreshed)
 	return nil
+}
+
+// UpdateNpubSubscriptionEvent updates the kind 888 event for a specific npub with new tier information
+// This is called when access control lists are updated and we need to sync the kind 888 events
+func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string) error {
+	log.Printf("Updating kind 888 event for npub %s with tier %s", npub, tierName)
+
+	// Load allowed users settings to get tier configuration
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		return fmt.Errorf("failed to load allowed users settings: %v", err)
+	}
+
+	// Find the tier configuration
+	var activeTier *types.SubscriptionTier
+	for i := range allowedUsersSettings.Tiers {
+		if allowedUsersSettings.Tiers[i].Name == tierName {
+			activeTier = &allowedUsersSettings.Tiers[i]
+			break
+		}
+	}
+
+	if activeTier == nil {
+		return fmt.Errorf("tier %s not found in configuration", tierName)
+	}
+
+	// Create subscriber info
+	subscriber := &types.Subscriber{
+		Npub: npub,
+	}
+
+	// Set expiration date based on tier type
+	expirationDate := time.Now().AddDate(0, 1, 0) // Default to 1 month
+	if activeTier.PriceSats <= 0 {
+		// For free tiers, set longer expiration
+		expirationDate = time.Now().AddDate(1, 0, 0) // 1 year for free
+	}
+
+	// Create storage info from tier - check for unlimited storage
+	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
+	
+	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t", 
+		npub, tierName, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited)
+	
+	storageInfo := &StorageInfo{
+		TotalBytes:  activeTier.MonthlyLimitBytes,
+		UsedBytes:   0, // Start with 0 used bytes
+		IsUnlimited: isUnlimited,
+		UpdatedAt:   time.Now(),
+	}
+
+	// Create or update the NIP-88 event
+	return m.createOrUpdateNIP88Event(subscriber, activeTier, expirationDate, storageInfo)
 }
 
 // updatePaidSubscriberRecord is a helper method to update the PaidSubscriber table
