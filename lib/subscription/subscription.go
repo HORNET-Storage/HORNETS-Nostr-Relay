@@ -60,6 +60,28 @@ func normalizePubkey(pubkey string) (hex string, npub string, err error) {
 	return hexKey, npubKey, nil
 }
 
+// getRelayMode reads the current relay mode from configuration
+func (m *SubscriptionManager) getRelayMode() string {
+	// Load allowed users settings from config to get current mode
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		log.Printf("[DEBUG] Warning: could not load allowed_users settings: %v", err)
+		return "unknown"
+	}
+	
+	mode := strings.ToLower(allowedUsersSettings.Mode)
+	log.Printf("[DEBUG] Creating storage info for npub: mode=%s", mode)
+	
+	// Validate mode and return
+	switch mode {
+	case "free", "paid", "exclusive", "personal":
+		return mode
+	default:
+		log.Printf("[DEBUG] Unknown mode '%s', defaulting to 'unknown'", mode)
+		return "unknown"
+	}
+}
+
 // InitGlobalManager initializes the global subscription manager instance
 func InitGlobalManager(
 	store stores.Store,
@@ -789,6 +811,9 @@ func (m *SubscriptionManager) createEvent(
 	log.Printf("[DEBUG] Creating kind 888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t", 
 		subscriber.Npub, storageInfo.UsedBytes, totalBytesStr, storageInfo.IsUnlimited)
 
+	// Get relay mode from config
+	relayMode := m.getRelayMode()
+	
 	// Prepare tags with free tier consideration
 	tags := []nostr.Tag{
 		{"subscription_duration", "1 month"},
@@ -797,6 +822,7 @@ func (m *SubscriptionManager) createEvent(
 		{"relay_bitcoin_address", subscriber.Address},
 		{"relay_dht_key", m.relayDHTKey},
 		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), totalBytesStr, fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
+		{"relay_mode", relayMode},
 	}
 
 	// Add credit information if there is any
@@ -1465,7 +1491,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 
 		// Process each event in the batch
 		for _, event := range events {
-			if err := m.processSingleSubscriptionEvent(event, &allowedUsersSettings); err != nil {
+			if err := m.processSingleSubscriptionEvent(event); err != nil {
 				log.Printf("Error processing event %s: %v", event.ID, err)
 				// Continue with next event even if this one fails
 			}
@@ -1485,132 +1511,44 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	return nil
 }
 
-// processSingleSubscriptionEvent handles the storage adjustment logic for a single kind 888 event
-// During migration, preserve existing free allocations until expiration, only upgrade actual paid users
-func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event, allowedUsersSettings *types.AllowedUsersSettings) error {
+// processSingleSubscriptionEvent handles updating relay_mode tag for existing kind 888 events
+// This function only updates the relay_mode tag and preserves all other subscription details
+func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event) error {
 	// Extract pubkey
 	pubkey := getTagValue(event.Tags, "p")
 	if pubkey == "" {
 		return fmt.Errorf("no pubkey found in event")
 	}
 
-	// Get storage info
+	// Check if relay_mode tag already exists and is current
+	currentRelayMode := getTagValue(event.Tags, "relay_mode")
+	expectedRelayMode := m.getRelayMode()
+	
+	// If relay_mode is already correct, no update needed
+	if currentRelayMode == expectedRelayMode {
+		log.Printf("Event for %s already has correct relay_mode: %s", pubkey, currentRelayMode)
+		return nil
+	}
+
+	log.Printf("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
+
+	// Get all existing event details to preserve them
 	storageInfo, err := m.extractStorageInfo(event)
 	if err != nil {
 		return fmt.Errorf("failed to extract storage info: %v", err)
 	}
 
-	// Get subscription details
+	// Get subscription details (preserve existing values)
 	activeTier := getTagValue(event.Tags, "active_subscription")
 	expirationUnix := getTagUnixValue(event.Tags, "active_subscription")
 	expirationDate := time.Unix(expirationUnix, 0)
 	address := getTagValue(event.Tags, "relay_bitcoin_address")
-	currentBytes := storageInfo.TotalBytes
 
-	// Determine if this is a free tier user based on current allocation
-	// Users with 100MB (104857600 bytes) are likely free tier users
-	// Users with larger allocations (450MB, 10GB) were likely paid users
-	isFreeUser := currentBytes <= 104857600 // 100 MB or less = free user
-
-	var newTier *types.SubscriptionTier
-	var needsUpdate bool
-
-	if isFreeUser {
-		// For free users: preserve their current free allocation until expiration
-		// Don't upgrade them to paid tiers during migration
-		log.Printf("Preserving free tier allocation for %s (%d bytes) until expiration: %s",
-			pubkey, currentBytes, expirationDate.Format("2006-01-02"))
-
-		// Find a free tier that matches their current allocation
-		for i := range allowedUsersSettings.Tiers {
-			tier := &allowedUsersSettings.Tiers[i]
-			if tier.PriceSats <= 0 { // Free tier
-				tierBytes := tier.MonthlyLimitBytes
-				if tierBytes >= currentBytes {
-					newTier = tier
-					break
-				}
-			}
-		}
-
-		// If no matching free tier, create a temporary free tier to preserve their allocation
-		if newTier == nil {
-			newTier = &types.SubscriptionTier{
-				Name:              "Basic Free",
-				MonthlyLimitBytes: currentBytes,
-				PriceSats:         0,
-				Unlimited:         false,
-			}
-		}
-
-		// Only update if tier name changed, preserve storage allocation
-		if newTier.Name != activeTier {
-			needsUpdate = true
-			storageInfo.TotalBytes = currentBytes // Keep current allocation
-		}
-
-	} else {
-		// For users with larger allocations (likely paid users): map to appropriate paid tier
-		log.Printf("Mapping paid user %s with %d bytes to appropriate paid tier", pubkey, currentBytes)
-
-		// Find the smallest paid tier that can accommodate their current storage
-		for i := range allowedUsersSettings.Tiers {
-			tier := &allowedUsersSettings.Tiers[i]
-			if tier.PriceSats > 0 { // Paid tier
-				tierBytes := tier.MonthlyLimitBytes
-				if tier.Unlimited {
-					tierBytes = types.MaxMonthlyLimitBytes
-				}
-
-				// If this tier can accommodate current storage, use it
-				if tierBytes >= currentBytes {
-					if newTier == nil || tierBytes < newTier.MonthlyLimitBytes {
-						newTier = tier
-					}
-				}
-			}
-		}
-
-		// If no paid tier found, keep their current allocation as a custom tier
-		if newTier == nil {
-			log.Printf("No paid tier found for %d bytes, preserving current allocation", currentBytes)
-			return nil // Don't update, keep as-is
-		}
-
-		newTierBytes := newTier.MonthlyLimitBytes
-		if newTier.Unlimited {
-			newTierBytes = types.MaxMonthlyLimitBytes
-		}
-
-		// Update storage allocation
-		storageInfo.TotalBytes = newTierBytes
-		needsUpdate = true
-
-		log.Printf("Updating paid user %s from %s (%d bytes) to %s (%d bytes)",
-			pubkey, activeTier, currentBytes, newTier.Name, newTierBytes)
-	}
-
-	if !needsUpdate || newTier == nil {
-		return nil
-	}
-
-	// Ensure we don't go below current usage
-	if storageInfo.TotalBytes < storageInfo.UsedBytes {
-		storageInfo.TotalBytes = storageInfo.UsedBytes
-		log.Printf("Warning: New tier limit (%d) is below current usage (%d) for %s, keeping current usage as limit",
-			storageInfo.TotalBytes, storageInfo.UsedBytes, pubkey)
-	}
-
-	// Preserve existing expiration date, don't extend free periods
-	if expirationDate.IsZero() {
-		expirationDate = time.Now().AddDate(0, 1, 0) // 1 month from now only if no expiration set
-	}
-
-	// Update the event with appropriate tier
+	// Update the event with only the relay_mode tag changed
 	return m.createOrUpdateNIP88Event(&types.Subscriber{
 		Npub:    pubkey,
 		Address: address,
-	}, newTier.Name, expirationDate, &storageInfo)
+	}, activeTier, expirationDate, &storageInfo)
 }
 
 // InitDailyFreeSubscriptionRenewal sets up a daily job to refresh expired free tier subscriptions

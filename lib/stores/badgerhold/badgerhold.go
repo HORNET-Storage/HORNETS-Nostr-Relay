@@ -882,7 +882,8 @@ func matchWildcard(pattern, value string) bool {
 	patternIndex, valueIndex := 0, 0
 
 	for patternIndex < len(patternParts) && valueIndex < len(valueParts) {
-		if patternParts[patternIndex] == "*" {
+		switch patternParts[patternIndex] {
+		case "*":
 			patternIndex++
 			if patternIndex == len(patternParts) {
 				return true // "*" at the end matches everything remaining
@@ -891,10 +892,10 @@ func matchWildcard(pattern, value string) bool {
 			for valueIndex < len(valueParts) && valueParts[valueIndex] != patternParts[patternIndex] {
 				valueIndex++
 			}
-		} else if patternParts[patternIndex] == valueParts[valueIndex] {
+		case valueParts[valueIndex]:
 			patternIndex++
 			valueIndex++
-		} else {
+		default:
 			return false
 		}
 	}

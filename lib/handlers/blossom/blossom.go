@@ -8,6 +8,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/middleware"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/fiber/v2"
@@ -148,6 +149,18 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 
 	// Store the file in the statistics database
 	s.storage.GetStatsStore().SaveFile("blossom", encodedHash, name, mtype.String(), 0, int64(len(data)))
+
+	// Update subscription storage usage for the file upload
+	subManager := subscription.GetGlobalManager()
+	if subManager != nil {
+		if err := subManager.UpdateStorageUsage(pubkey, int64(len(data))); err != nil {
+			log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pubkey, err)
+			// Don't return error since the file was already stored successfully
+			// Storage tracking is important but not critical for file storage
+		}
+	} else {
+		log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pubkey)
+	}
 
 	// Return success with the hash for confirmation
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{

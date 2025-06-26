@@ -17,6 +17,7 @@ import (
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
@@ -214,6 +215,26 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 		if err != nil {
 			write(lib_stream.BuildErrorMessage("Failed to commit dag to long term store", err))
 			return
+		}
+
+		// Calculate total DAG size for subscription tracking
+		var totalDagSize int64
+		for _, leaf := range dag.Leafs {
+			if leaf.Content != nil {
+				totalDagSize += int64(len(leaf.Content))
+			}
+		}
+
+		// Update subscription storage usage for the DAG upload
+		subManager := subscription.GetGlobalManager()
+		if subManager != nil {
+			if err := subManager.UpdateStorageUsage(message.PublicKey, totalDagSize); err != nil {
+				fmt.Printf("Warning: Failed to update storage usage for pubkey %s: %v\n", message.PublicKey, err)
+				// Don't fail the operation since the DAG was already stored successfully
+				// Storage tracking is important but not critical for DAG storage
+			}
+		} else {
+			fmt.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s\n", message.PublicKey)
 		}
 
 		fmt.Println("Dag Uploaded: " + message.Root)
