@@ -49,8 +49,17 @@ func (m *SubscriptionManager) getRelayMode() string {
 	mode := strings.ToLower(allowedUsersSettings.Mode)
 	log.Printf("[DEBUG] Creating storage info for npub: mode=%s", mode)
 
-	// Validate mode and return
+	// Map new access control modes to subscription system modes
 	switch mode {
+	case "public":
+		return "free"
+	case "subscription":
+		return "paid"
+	case "invite-only":
+		return "exclusive"
+	case "only_me":
+		return "personal"
+	// Legacy mode support
 	case "free", "paid", "exclusive", "personal":
 		return mode
 	default:
@@ -110,9 +119,11 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 
 // findAppropriateTierForUser determines the appropriate tier for a user based on mode and current status
 func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentTier *types.SubscriptionTier, allowedUsersSettings *types.AllowedUsersSettings) *types.SubscriptionTier {
-	switch allowedUsersSettings.Mode {
-	case "free":
-		// In free mode, assign users to the first available free tier
+	mode := strings.ToLower(allowedUsersSettings.Mode)
+
+	switch mode {
+	case "public", "free":
+		// In public/free mode, assign users to the first available free tier
 		for i := range allowedUsersSettings.Tiers {
 			if allowedUsersSettings.Tiers[i].PriceSats <= 0 {
 				return &allowedUsersSettings.Tiers[i]
@@ -126,8 +137,8 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 			Unlimited:         false,
 		}
 
-	case "paid":
-		// In paid mode, give users the basic free tier by default
+	case "subscription", "paid":
+		// In subscription/paid mode, give users the basic free tier by default
 		// They can upgrade by making payments
 		for i := range allowedUsersSettings.Tiers {
 			if allowedUsersSettings.Tiers[i].PriceSats <= 0 {
@@ -142,8 +153,8 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 			Unlimited:         false,
 		}
 
-	case "exclusive":
-		// In exclusive mode, tier is manually assigned
+	case "invite-only", "exclusive":
+		// In invite-only/exclusive mode, tier is manually assigned
 		// Check if user is still in allowed lists
 		if m.isUserInAllowedLists(pubkey) {
 			if currentTier != nil {
@@ -155,6 +166,17 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 			}
 		}
 		// User not in allowed lists, no tier
+		return nil
+
+	case "only_me", "personal":
+		// In only_me/personal mode, only the relay owner gets access
+		// Return current tier if they have one, otherwise first available tier
+		if currentTier != nil {
+			return currentTier
+		}
+		if len(allowedUsersSettings.Tiers) > 0 {
+			return &allowedUsersSettings.Tiers[0]
+		}
 		return nil
 
 	default:
