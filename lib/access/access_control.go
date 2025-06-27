@@ -2,7 +2,9 @@ package access
 
 import (
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -62,7 +64,27 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 
 	// Check if user has a paid tier if set to paid_users
 	if readOrWrite == "paid_users" {
-		// check subscription tier?
+		// Check if user exists in paid subscribers table
+		paidSubscriber, err := ac.statsStore.GetPaidSubscriberByNpub(*hex)
+		if err != nil {
+			// Database error - log it but deny access
+			log.Printf("Error checking paid subscriber status: %v", err)
+			return fmt.Errorf("user does not have permission")
+		}
+
+		if paidSubscriber == nil {
+			return fmt.Errorf("user does not have a paid subscription")
+		}
+
+		// Check if subscription is still valid
+		if time.Now().After(paidSubscriber.ExpirationDate) {
+			return fmt.Errorf("user subscription has expired")
+		}
+
+		// Verify it's actually a paid tier (not a free tier that somehow got into the table)
+		if paidSubscriber.Tier == "" {
+			return fmt.Errorf("user does not have a valid subscription tier")
+		}
 	}
 
 	return nil
@@ -112,7 +134,7 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 		return fmt.Errorf("settings cannot be nil")
 	}
 
-	// Validate mode
+	// Normalize input values to lowercase for consistent comparison
 	mode := strings.ToLower(settings.Mode)
 	read := strings.ToLower(settings.Read)
 	write := strings.ToLower(settings.Write)
@@ -124,7 +146,13 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 
 	switch mode {
 	case "only_me":
-		write = "only_me"
+		// For only_me mode, validate write permission
+		switch write {
+		case "only_me":
+			// Valid, keep as is
+		default:
+			write = "only_me"
+		}
 		switch read {
 		case "only_me":
 		case "all_users":
@@ -133,7 +161,13 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 			read = "only_me"
 		}
 	case "invite-only":
-		write = "allowed_users"
+		// For invite-only mode, validate write permission
+		switch write {
+		case "allowed_users":
+			// Valid, keep as is
+		default:
+			write = "allowed_users"
+		}
 		switch read {
 		case "all_users":
 		case "allowed_users":
@@ -144,7 +178,13 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 		write = "all_users"
 		read = "all_users"
 	case "subscription":
-		write = "paid_users"
+		// For subscription mode, validate write permission
+		switch write {
+		case "paid_users":
+			// Valid, keep as is
+		default:
+			write = "paid_users"
+		}
 		switch read {
 		case "all_users":
 		case "paid_users":
