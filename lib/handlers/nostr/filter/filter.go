@@ -397,14 +397,8 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 
 			// Check if user has read access
-			canRead, err := accessControl.CanRead(connPubkey)
+			err := accessControl.CanRead(connPubkey)
 			if err != nil {
-				log.Printf(ColorRed+"[ACCESS CONTROL] Error checking read permissions for pubkey '%s': %v"+ColorReset, connPubkey, err)
-				write("NOTICE", "Read access denied: Permission check failed")
-				return
-			}
-
-			if !canRead {
 				log.Printf(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
 				write("NOTICE", "Read access denied: User not in allowed list")
 				return

@@ -143,16 +143,10 @@ type StatisticsStore interface {
 	GetMostReportedContent(limit int) ([]types.ReportSummary, error)
 
 	// NPUB access control management
-	IsNpubInAllowedReadList(npub string) (bool, error)
-	IsNpubInAllowedWriteList(npub string) (bool, error)
-	AddNpubToReadList(npub, tierName, addedBy string) error
-	AddNpubToWriteList(npub, tierName, addedBy string) error
-	RemoveNpubFromReadList(npub string) error
-	RemoveNpubFromWriteList(npub string) error
-	GetAllowedReadNpubs(page, pageSize int) ([]types.AllowedReadNpub, *types.PaginationMetadata, error)
-	GetAllowedWriteNpubs(page, pageSize int) ([]types.AllowedWriteNpub, *types.PaginationMetadata, error)
-	GetNpubTierFromReadList(npub string) (string, error)
-	GetNpubTierFromWriteList(npub string) (string, error)
-	BulkAddNpubsToReadList(npubs []types.AllowedReadNpub) error
-	BulkAddNpubsToWriteList(npubs []types.AllowedWriteNpub) error
+	GetAllowedUser(npub string) (*types.AllowedUser, error)
+	AddAllowedUser(npub string, read bool, write bool, tier string, createdBy string) error
+	RemoveAllowedUser(npub string) error
+	BulkAddAllowedUser(users []types.AllowedUser) error
+	ClearAllowedUsers() error
+	GetUsersPaginated(page int, pageSize int) ([]*types.AllowedUser, *types.PaginationMetadata, error)
 }

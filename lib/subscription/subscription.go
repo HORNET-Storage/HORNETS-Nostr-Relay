@@ -68,10 +68,10 @@ func (m *SubscriptionManager) getRelayMode() string {
 		log.Printf("[DEBUG] Warning: could not load allowed_users settings: %v", err)
 		return "unknown"
 	}
-	
+
 	mode := strings.ToLower(allowedUsersSettings.Mode)
 	log.Printf("[DEBUG] Creating storage info for npub: mode=%s", mode)
-	
+
 	// Validate mode and return
 	switch mode {
 	case "free", "paid", "exclusive", "personal":
@@ -720,16 +720,16 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 		log.Printf("Warning: Failed to extract storage info for user %s: %v", npub, err)
 		return nil // Don't fail the operation
 	}
-	
+
 	newUsedBytes := storageInfo.UsedBytes + newBytes
-	
+
 	// Check storage limits but only log warnings for unlimited storage
 	if !storageInfo.IsUnlimited && newUsedBytes > storageInfo.TotalBytes {
 		log.Printf("Warning: Storage limit exceeded for user %s: would use %d of %d bytes", npub, newUsedBytes, storageInfo.TotalBytes)
 		// In development, we'll allow this but log the warning
 		// In production, you might want to enforce this limit
 	}
-	
+
 	storageInfo.UsedBytes = newUsedBytes
 	storageInfo.UpdatedAt = time.Now()
 
@@ -746,7 +746,7 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 		log.Printf("Warning: Failed to update NIP-88 event for user %s: %v", npub, err)
 		return nil // Don't fail the operation
 	}
-	
+
 	log.Printf("Successfully updated storage usage for user %s: +%d bytes (total: %d)", npub, newBytes, newUsedBytes)
 	return nil
 }
@@ -824,13 +824,13 @@ func (m *SubscriptionManager) createEvent(
 		}
 		return fmt.Sprintf("%d", storageInfo.TotalBytes)
 	}()
-	
-	log.Printf("[DEBUG] Creating kind 888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t", 
+
+	log.Printf("[DEBUG] Creating kind 888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t",
 		subscriber.Npub, storageInfo.UsedBytes, totalBytesStr, storageInfo.IsUnlimited)
 
 	// Get relay mode from config
 	relayMode := m.getRelayMode()
-	
+
 	// Prepare tags with free tier consideration
 	tags := []nostr.Tag{
 		{"subscription_duration", "1 month"},
@@ -904,7 +904,7 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	if err != nil {
 		return fmt.Errorf("failed to normalize pubkey: %v", err)
 	}
-	
+
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
 		Tags: nostr.TagMap{
@@ -1540,7 +1540,7 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 	// Check if relay_mode tag already exists and is current
 	currentRelayMode := getTagValue(event.Tags, "relay_mode")
 	expectedRelayMode := m.getRelayMode()
-	
+
 	// If relay_mode is already correct, no update needed
 	if currentRelayMode == expectedRelayMode {
 		log.Printf("Event for %s already has correct relay_mode: %s", pubkey, currentRelayMode)
@@ -1781,10 +1781,10 @@ func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string)
 
 	// Create storage info from tier - check for unlimited storage
 	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
-	
-	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t", 
+
+	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t",
 		npub, tierName, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited)
-	
+
 	storageInfo := &StorageInfo{
 		TotalBytes:  activeTier.MonthlyLimitBytes,
 		UsedBytes:   0, // Start with 0 used bytes
@@ -1924,13 +1924,10 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 
 // isUserInAllowedLists checks if a user is in the allowed read or write lists for exclusive mode
 func (m *SubscriptionManager) isUserInAllowedLists(pubkey string) bool {
-	// Check read list
-	if allowed, err := m.store.GetStatsStore().IsNpubInAllowedReadList(pubkey); err == nil && allowed {
-		return true
+	user, err := m.store.GetStatsStore().GetAllowedUser(pubkey)
+	if err != nil || user == nil {
+		return false
 	}
-	// Check write list
-	if allowed, err := m.store.GetStatsStore().IsNpubInAllowedWriteList(pubkey); err == nil && allowed {
-		return true
-	}
-	return false
+
+	return true
 }

@@ -107,8 +107,7 @@ type (
 
 // Access types
 type (
-	AllowedReadNpub  = types.AllowedReadNpub
-	AllowedWriteNpub = types.AllowedWriteNpub
+	AllowedUser = types.AllowedUser
 )
 
 // Config types

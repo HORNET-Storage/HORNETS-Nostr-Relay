@@ -2,62 +2,13 @@ package access
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
-	"github.com/nbd-wtf/go-nostr/nip19"
+	"github.com/spf13/viper"
 )
-
-// normalizePubkey converts both npub and hex formats to a consistent format for comparison
-// It uses the signing package's robust DecodeKey function that handles both formats
-func normalizePubkey(pubkey string) (hex string, npub string, err error) {
-	// Use the signing package's DecodeKey which handles both hex and bech32
-	keyBytes, err := signing.DecodeKey(pubkey)
-	if err != nil {
-		return "", "", fmt.Errorf("invalid pubkey format: %v", err)
-	}
-
-	// Convert to hex format
-	hexKey := fmt.Sprintf("%x", keyBytes)
-
-	// Convert to npub format
-	npubKey, err := nip19.EncodePublicKey(hexKey)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to encode as npub: %v", err)
-	}
-
-	return hexKey, npubKey, nil
-}
-
-// checkBothFormats checks the database using both npub and hex formats
-func (ac *AccessControl) checkBothFormats(pubkey string, checkFunc func(string) (bool, error)) (bool, error) {
-	hex, npub, err := normalizePubkey(pubkey)
-	if err != nil {
-		return false, err
-	}
-
-	log.Printf("[ACCESS DEBUG] Checking pubkey in both formats - hex: %s, npub: %s", hex, npub)
-
-	// Try hex format first
-	allowed, err := checkFunc(hex)
-	if err == nil && allowed {
-		log.Printf("[ACCESS DEBUG] Found match using hex format: %s", hex)
-		return true, nil
-	}
-
-	// Try npub format
-	allowed, err = checkFunc(npub)
-	if err == nil && allowed {
-		log.Printf("[ACCESS DEBUG] Found match using npub format: %s", npub)
-		return true, nil
-	}
-
-	log.Printf("[ACCESS DEBUG] No match found for either format - hex: %s, npub: %s", hex, npub)
-	return false, err
-}
 
 // AccessControl handles permission checking for H.O.R.N.E.T Allowed Users
 type AccessControl struct {
@@ -73,274 +24,94 @@ func NewAccessControl(statsStore statistics.StatisticsStore, settings *types.All
 	}
 }
 
-// UpdateSettings updates the access control settings
-func (ac *AccessControl) UpdateSettings(settings *types.AllowedUsersSettings) {
-	ac.settings = settings
-}
-
-// CanRead checks if an NPUB has read access based on current mode and settings
-func (ac *AccessControl) CanRead(npub string) (bool, error) {
-	if ac.settings == nil {
-		return false, fmt.Errorf("access control settings not initialized")
+func (ac *AccessControl) CanWrite(npub string) error {
+	if ac.settings.Read == "all_users" {
+		return nil
 	}
 
-	// If read access is disabled, deny all read access
-	if !ac.settings.ReadAccess.Enabled {
-		return false, nil
-	}
-
-	switch strings.ToLower(ac.settings.Mode) {
-	case "free":
-		return ac.canReadFreeMode(npub)
-	case "paid":
-		return ac.canReadPaidMode(npub)
-	case "exclusive":
-		return ac.canReadExclusiveMode(npub)
-	case "personal":
-		return ac.canReadPersonalMode(npub)
-	default:
-		log.Printf("Unknown access control mode: %s", ac.settings.Mode)
-		return false, fmt.Errorf("unknown access control mode: %s", ac.settings.Mode)
-	}
-}
-
-// CanWrite checks if an NPUB has write access based on current mode and settings
-func (ac *AccessControl) CanWrite(npub string) (bool, error) {
-	if ac.settings == nil {
-		return false, fmt.Errorf("access control settings not initialized")
-	}
-
-	// If write access is disabled, deny all write access
-	if !ac.settings.WriteAccess.Enabled {
-		return false, nil
-	}
-
-	switch strings.ToLower(ac.settings.Mode) {
-	case "free":
-		return ac.canWriteFreeMode(npub)
-	case "paid":
-		return ac.canWritePaidMode(npub)
-	case "exclusive":
-		return ac.canWriteExclusiveMode(npub)
-	case "personal":
-		return ac.canWritePersonalMode(npub)
-	default:
-		log.Printf("Unknown access control mode: %s", ac.settings.Mode)
-		return false, fmt.Errorf("unknown access control mode: %s", ac.settings.Mode)
-	}
-}
-
-// GetUserTier gets the tier assignment for an NPUB based on current mode
-func (ac *AccessControl) GetUserTier(npub string) (string, error) {
-	if ac.settings == nil {
-		return "", fmt.Errorf("access control settings not initialized")
-	}
-
-	switch strings.ToLower(ac.settings.Mode) {
-	case "free":
-		return ac.getUserTierFreeMode(npub)
-	case "paid":
-		return ac.getUserTierPaidMode(npub)
-	case "exclusive":
-		return ac.getUserTierExclusiveMode(npub)
-	case "personal":
-		return ac.getUserTierPersonalMode(npub)
-	default:
-		return "", fmt.Errorf("unknown access control mode: %s", ac.settings.Mode)
-	}
-}
-
-// Mode-specific read access methods
-
-func (ac *AccessControl) canReadFreeMode(_ string) (bool, error) {
-	// In free mode, read access scope determines permissions
-	switch strings.ToLower(ac.settings.ReadAccess.Scope) {
-	case "all_users", "":
-		// Everyone can read in free mode
-		return true, nil
-	default:
-		log.Printf("Unknown read access scope for free mode: %s", ac.settings.ReadAccess.Scope)
-		return true, nil // Default to open access for free mode
-	}
-}
-
-func (ac *AccessControl) canReadPaidMode(npub string) (bool, error) {
-	switch strings.ToLower(ac.settings.ReadAccess.Scope) {
-	case "all_users":
-		// Anyone can read, regardless of payment status
-		return true, nil
-	case "paid_users":
-		// Only paid subscribers can read
-		return ac.isPaidSubscriber(npub)
-	default:
-		log.Printf("Unknown read access scope for paid mode: %s", ac.settings.ReadAccess.Scope)
-		return false, nil
-	}
-}
-
-func (ac *AccessControl) canReadExclusiveMode(npub string) (bool, error) {
-	switch strings.ToLower(ac.settings.ReadAccess.Scope) {
-	case "all_users":
-		// Anyone can read (displays warning about public access)
-		return true, nil
-	case "allowed_users":
-		// Only NPUBs in the allowed read list can read - check both formats
-		return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedReadList)
-	default:
-		log.Printf("Unknown read access scope for exclusive mode: %s", ac.settings.ReadAccess.Scope)
-		return false, nil
-	}
-}
-
-func (ac *AccessControl) canReadPersonalMode(npub string) (bool, error) {
-	switch strings.ToLower(ac.settings.ReadAccess.Scope) {
-	case "allowed_users":
-		// Only NPUBs in the allowed read list can read - check both formats
-		return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedReadList)
-	default:
-		// Personal mode defaults to allowed_users scope
-		return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedReadList)
-	}
-}
-
-// Mode-specific write access methods
-
-func (ac *AccessControl) canWriteFreeMode(_ string) (bool, error) {
-	// In free mode, write access is open to all users when enabled
-	return true, nil
-}
-
-func (ac *AccessControl) canWritePaidMode(npub string) (bool, error) {
-	// In paid mode, only paid subscribers can write
-	return ac.isPaidSubscriber(npub)
-}
-
-func (ac *AccessControl) canWriteExclusiveMode(npub string) (bool, error) {
-	// In exclusive mode, only NPUBs in the allowed write list can write - check both formats
-	return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedWriteList)
-}
-
-func (ac *AccessControl) canWritePersonalMode(npub string) (bool, error) {
-	// In personal mode, only NPUBs in the allowed write list can write - check both formats
-	return ac.checkBothFormats(npub, ac.statsStore.IsNpubInAllowedWriteList)
-}
-
-// Mode-specific tier assignment methods
-
-func (ac *AccessControl) getUserTierFreeMode(_ string) (string, error) {
-	// In free mode, tiers are assigned based on free tier configuration
-	// For now, return the first available free tier or "basic"
-	if len(ac.settings.Tiers) > 0 {
-		return "basic", nil // Default to basic tier for free users
-	}
-	return "basic", nil
-}
-
-func (ac *AccessControl) getUserTierPaidMode(npub string) (string, error) {
-	// In paid mode, tier comes from subscription system
-	subscriber, err := ac.statsStore.GetPaidSubscriberByNpub(npub)
+	hex, err := sanitizePublicKey(npub)
 	if err != nil {
-		return "", err
-	}
-	if subscriber == nil {
-		return "", fmt.Errorf("no paid subscription found for npub: %s", npub)
-	}
-	return subscriber.Tier, nil
-}
-
-func (ac *AccessControl) getUserTierExclusiveMode(npub string) (string, error) {
-	// In exclusive mode, tier is manually assigned and stored in NPUB lists
-	// Check both read and write lists for tier assignment
-	tier, err := ac.statsStore.GetNpubTierFromReadList(npub)
-	if err == nil && tier != "" {
-		return tier, nil
+		return err
 	}
 
-	tier, err = ac.statsStore.GetNpubTierFromWriteList(npub)
-	if err == nil && tier != "" {
-		return tier, nil
+	if isOwner(npub) {
+		return nil
 	}
 
-	return "", fmt.Errorf("no tier assignment found for npub: %s", npub)
-}
-
-func (ac *AccessControl) getUserTierPersonalMode(npub string) (string, error) {
-	// In personal mode, tier is manually assigned and stored in NPUB lists
-	// Check both read and write lists for tier assignment
-	tier, err := ac.statsStore.GetNpubTierFromReadList(npub)
-	if err == nil && tier != "" {
-		return tier, nil
-	}
-
-	tier, err = ac.statsStore.GetNpubTierFromWriteList(npub)
-	if err == nil && tier != "" {
-		return tier, nil
-	}
-
-	// Default to "Personal" tier if configured
-	if len(ac.settings.Tiers) > 0 {
-		for _, t := range ac.settings.Tiers {
-			if t.Name == "Personal" {
-				return "Personal", nil
-			}
-		}
-		// Return first tier as fallback
-		return ac.settings.Tiers[0].Name, nil
-	}
-
-	return "", fmt.Errorf("no tier assignment found for npub: %s", npub)
-}
-
-// Helper methods
-
-func (ac *AccessControl) isPaidSubscriber(npub string) (bool, error) {
-	subscriber, err := ac.statsStore.GetPaidSubscriberByNpub(npub)
+	user, err := ac.statsStore.GetAllowedUser(*hex)
 	if err != nil {
-		return false, err
+		return err
 	}
-	return subscriber != nil, nil
+
+	if !user.Write {
+		return fmt.Errorf("user does not have permission to write")
+	}
+
+	return nil
 }
 
-// Bulk operations for NPUB management
+func (ac *AccessControl) CanRead(npub string) error {
+	if ac.settings.Read == "all_users" {
+		return nil
+	}
 
-// AddNpubToReadList adds an NPUB to the allowed read list with tier assignment
-func (ac *AccessControl) AddNpubToReadList(npub, tierName, addedBy string) error {
-	return ac.statsStore.AddNpubToReadList(npub, tierName, addedBy)
+	hex, err := sanitizePublicKey(npub)
+	if err != nil {
+		return err
+	}
+
+	if isOwner(npub) {
+		return nil
+	}
+
+	user, err := ac.statsStore.GetAllowedUser(*hex)
+	if err != nil {
+		return err
+	}
+
+	if !user.Read {
+		return fmt.Errorf("user does not have permission to read")
+	}
+
+	return nil
 }
 
-// AddNpubToWriteList adds an NPUB to the allowed write list with tier assignment
-func (ac *AccessControl) AddNpubToWriteList(npub, tierName, addedBy string) error {
-	return ac.statsStore.AddNpubToWriteList(npub, tierName, addedBy)
+func (ac *AccessControl) AddAllowedUser(npub string, read bool, write bool, tier string, createdBy string) error {
+	return ac.statsStore.AddAllowedUser(npub, read, write, tier, createdBy)
 }
 
-// RemoveNpubFromReadList removes an NPUB from the allowed read list
-func (ac *AccessControl) RemoveNpubFromReadList(npub string) error {
-	return ac.statsStore.RemoveNpubFromReadList(npub)
+func (ac *AccessControl) RemoveAllowedUser(npub string) error {
+	return ac.statsStore.RemoveAllowedUser(npub)
 }
 
-// RemoveNpubFromWriteList removes an NPUB from the allowed write list
-func (ac *AccessControl) RemoveNpubFromWriteList(npub string) error {
-	return ac.statsStore.RemoveNpubFromWriteList(npub)
+// Sanitizes the public key to ensure it is always the same hex format
+func sanitizePublicKey(serializedPublicKey string) (hex *string, err error) {
+	pubKey, err := signing.DeserializePublicKey(serializedPublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	hexKey, err := signing.SerializePublicKey(pubKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return hexKey, nil
 }
 
-// BulkImportReadNpubs imports multiple NPUBs to the read list
-func (ac *AccessControl) BulkImportReadNpubs(npubs []types.AllowedReadNpub) error {
-	return ac.statsStore.BulkAddNpubsToReadList(npubs)
-}
+// Is the incomming pub key the owner of the relay
+func isOwner(hex string) bool {
+	ownerKey := viper.GetString("relay.public_key")
+	ownerHex, err := sanitizePublicKey(ownerKey)
+	if err != nil {
+		return false
+	}
 
-// BulkImportWriteNpubs imports multiple NPUBs to the write list
-func (ac *AccessControl) BulkImportWriteNpubs(npubs []types.AllowedWriteNpub) error {
-	return ac.statsStore.BulkAddNpubsToWriteList(npubs)
-}
+	if hex != *ownerHex {
+		return false
+	}
 
-// GetAllowedReadNpubs retrieves paginated allowed read NPUBs
-func (ac *AccessControl) GetAllowedReadNpubs(page, pageSize int) ([]types.AllowedReadNpub, *types.PaginationMetadata, error) {
-	return ac.statsStore.GetAllowedReadNpubs(page, pageSize)
-}
-
-// GetAllowedWriteNpubs retrieves paginated allowed write NPUBs
-func (ac *AccessControl) GetAllowedWriteNpubs(page, pageSize int) ([]types.AllowedWriteNpub, *types.PaginationMetadata, error) {
-	return ac.statsStore.GetAllowedWriteNpubs(page, pageSize)
+	return true
 }
 
 // ValidateSettings validates the access control settings for consistency
@@ -351,80 +122,62 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 
 	// Validate mode
 	mode := strings.ToLower(settings.Mode)
-	if mode != "free" && mode != "paid" && mode != "exclusive" && mode != "personal" {
-		return fmt.Errorf("invalid mode: %s, must be 'free', 'paid', 'exclusive', or 'personal'", settings.Mode)
-	}
+	read := strings.ToLower(settings.Read)
+	write := strings.ToLower(settings.Write)
 
-	// Validate read access scope based on mode
-	if settings.ReadAccess.Enabled {
-		switch mode {
-		case "free":
-			// Free mode supports "all_users" scope
-			if settings.ReadAccess.Scope != "" && strings.ToLower(settings.ReadAccess.Scope) != "all_users" {
-				return fmt.Errorf("free mode read access scope must be 'all_users' or empty")
-			}
-		case "paid":
-			// Paid mode supports "all_users" or "paid_users"
-			scope := strings.ToLower(settings.ReadAccess.Scope)
-			if scope != "all_users" && scope != "paid_users" {
-				return fmt.Errorf("paid mode read access scope must be 'all_users' or 'paid_users'")
-			}
-		case "exclusive":
-			// Exclusive mode supports "all_users" or "allowed_users"
-			scope := strings.ToLower(settings.ReadAccess.Scope)
-			if scope != "all_users" && scope != "allowed_users" {
-				return fmt.Errorf("exclusive mode read access scope must be 'all_users' or 'allowed_users'")
-			}
-		case "personal":
-			// Personal mode supports "allowed_users" scope
-			scope := strings.ToLower(settings.ReadAccess.Scope)
-			if scope != "allowed_users" && scope != "" {
-				return fmt.Errorf("personal mode read access scope must be 'allowed_users' or empty (defaults to 'allowed_users')")
-			}
+	// This ensures the correct options are selected for each mode and sets defaults when incorrect values are set
+	// Not all read/write values are valid for each mode so this ensures that the read/write values are in line with the selected mode
+	// mode: 		only_me, invite_only, public, subscription
+	// read/write: 	all_users, paid_users, allowed_users, only_me
+
+	switch mode {
+	case "only_me":
+		write = "only_me"
+		switch read {
+		case "only_me":
+		case "all_users":
+		case "allowed_users":
+		default:
+			read = "only_me"
 		}
+	case "invite-only":
+		write = "allowed_users"
+		switch read {
+		case "all_users":
+		case "allowed_users":
+		default:
+			read = "allowed_users"
+		}
+	case "public":
+		write = "all_users"
+		read = "all_users"
+	case "subscription":
+		write = "paid_users"
+		switch read {
+		case "all_users":
+		case "paid_users":
+		default:
+			read = "paid_users"
+		}
+	default:
+		mode = "only_me"
+		read = "only_me"
+		write = "only_me"
 	}
 
-	// Write access validation: scope is mode-dependent and handled automatically
-	// Free: "all_users" when enabled
-	// Paid: "paid_users" when enabled
-	// Invite-Only: "allowed_users" when enabled
+	settings.Mode = mode
+	settings.Read = read
+	settings.Write = write
 
 	return nil
-}
-
-// GetAccessSummary returns a summary of current access control configuration
-func (ac *AccessControl) GetAccessSummary() map[string]interface{} {
-	if ac.settings == nil {
-		return map[string]interface{}{
-			"error": "settings not initialized",
-		}
-	}
-
-	summary := map[string]interface{}{
-		"mode":          ac.settings.Mode,
-		"read_enabled":  ac.settings.ReadAccess.Enabled,
-		"read_scope":    ac.settings.ReadAccess.Scope,
-		"write_enabled": ac.settings.WriteAccess.Enabled,
-		"tier_count":    len(ac.settings.Tiers),
-		"last_updated":  ac.settings.LastUpdated,
-	}
-
-	// Add mode-specific information
-	switch strings.ToLower(ac.settings.Mode) {
-	case "free":
-		summary["description"] = "Open access with configurable read/write permissions"
-	case "paid":
-		summary["description"] = "Bitcoin payment-gated access with automatic tier assignment"
-	case "exclusive":
-		summary["description"] = "Invitation-based access with manual NPUB curation"
-	case "personal":
-		summary["description"] = "Single-user access for relay owner only"
-	}
-
-	return summary
 }
 
 // GetSettings returns the current access control settings
 func (ac *AccessControl) GetSettings() *types.AllowedUsersSettings {
 	return ac.settings
+}
+
+// UpdateSettings updates the access control settings
+func (ac *AccessControl) UpdateSettings(settings *types.AllowedUsersSettings) {
+	ac.settings = settings
 }

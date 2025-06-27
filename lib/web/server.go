@@ -321,27 +321,17 @@ func StartServer(store stores.Store) error {
 		return handlers.CreatePaymentNotification(c, store)
 	})
 
-	// Allowed users NPUB management routes
-	secured.Get("/allowed-npubs/read", func(c *fiber.Ctx) error {
-		return access.GetAllowedReadNpubs(c, store)
+	// Allowed users
+	secured.Get("/allowed/users", func(c *fiber.Ctx) error {
+		return access.GetAllowedUsersPaginated(c, store)
 	})
-	secured.Get("/allowed-npubs/write", func(c *fiber.Ctx) error {
-		return access.GetAllowedWriteNpubs(c, store)
+
+	secured.Get("/allowed/add", func(c *fiber.Ctx) error {
+		return access.AddAllowedUser(c, store)
 	})
-	secured.Post("/allowed-npubs/read", func(c *fiber.Ctx) error {
-		return access.AddAllowedReadNpub(c, store)
-	})
-	secured.Post("/allowed-npubs/write", func(c *fiber.Ctx) error {
-		return access.AddAllowedWriteNpub(c, store)
-	})
-	secured.Delete("/allowed-npubs/read/:npub", func(c *fiber.Ctx) error {
-		return access.RemoveAllowedReadNpub(c, store)
-	})
-	secured.Delete("/allowed-npubs/write/:npub", func(c *fiber.Ctx) error {
-		return access.RemoveAllowedWriteNpub(c, store)
-	})
-	secured.Post("/allowed-npubs/bulk-import", func(c *fiber.Ctx) error {
-		return access.BulkImportNpubs(c, store)
+
+	secured.Get("/allowed/remove", func(c *fiber.Ctx) error {
+		return access.RemoveAllowedUser(c, store)
 	})
 
 	// ================================

@@ -122,13 +122,10 @@ event_filtering:
 # ALLOWED USERS SETTINGS (Dynamic - web panel can modify)
 # ==================================================
 allowed_users:
-  mode: "paid"  # free, paid, exclusive
-  read_access:
-    enabled: true
-    scope: "all_users"  # all_users, paid_users, allowed_users
-  write_access:
-    enabled: true
-    scope: "paid_users"  # all_users (free mode), paid_users (paid mode), allowed_users (exclusive mode)
+  mode: "public" # only-me, invite-only, public, subscription
+  read: "all_users" # all_users, paid_users, allowed_users, only_me
+  write: "all_users" # all_users, paid_users, allowed_users, only_me
+
   tiers:
     - name: "Starter"
       price_sats: 1000
