@@ -24,60 +24,52 @@ func NewAccessControl(statsStore statistics.StatisticsStore, settings *types.All
 	}
 }
 
-func (ac *AccessControl) CanWrite(npub string) error {
-	if ac.settings.Read == "all_users" {
-		return nil
-	}
-
-	hex, err := sanitizePublicKey(npub)
-	if err != nil {
-		return err
-	}
-
-	if isOwner(npub) {
-		return nil
-	}
-
-	user, err := ac.statsStore.GetAllowedUser(*hex)
-	if err != nil {
-		return err
-	}
-
-	if !user.Write {
-		return fmt.Errorf("user does not have permission to write")
-	}
-
-	return nil
+func (ac *AccessControl) CanRead(npub string) error {
+	return ac.IsAllowed(ac.settings.Read, npub)
 }
 
-func (ac *AccessControl) CanRead(npub string) error {
-	if ac.settings.Read == "all_users" {
+func (ac *AccessControl) CanWrite(npub string) error {
+	return ac.IsAllowed(ac.settings.Write, npub)
+}
+
+func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
+	// Everyone is allowed if all_users is set
+	if readOrWrite == "all_users" {
 		return nil
 	}
 
+	// Ensure we always use the hex encoded public key
 	hex, err := sanitizePublicKey(npub)
 	if err != nil {
 		return err
 	}
 
+	// The owner is always allowed
 	if isOwner(npub) {
 		return nil
 	}
 
+	// Get the allowed user from the database
 	user, err := ac.statsStore.GetAllowedUser(*hex)
 	if err != nil {
 		return err
 	}
 
-	if !user.Read {
+	// User is not allowed if they don't exist
+	if user == nil {
 		return fmt.Errorf("user does not have permission to read")
+	}
+
+	// Check if user has a paid tier if set to paid_users
+	if readOrWrite == "paid_users" {
+		// check subscription tier?
 	}
 
 	return nil
 }
 
 func (ac *AccessControl) AddAllowedUser(npub string, read bool, write bool, tier string, createdBy string) error {
-	return ac.statsStore.AddAllowedUser(npub, read, write, tier, createdBy)
+	return ac.statsStore.AddAllowedUser(npub, tier, createdBy)
 }
 
 func (ac *AccessControl) RemoveAllowedUser(npub string) error {

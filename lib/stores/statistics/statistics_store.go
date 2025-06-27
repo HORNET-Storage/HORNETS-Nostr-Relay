@@ -144,7 +144,7 @@ type StatisticsStore interface {
 
 	// NPUB access control management
 	GetAllowedUser(npub string) (*types.AllowedUser, error)
-	AddAllowedUser(npub string, read bool, write bool, tier string, createdBy string) error
+	AddAllowedUser(npub string, tier string, createdBy string) error
 	RemoveAllowedUser(npub string) error
 	BulkAddAllowedUser(users []types.AllowedUser) error
 	ClearAllowedUsers() error

@@ -1797,11 +1797,9 @@ func (store *GormStatisticsStore) GetAllowedUser(npub string) (*types.AllowedUse
 	return user, nil
 }
 
-func (store *GormStatisticsStore) AddAllowedUser(npub string, read bool, write bool, tier string, createdBy string) error {
+func (store *GormStatisticsStore) AddAllowedUser(npub string, tier string, createdBy string) error {
 	allowedNpub := types.AllowedUser{
 		Npub:      npub,
-		Read:      read,
-		Write:     write,
 		Tier:      tier,
 		CreatedBy: createdBy,
 	}
@@ -1818,8 +1816,6 @@ func (store *GormStatisticsStore) BulkAddAllowedUser(users []types.AllowedUser) 
 		for _, user := range users {
 			allowedUser := types.AllowedUser{
 				Npub:      user.Npub,
-				Read:      user.Read,
-				Write:     user.Write,
 				Tier:      user.Tier,
 				CreatedBy: user.CreatedBy,
 			}
