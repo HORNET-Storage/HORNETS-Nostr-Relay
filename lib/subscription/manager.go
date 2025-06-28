@@ -53,25 +53,27 @@ func NewSubscriptionManager(
 	relayDHTKey string,
 	tiers []types.SubscriptionTier,
 ) *SubscriptionManager {
-	log.Printf("Initializing SubscriptionManager with tiers: %+v", tiers)
+	log.Printf("Initializing SubscriptionManager with %d tiers", len(tiers))
 
 	// Log each tier in detail for debugging
 	for i, tier := range tiers {
-		log.Printf("DEBUG: Initial tier %d: MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
-			i, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
+		log.Printf("DEBUG: Initial tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
+			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
 
 	// Validate tiers data
 	validTiers := make([]types.SubscriptionTier, 0)
 	for i, tier := range tiers {
 		if tier.MonthlyLimitBytes <= 0 && !tier.Unlimited {
-			log.Printf("Warning: skipping tier %d with invalid MonthlyLimitBytes: '%d'", i, tier.MonthlyLimitBytes)
+			log.Printf("Warning: skipping tier %d ('%s') with invalid MonthlyLimitBytes: %d", i, tier.Name, tier.MonthlyLimitBytes)
 			continue
 		}
 		validTiers = append(validTiers, tier)
-		log.Printf("Validated tier %d: MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
-			i, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
+		log.Printf("Validated tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
+			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
+
+	log.Printf("SubscriptionManager initialized with %d valid tiers (from %d total)", len(validTiers), len(tiers))
 
 	return &SubscriptionManager{
 		store:             store,

@@ -9,7 +9,7 @@ type Config struct {
 	Relay                RelayConfig            `mapstructure:"relay"`
 	ContentFiltering     ContentFilteringConfig `mapstructure:"content_filtering"`
 	EventFiltering       EventFilteringConfig   `mapstructure:"event_filtering"`
-	AllowedUsersSettings AllowedUsersSettings   `mapstructure:"allowed_users_settings"`
+	AllowedUsersSettings AllowedUsersSettings   `mapstructure:"allowed_users"`
 }
 
 // ServerConfig holds server-related configuration

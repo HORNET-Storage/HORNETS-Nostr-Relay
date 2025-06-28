@@ -100,8 +100,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	return nil
 }
 
-// processSingleSubscriptionEvent handles updating relay_mode tag for existing kind 888 events
-// This function only updates the relay_mode tag and preserves all other subscription details
+// processSingleSubscriptionEvent handles updating relay_mode tag and storage limits for existing kind 888 events
 func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event) error {
 	// Extract pubkey
 	pubkey := getTagValue(event.Tags, "p")
@@ -109,31 +108,80 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		return fmt.Errorf("no pubkey found in event")
 	}
 
+	// Get current allowed users settings
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		return fmt.Errorf("failed to load allowed users settings: %v", err)
+	}
+
 	// Check if relay_mode tag already exists and is current
 	currentRelayMode := getTagValue(event.Tags, "relay_mode")
 	expectedRelayMode := m.getRelayMode()
 
-	// If relay_mode is already correct, no update needed
-	if currentRelayMode == expectedRelayMode {
-		log.Printf("Event for %s already has correct relay_mode: %s", pubkey, currentRelayMode)
-		return nil
-	}
-
-	log.Printf("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
-
-	// Get all existing event details to preserve them
+	// Get all existing event details
 	storageInfo, err := m.extractStorageInfo(event)
 	if err != nil {
 		return fmt.Errorf("failed to extract storage info: %v", err)
 	}
 
-	// Get subscription details (preserve existing values)
+	// Get subscription details
 	activeTier := getTagValue(event.Tags, "active_subscription")
 	expirationUnix := getTagUnixValue(event.Tags, "active_subscription")
 	expirationDate := time.Unix(expirationUnix, 0)
 	address := getTagValue(event.Tags, "relay_bitcoin_address")
+	status := getTagValue(event.Tags, "subscription_status")
 
-	// Update the event with only the relay_mode tag changed
+	// Check if user should have a tier based on current settings
+	var currentTierObj *types.SubscriptionTier
+	if activeTier != "" {
+		for i := range allowedUsersSettings.Tiers {
+			if allowedUsersSettings.Tiers[i].Name == activeTier {
+				currentTierObj = &allowedUsersSettings.Tiers[i]
+				break
+			}
+		}
+	}
+
+	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, &allowedUsersSettings)
+
+	needsUpdate := false
+
+	// Check if relay mode needs update
+	if currentRelayMode != expectedRelayMode {
+		log.Printf("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
+		needsUpdate = true
+	}
+
+	// Check if storage limits need update
+	if expectedTier != nil {
+		expectedBytes := expectedTier.MonthlyLimitBytes
+		if storageInfo.TotalBytes != expectedBytes {
+			log.Printf("Updating storage limit for %s from %d to %d bytes", pubkey, storageInfo.TotalBytes, expectedBytes)
+			storageInfo.TotalBytes = expectedBytes
+			needsUpdate = true
+		}
+
+		// Update tier if it changed
+		if activeTier != expectedTier.Name {
+			log.Printf("Updating tier for %s from '%s' to '%s'", pubkey, activeTier, expectedTier.Name)
+			activeTier = expectedTier.Name
+			needsUpdate = true
+		}
+
+		// Update status if needed
+		if status == "inactive" && expectedBytes > 0 {
+			log.Printf("Activating subscription for %s", pubkey)
+			needsUpdate = true
+		}
+	}
+
+	// If nothing needs update, skip
+	if !needsUpdate {
+		log.Printf("Event for %s already up to date", pubkey)
+		return nil
+	}
+
+	// Update the event with new values
 	return m.createOrUpdateNIP88Event(&types.Subscriber{
 		Npub:    pubkey,
 		Address: address,

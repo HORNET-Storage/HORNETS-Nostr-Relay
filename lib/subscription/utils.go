@@ -52,16 +52,14 @@ func (m *SubscriptionManager) getRelayMode() string {
 	// Map new access control modes to subscription system modes
 	switch mode {
 	case "public":
-		return "free"
+		return "public"
 	case "subscription":
-		return "paid"
+		return "subscription"
 	case "invite-only":
-		return "exclusive"
+		return "invite-only"
 	case "only_me":
-		return "personal"
-	// Legacy mode support
-	case "free", "paid", "exclusive", "personal":
-		return mode
+		return "only_me"
+
 	default:
 		log.Printf("[DEBUG] Unknown mode '%s', defaulting to 'unknown'", mode)
 		return "unknown"
@@ -121,15 +119,24 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentTier *types.SubscriptionTier, allowedUsersSettings *types.AllowedUsersSettings) *types.SubscriptionTier {
 	mode := strings.ToLower(allowedUsersSettings.Mode)
 
+	log.Printf("DEBUG: findAppropriateTierForUser called with mode='%s', pubkey='%s'", mode, pubkey)
+	log.Printf("DEBUG: Available tiers in findAppropriateTierForUser: %d", len(allowedUsersSettings.Tiers))
+
 	switch mode {
 	case "public", "free":
 		// In public/free mode, assign users to the first available free tier
+		log.Printf("DEBUG: Looking for free tier (PriceSats <= 0)")
 		for i := range allowedUsersSettings.Tiers {
-			if allowedUsersSettings.Tiers[i].PriceSats <= 0 {
-				return &allowedUsersSettings.Tiers[i]
+			tier := &allowedUsersSettings.Tiers[i]
+			log.Printf("DEBUG: Checking tier %d: Name='%s', PriceSats=%d, MonthlyLimitBytes=%d",
+				i, tier.Name, tier.PriceSats, tier.MonthlyLimitBytes)
+			if tier.PriceSats <= 0 {
+				log.Printf("DEBUG: Found free tier: %s with %d bytes", tier.Name, tier.MonthlyLimitBytes)
+				return tier
 			}
 		}
 		// Fallback to basic free allocation
+		log.Printf("DEBUG: No free tier found in config, using fallback")
 		return &types.SubscriptionTier{
 			Name:              "Basic Free",
 			MonthlyLimitBytes: 100 * 1024 * 1024, // 100 MB

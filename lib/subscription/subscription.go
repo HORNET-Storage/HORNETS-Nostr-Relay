@@ -51,6 +51,13 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	}
 
 	// Step 3: Determine appropriate tier for new user
+	log.Printf("DEBUG: AllowedUsersSettings mode: %s", settings.AllowedUsersSettings.Mode)
+	log.Printf("DEBUG: Available tiers in settings: %d", len(settings.AllowedUsersSettings.Tiers))
+	for i, tier := range settings.AllowedUsersSettings.Tiers {
+		log.Printf("DEBUG: Settings tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d",
+			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats)
+	}
+
 	tierLimit := m.findAppropriateTierForUser(npub, nil, &settings.AllowedUsersSettings)
 
 	// Create initial NIP-88 event with storage usage based on assigned tier

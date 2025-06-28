@@ -134,11 +134,12 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 		return fmt.Errorf("settings cannot be nil")
 	}
 
-	// Normalize input values to lowercase for consistent comparison
+	// Validate mode
 	mode := strings.ToLower(settings.Mode)
 	read := strings.ToLower(settings.Read)
 	write := strings.ToLower(settings.Write)
 
+	log.Println("Write setting", write)
 	// This ensures the correct options are selected for each mode and sets defaults when incorrect values are set
 	// Not all read/write values are valid for each mode so this ensures that the read/write values are in line with the selected mode
 	// mode: 		only_me, invite_only, public, subscription
@@ -146,13 +147,7 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 
 	switch mode {
 	case "only_me":
-		// For only_me mode, validate write permission
-		switch write {
-		case "only_me":
-			// Valid, keep as is
-		default:
-			write = "only_me"
-		}
+		write = "only_me"
 		switch read {
 		case "only_me":
 		case "all_users":
@@ -161,13 +156,7 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 			read = "only_me"
 		}
 	case "invite-only":
-		// For invite-only mode, validate write permission
-		switch write {
-		case "allowed_users":
-			// Valid, keep as is
-		default:
-			write = "allowed_users"
-		}
+		write = "allowed_users"
 		switch read {
 		case "all_users":
 		case "allowed_users":
@@ -178,13 +167,7 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 		write = "all_users"
 		read = "all_users"
 	case "subscription":
-		// For subscription mode, validate write permission
-		switch write {
-		case "paid_users":
-			// Valid, keep as is
-		default:
-			write = "paid_users"
-		}
+		write = "paid_users"
 		switch read {
 		case "all_users":
 		case "paid_users":
