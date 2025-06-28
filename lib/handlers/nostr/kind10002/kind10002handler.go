@@ -62,12 +62,16 @@ func BuildKind10002Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Store the new event
 		if err := store.StoreEvent(&env.Event); err != nil {
+			log.Printf("Error storing kind 10002 event: %v", err)
 			write("NOTICE", "Failed to store the event")
 			return
 		}
 
+		log.Printf("Successfully stored kind 10002 event %s", env.Event.ID)
+
 		// Successfully processed event
 		write("OK", env.Event.ID, true, "Event stored successfully")
+		log.Printf("Sent OK response for kind 10002 event %s", env.Event.ID)
 	}
 
 	return handler
@@ -103,7 +107,12 @@ func validateRelayListTags(tags nostr.Tags) error {
 
 // isValidRelayURI checks if the given URI is a valid relay URI.
 func isValidRelayURI(uri string) bool {
-
-	// For now, we'll just check if it starts with "wss://"
-	return len(uri) > 6 && uri[:6] == "wss://"
+	// Check if it starts with "ws://" or "wss://"
+	if len(uri) > 5 && uri[:5] == "ws://" {
+		return true
+	}
+	if len(uri) > 6 && uri[:6] == "wss://" {
+		return true
+	}
+	return false
 }

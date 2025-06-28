@@ -332,18 +332,18 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 					return err
 				}
 
-				// Update subscription storage usage for the event
-				subManager := subscription.GetGlobalManager()
-				if subManager != nil {
-					// Convert PubKey from hex to npub format for subscription manager
-					if err := subManager.UpdateStorageUsage(event.PubKey, int64(sizeBytes)); err != nil {
-						log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", event.PubKey, err)
-						// Don't return error since the database update succeeded
-						// Storage tracking is important but not critical for event storage
+				// Update subscription storage usage for the event asynchronously
+				go func(pubKey string, size int64) {
+					subManager := subscription.GetGlobalManager()
+					if subManager != nil {
+						// Convert PubKey from hex to npub format for subscription manager
+						if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
+							log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pubKey, err)
+						}
+					} else {
+						log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pubKey)
 					}
-				} else {
-					log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", event.PubKey)
-				}
+				}(event.PubKey, int64(sizeBytes))
 			}
 
 			return nil

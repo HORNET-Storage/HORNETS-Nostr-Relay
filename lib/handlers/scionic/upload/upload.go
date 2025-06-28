@@ -225,17 +225,17 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			}
 		}
 
-		// Update subscription storage usage for the DAG upload
-		subManager := subscription.GetGlobalManager()
-		if subManager != nil {
-			if err := subManager.UpdateStorageUsage(message.PublicKey, totalDagSize); err != nil {
-				fmt.Printf("Warning: Failed to update storage usage for pubkey %s: %v\n", message.PublicKey, err)
-				// Don't fail the operation since the DAG was already stored successfully
-				// Storage tracking is important but not critical for DAG storage
+		// Update subscription storage usage for the DAG upload asynchronously
+		go func(pubKey string, size int64) {
+			subManager := subscription.GetGlobalManager()
+			if subManager != nil {
+				if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
+					fmt.Printf("Warning: Failed to update storage usage for pubkey %s: %v\n", pubKey, err)
+				}
+			} else {
+				fmt.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s\n", pubKey)
 			}
-		} else {
-			fmt.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s\n", message.PublicKey)
-		}
+		}(message.PublicKey, totalDagSize)
 
 		fmt.Println("Dag Uploaded: " + message.Root)
 
