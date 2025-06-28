@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 	"golang.org/x/crypto/bcrypt"
@@ -65,6 +65,7 @@ func (store *GormStatisticsStore) Init() error {
 		&types.PaymentNotification{},
 		&types.ReportNotification{}, // Add ReportNotification to be migrated
 		&types.AllowedUser{},
+		&types.RelayOwner{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -1867,4 +1868,32 @@ func (store *GormStatisticsStore) GetUsersPaginated(page int, pageSize int) ([]*
 	}
 
 	return users, metaData, nil
+}
+
+// RelayOwner CRUD operations
+
+func (store *GormStatisticsStore) GetRelayOwner() (*types.RelayOwner, error) {
+	var owner types.RelayOwner
+	err := store.DB.Model(&types.RelayOwner{}).First(&owner).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &owner, nil
+}
+
+func (store *GormStatisticsStore) SetRelayOwner(npub string, createdBy string) error {
+	// First clear any existing owner (only one owner allowed)
+	store.DB.Where("1 = 1").Delete(&types.RelayOwner{})
+
+	relayOwner := types.RelayOwner{
+		Npub:      npub,
+		CreatedBy: createdBy,
+	}
+
+	return store.DB.Create(&relayOwner).Error
+}
+
+func (store *GormStatisticsStore) RemoveRelayOwner() error {
+	return store.DB.Where("1 = 1").Delete(&types.RelayOwner{}).Error
 }

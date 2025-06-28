@@ -334,6 +334,19 @@ func StartServer(store stores.Store) error {
 		return access.RemoveAllowedUser(c, store)
 	})
 
+	// Relay owner management
+	secured.Get("/admin/owner", func(c *fiber.Ctx) error {
+		return access.GetRelayOwner(c, store)
+	})
+
+	secured.Post("/admin/owner", func(c *fiber.Ctx) error {
+		return access.SetRelayOwner(c, store)
+	})
+
+	secured.Delete("/admin/owner", func(c *fiber.Ctx) error {
+		return access.RemoveRelayOwner(c, store)
+	})
+
 	// ================================
 	// STATIC FILE SERVING
 	// ================================

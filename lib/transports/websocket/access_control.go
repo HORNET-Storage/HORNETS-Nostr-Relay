@@ -26,9 +26,9 @@ func InitializeAccessControl(statsStore statistics.StatisticsStore) error {
 		// If no settings found, use default free mode
 		log.Printf("No allowed users settings found, using default free mode: %v", err)
 		allowedUsersSettings = types.AllowedUsersSettings{
-			Mode:  "only_me",
-			Read:  "only_me",
-			Write: "only_me",
+			Mode:  "only-me",
+			Read:  "only-me",
+			Write: "only-me",
 		}
 	}
 

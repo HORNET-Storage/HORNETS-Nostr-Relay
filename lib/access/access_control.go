@@ -47,7 +47,7 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 	}
 
 	// The owner is always allowed
-	if isOwner(npub) {
+	if ac.isOwner(npub) {
 		return nil
 	}
 
@@ -113,8 +113,20 @@ func sanitizePublicKey(serializedPublicKey string) (hex *string, err error) {
 	return hexKey, nil
 }
 
-// Is the incomming pub key the owner of the relay
-func isOwner(hex string) bool {
+// Is the incoming pub key the owner of the relay
+func (ac *AccessControl) isOwner(hex string) bool {
+	// First check database for relay owner
+	if ac.statsStore != nil {
+		owner, err := ac.statsStore.GetRelayOwner()
+		if err == nil && owner != nil {
+			ownerHex, err := sanitizePublicKey(owner.Npub)
+			if err == nil && hex == *ownerHex {
+				return true
+			}
+		}
+	}
+
+	// Fallback to config-based owner (for backwards compatibility)
 	ownerKey := viper.GetString("relay.public_key")
 	ownerHex, err := sanitizePublicKey(ownerKey)
 	if err != nil {
@@ -142,18 +154,18 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 	log.Println("Write setting", write)
 	// This ensures the correct options are selected for each mode and sets defaults when incorrect values are set
 	// Not all read/write values are valid for each mode so this ensures that the read/write values are in line with the selected mode
-	// mode: 		only_me, invite_only, public, subscription
-	// read/write: 	all_users, paid_users, allowed_users, only_me
+	// mode: 		only-me, invite_only, public, subscription
+	// read/write: 	all_users, paid_users, allowed_users, only-me
 
 	switch mode {
-	case "only_me":
-		write = "only_me"
+	case "only-me":
+		write = "only-me"
 		switch read {
-		case "only_me":
+		case "only-me":
 		case "all_users":
 		case "allowed_users":
 		default:
-			read = "only_me"
+			read = "only-me"
 		}
 	case "invite-only":
 		write = "allowed_users"
@@ -175,9 +187,9 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 			read = "paid_users"
 		}
 	default:
-		mode = "only_me"
-		read = "only_me"
-		write = "only_me"
+		mode = "only-me"
+		read = "only-me"
+		write = "only-me"
 	}
 
 	settings.Mode = mode

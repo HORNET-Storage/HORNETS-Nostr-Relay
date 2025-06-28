@@ -123,8 +123,8 @@ event_filtering:
 # ==================================================
 allowed_users:
   mode: "public" # only-me, invite-only, public, subscription
-  read: "all_users" # all_users, paid_users, allowed_users, only_me
-  write: "all_users" # all_users, paid_users, allowed_users, only_me
+  read: "all_users" # all_users, paid_users, allowed_users, only-me
+  write: "all_users" # all_users, paid_users, allowed_users, only-me
 
   tiers:
     - name: "Starter"

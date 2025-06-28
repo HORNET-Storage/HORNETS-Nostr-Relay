@@ -57,8 +57,8 @@ func (m *SubscriptionManager) getRelayMode() string {
 		return "subscription"
 	case "invite-only":
 		return "invite-only"
-	case "only_me":
-		return "only_me"
+	case "only-me":
+		return "only-me"
 
 	default:
 		log.Printf("[DEBUG] Unknown mode '%s', defaulting to 'unknown'", mode)
@@ -175,8 +175,8 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 		// User not in allowed lists, no tier
 		return nil
 
-	case "only_me", "personal":
-		// In only_me/personal mode, only the relay owner gets access
+	case "only-me", "personal":
+		// In only-me/personal mode, only the relay owner gets access
 		// Return current tier if they have one, otherwise first available tier
 		if currentTier != nil {
 			return currentTier

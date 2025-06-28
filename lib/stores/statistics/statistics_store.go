@@ -149,4 +149,9 @@ type StatisticsStore interface {
 	BulkAddAllowedUser(users []types.AllowedUser) error
 	ClearAllowedUsers() error
 	GetUsersPaginated(page int, pageSize int) ([]*types.AllowedUser, *types.PaginationMetadata, error)
+
+	// Relay owner management
+	GetRelayOwner() (*types.RelayOwner, error)
+	SetRelayOwner(npub string, createdBy string) error
+	RemoveRelayOwner() error
 }

@@ -127,3 +127,92 @@ func RemoveAllowedUser(c *fiber.Ctx, store stores.Store) error {
 		"message": "User added to allowed users successfully",
 	})
 }
+
+// RelayOwner management handlers
+
+func GetRelayOwner(c *fiber.Ctx, store stores.Store) error {
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Statistics store not available",
+		})
+	}
+
+	owner, err := statsStore.GetRelayOwner()
+	if err != nil {
+		// Return null if no owner is set (not an error)
+		return c.JSON(fiber.Map{
+			"relay_owner": nil,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"relay_owner": owner,
+	})
+}
+
+func SetRelayOwner(c *fiber.Ctx, store stores.Store) error {
+	var req struct {
+		Npub string `json:"npub"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	pubKey, err := signing.DeserializePublicKey(req.Npub)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid public key format",
+		})
+	}
+
+	createdBy := c.Get("userPubkey", "admin")
+
+	serializedPubKey, err := signing.SerializePublicKey(pubKey)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Failed to serialize public key",
+		})
+	}
+
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Statistics store not available",
+		})
+	}
+
+	if err := statsStore.SetRelayOwner(*serializedPubKey, createdBy); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to set relay owner",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Relay owner set successfully",
+	})
+}
+
+func RemoveRelayOwner(c *fiber.Ctx, store stores.Store) error {
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Statistics store not available",
+		})
+	}
+
+	if err := statsStore.RemoveRelayOwner(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to remove relay owner",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Relay owner removed successfully",
+	})
+}

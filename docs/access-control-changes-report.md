@@ -36,8 +36,8 @@ type AllowedUser struct {
 ```yaml
 allowed_users:
   mode: "public" # only-me, invite-only, public, subscription
-  read: "all_users" # all_users, paid_users, allowed_users, only_me
-  write: "all_users" # all_users, paid_users, allowed_users, only_me
+  read: "all_users" # all_users, paid_users, allowed_users, only-me
+  write: "all_users" # all_users, paid_users, allowed_users, only-me
   tiers:
     - name: "Starter"
       price_sats: 1000
@@ -125,10 +125,10 @@ DELETE /api/allowed-users
 
 The system supports four main modes with specific validation rules:
 
-#### 1. **only_me**
+#### 1. **only-me**
 - **Description**: Restricts access to the relay owner only
-- **Write Permission**: Must be "only_me" (forced)
-- **Read Permission**: Can be "only_me", "all_users", or "allowed_users"
+- **Write Permission**: Must be "only-me" (forced)
+- **Read Permission**: Can be "only-me", "all_users", or "allowed_users"
 - **Use Case**: Personal relay for single user
 
 #### 2. **invite-only**
@@ -169,7 +169,7 @@ The system uses four permission types for read/write access:
   - Verifies subscription hasn't expired
   - Confirms user has a valid tier assigned
 
-#### 4. **only_me**
+#### 4. **only-me**
 - **Description**: Only the relay owner can access
 - **Implementation**: Compares user's public key with relay owner's key
 
@@ -177,7 +177,7 @@ The system uses four permission types for read/write access:
 
 The system automatically validates and corrects invalid combinations:
 
-- **only_me**: Forces write to "only_me", allows read to be "only_me", "all_users", or "allowed_users"
+- **only-me**: Forces write to "only-me", allows read to be "only-me", "all_users", or "allowed_users"
 - **invite-only**: Forces write to "allowed_users", allows read to be "all_users" or "allowed_users"
 - **public**: Forces both read and write to "all_users"
 - **subscription**: Forces write to "paid_users", allows read to be "all_users" or "paid_users"
@@ -219,8 +219,8 @@ The system automatically validates and corrects invalid combinations:
 ```javascript
 const accessSettings = {
   mode: "subscription", // dropdown: only-me, invite-only, public, subscription
-  read: "paid_users",   // dropdown: all_users, paid_users, allowed_users, only_me
-  write: "paid_users"   // dropdown: all_users, paid_users, allowed_users, only_me
+  read: "paid_users",   // dropdown: all_users, paid_users, allowed_users, only-me
+  write: "paid_users"   // dropdown: all_users, paid_users, allowed_users, only-me
 };
 ```
 
@@ -234,7 +234,7 @@ const accessSettings = {
 #### Mode Validation:
 The system automatically validates and corrects invalid combinations:
 
-- **only_me**: Forces write to "only_me", allows read to be "only_me", "all_users", or "allowed_users"
+- **only-me**: Forces write to "only-me", allows read to be "only-me", "all_users", or "allowed_users"
 - **invite-only**: Forces write to "allowed_users", allows read to be "all_users" or "allowed_users"
 - **public**: Forces both read and write to "all_users"
 - **subscription**: Forces write to "paid_users", allows read to be "all_users" or "paid_users"
