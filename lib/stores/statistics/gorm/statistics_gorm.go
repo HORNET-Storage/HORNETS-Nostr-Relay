@@ -1853,7 +1853,7 @@ func (store *GormStatisticsStore) GetUsersPaginated(page int, pageSize int) ([]*
 	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
 
 	var users []*types.AllowedUser
-	result = store.DB.Model(&types.AllowedUser{}).Limit(pageSize).Offset(offset).Find(users)
+	result = store.DB.Model(&types.AllowedUser{}).Limit(pageSize).Offset(offset).Find(&users)
 	if result.Error != nil {
 		return nil, nil, result.Error
 	}
