@@ -484,8 +484,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
 	// }
 
-	log.Println("DB Querying results: ", filteredEvents)
-
 	return filteredEvents, nil
 }
 

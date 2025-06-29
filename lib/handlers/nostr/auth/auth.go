@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
@@ -31,9 +32,10 @@ func verifyAuthTags(tags nostr.Tags, challenge string) bool {
 	var hasRelayTag, hasChallengeTag bool
 	for _, tag := range tags {
 		if len(tag) >= 2 {
-			if tag[0] == "relay" {
+			switch tag[0] {
+			case "relay":
 				hasRelayTag = true
-			} else if tag[0] == "challenge" {
+			case "challenge":
 				hasChallengeTag = true
 				if challenge != "" && tag[1] != challenge {
 					return false
@@ -126,15 +128,24 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 			return
 		}
 
-		// Initialize subscriber
-		if err := subManager.InitializeSubscriber(request.Event.PubKey); err != nil {
+		// Get current relay configuration
+		settings, err := config.GetConfig()
+		if err != nil {
+			log.Printf("Failed to get config: %v", err)
+			write("OK", request.Event.ID, false, "Failed to get relay configuration")
+			return
+		}
+
+		// Initialize subscriber with current mode
+		currentMode := settings.AllowedUsersSettings.Mode
+		if err := subManager.InitializeSubscriber(request.Event.PubKey, currentMode); err != nil {
 			log.Printf("Failed to initialize subscriber %s: %v", request.Event.PubKey, err)
 
 			// Check for common errors and provide more specific messages
 			errMsg := err.Error()
-			if strings.Contains(errMsg, "no available addresses") {
+			if strings.Contains(errMsg, "no available addresses") && currentMode == "subscription" {
 				write("OK", request.Event.ID, false, "Failed to allocate Bitcoin address: No addresses available in the pool")
-			} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") {
+			} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") && currentMode == "subscription" {
 				write("OK", request.Event.ID, false, fmt.Sprintf("Bitcoin address allocation error: %v", err))
 			} else {
 				write("OK", request.Event.ID, false, fmt.Sprintf("Subscriber initialization failed: %v", err))

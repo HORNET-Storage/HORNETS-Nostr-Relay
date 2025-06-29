@@ -2,7 +2,9 @@ package access
 
 import (
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -45,7 +47,7 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 	}
 
 	// The owner is always allowed
-	if isOwner(npub) {
+	if ac.isOwner(npub) {
 		return nil
 	}
 
@@ -62,7 +64,27 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 
 	// Check if user has a paid tier if set to paid_users
 	if readOrWrite == "paid_users" {
-		// check subscription tier?
+		// Check if user exists in paid subscribers table
+		paidSubscriber, err := ac.statsStore.GetPaidSubscriberByNpub(*hex)
+		if err != nil {
+			// Database error - log it but deny access
+			log.Printf("Error checking paid subscriber status: %v", err)
+			return fmt.Errorf("user does not have permission")
+		}
+
+		if paidSubscriber == nil {
+			return fmt.Errorf("user does not have a paid subscription")
+		}
+
+		// Check if subscription is still valid
+		if time.Now().After(paidSubscriber.ExpirationDate) {
+			return fmt.Errorf("user subscription has expired")
+		}
+
+		// Verify it's actually a paid tier (not a free tier that somehow got into the table)
+		if paidSubscriber.Tier == "" {
+			return fmt.Errorf("user does not have a valid subscription tier")
+		}
 	}
 
 	return nil
@@ -91,8 +113,20 @@ func sanitizePublicKey(serializedPublicKey string) (hex *string, err error) {
 	return hexKey, nil
 }
 
-// Is the incomming pub key the owner of the relay
-func isOwner(hex string) bool {
+// Is the incoming pub key the owner of the relay
+func (ac *AccessControl) isOwner(hex string) bool {
+	// First check database for relay owner
+	if ac.statsStore != nil {
+		owner, err := ac.statsStore.GetRelayOwner()
+		if err == nil && owner != nil {
+			ownerHex, err := sanitizePublicKey(owner.Npub)
+			if err == nil && hex == *ownerHex {
+				return true
+			}
+		}
+	}
+
+	// Fallback to config-based owner (for backwards compatibility)
 	ownerKey := viper.GetString("relay.public_key")
 	ownerHex, err := sanitizePublicKey(ownerKey)
 	if err != nil {
@@ -117,20 +151,21 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 	read := strings.ToLower(settings.Read)
 	write := strings.ToLower(settings.Write)
 
+	log.Println("Write setting", write)
 	// This ensures the correct options are selected for each mode and sets defaults when incorrect values are set
 	// Not all read/write values are valid for each mode so this ensures that the read/write values are in line with the selected mode
-	// mode: 		only_me, invite_only, public, subscription
-	// read/write: 	all_users, paid_users, allowed_users, only_me
+	// mode: 		only-me, invite_only, public, subscription
+	// read/write: 	all_users, paid_users, allowed_users, only-me
 
 	switch mode {
-	case "only_me":
-		write = "only_me"
+	case "only-me":
+		write = "only-me"
 		switch read {
-		case "only_me":
+		case "only-me":
 		case "all_users":
 		case "allowed_users":
 		default:
-			read = "only_me"
+			read = "only-me"
 		}
 	case "invite-only":
 		write = "allowed_users"
@@ -152,9 +187,9 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 			read = "paid_users"
 		}
 	default:
-		mode = "only_me"
-		read = "only_me"
-		write = "only_me"
+		mode = "only-me"
+		read = "only-me"
+		write = "only-me"
 	}
 
 	settings.Mode = mode

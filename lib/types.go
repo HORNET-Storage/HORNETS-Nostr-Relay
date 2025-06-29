@@ -108,6 +108,7 @@ type (
 // Access types
 type (
 	AllowedUser = types.AllowedUser
+	RelayOwner  = types.RelayOwner
 )
 
 // Config types

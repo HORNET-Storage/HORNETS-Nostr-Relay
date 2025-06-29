@@ -6,28 +6,28 @@ Kind 888 events serve as the subscription and storage management system for the 
 
 ## Relay Modes
 
-### Free Mode
+### Public Mode (was "Free Mode")
 - **Storage**: Fixed allocation per user (configured by relay operator)
 - **Payment**: Not required
 - **Expiration**: Long-term (Month to month)
 - **Storage Policy**: Resets monthly
 - **UI Behavior**: No payment options, storage info only
 
-### Paid Mode
+### Subscription Mode (was "Paid Mode")
 - **Storage**: Tiered based on payment amount
 - **Payment**: Required for storage allocation
 - **Expiration**: Monthly billing cycles
 - **Storage Policy**: Accumulates (unused storage carries over)
 - **UI Behavior**: Full payment and upgrade options available
 
-### Exclusive Mode
+### Invite-Only Mode (was "Exclusive Mode")
 - **Storage**: Varies by assigned tier (can be limited or unlimited)
 - **Payment**: Not required (invite-only access)
 - **Expiration**: Set by admin or indefinite
 - **Storage Policy**: Based on tier configuration
 - **UI Behavior**: Storage info only, no payment options
 
-### Personal Mode
+### Only-Me Mode (was "Personal Mode")
 - **Storage**: Always unlimited
 - **Payment**: Not required
 - **Expiration**: Indefinite
@@ -50,7 +50,7 @@ Kind 888 events serve as the subscription and storage management system for the 
     ["storage", "<used_bytes>", "<total_bytes|unlimited>", "<last_updated_timestamp>"],
     ["credit", "<credit_amount_in_sats>"],
     ["active_subscription", "<tier_name>", "<expiration_timestamp>"],
-    ["relay_mode", "free|paid|exclusive|personal"]
+    ["relay_mode", "public|subscription|invite-only|only-me"]
   ],
   "content": "",
   "sig": "<relay_signature>"
@@ -61,7 +61,7 @@ Kind 888 events serve as the subscription and storage management system for the 
 
 ### relay_mode
 - **Purpose**: Informs clients about the relay's operational mode
-- **Values**: `free`, `paid`, `exclusive`, `personal`
+- **Values**: `public`, `subscription`, `invite-only`, `only-me`
 - **Client Usage**: Determines which UI components to display
 
 ### storage
@@ -81,20 +81,20 @@ Kind 888 events serve as the subscription and storage management system for the 
 
 ## Storage Management Policies
 
-### Free Mode Users
+### Public Mode Users
 - Storage allocation resets monthly
 - Fixed allocation (e.g., 100MB per month)
 - No accumulation of unused storage
 
-### Paid Mode Users
+### Subscription Mode Users
 - Storage accumulates month-to-month
 - Unused storage carries over to next billing cycle
 - Credit system handles overpayments
 
-### Exclusive/Personal Users
+### Invite-Only/Only-Me Users
 - Storage based on assigned tier
-- Personal mode users always get unlimited storage
-- Exclusive users vary by tier configuration
+- Only-me mode users always get unlimited storage
+- Invite-only users vary by tier configuration
 
 ## Payment Processing
 
@@ -130,11 +130,11 @@ function parseKind888Event(event) {
 ### UI Decision Making
 ```javascript
 function shouldShowPaymentOptions(relayMode) {
-  return relayMode === 'paid';
+  return relayMode === 'subscription';
 }
 
 function shouldShowUpgradeOptions(relayMode, subscription) {
-  return relayMode === 'paid' && subscription.status === 'active';
+  return relayMode === 'subscription' && subscription.status === 'active';
 }
 
 function getStorageDisplayText(storage) {
@@ -156,10 +156,10 @@ When relay operators change modes, the system:
 
 ### Transition Examples
 
-**Free → Paid**: Existing free allocations remain until expiration, then payment required  
-**Paid → Free**: Immediate downgrade to free tier limits  
-**Any → Personal**: Immediate unlimited storage for all users  
-**Any → Exclusive**: Admin manually manages access, existing subscriptions honored
+**Public → Subscription**: Existing public allocations remain until expiration, then payment required  
+**Subscription → Public**: Immediate downgrade to public tier limits  
+**Any → Only-Me**: Immediate unlimited storage for all users  
+**Any → Invite-Only**: Admin manually manages access, existing subscriptions honored
 
 ## Real-Time Storage Updates
 
@@ -188,7 +188,7 @@ When relay operators change modes, the system:
 - Ensures consistency even during mode transitions
 
 ### Storage Enforcement
-- Personal mode: No limits enforced
+- Only-me mode: No limits enforced
 - Other modes: Limits enforced based on tier allocation
 - Real-time checking prevents storage overuse
 

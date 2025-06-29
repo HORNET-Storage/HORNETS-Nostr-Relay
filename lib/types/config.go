@@ -9,7 +9,7 @@ type Config struct {
 	Relay                RelayConfig            `mapstructure:"relay"`
 	ContentFiltering     ContentFilteringConfig `mapstructure:"content_filtering"`
 	EventFiltering       EventFilteringConfig   `mapstructure:"event_filtering"`
-	AllowedUsersSettings AllowedUsersSettings   `mapstructure:"allowed_users_settings"`
+	AllowedUsersSettings AllowedUsersSettings   `mapstructure:"allowed_users"`
 }
 
 // ServerConfig holds server-related configuration
@@ -147,8 +147,8 @@ type SubscriptionTier struct {
 // AllowedUsersSettings represents the unified access control configuration
 type AllowedUsersSettings struct {
 	Mode        string             `json:"mode" mapstructure:"mode"`   // only-me, invite-only, public, subscription
-	Read        string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only_me
-	Write       string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only_me
+	Read        string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only-me
+	Write       string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only-me
 	Tiers       []SubscriptionTier `json:"tiers" mapstructure:"tiers"`
 	LastUpdated int64
 }

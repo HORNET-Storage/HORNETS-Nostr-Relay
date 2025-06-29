@@ -86,7 +86,7 @@ When a user first connects to the relay and authenticates, the system automatica
 }
 ```
 
-This initial kind 888 event serves as a subscription record that will track the user's status, allocated storage, payment history, and credit. If the relay doesn't offer a free tier, the event starts with "inactive" status and zero storage allocation until a payment is received. However, if the relay has configured a free tier, the user's subscription would start with "active" status and would be allocated the storage amount specified in the free tier configuration, without requiring any payment.
+This initial kind 888 event serves as a subscription record that will track the user's status, allocated storage, payment history, and credit. If the relay doesn't offer a public tier, the event starts with "inactive" status and zero storage allocation until a payment is received. However, if the relay has configured a public tier, the user's subscription would start with "active" status and would be allocated the storage amount specified in the public tier configuration, without requiring any payment.
 
 ### Step 5: Enhanced User Payment Process
 
@@ -181,7 +181,7 @@ Credit information is always included in the user's kind 888 event, providing tr
 
 ## Unlimited Storage Support
 
-For certain relay configurations (such as personal mode or exclusive users), unlimited storage may be granted. This is indicated in the kind 888 event by using "unlimited" as the total bytes value in the storage tag:
+For certain relay configurations (such as only-me mode or invite-only users), unlimited storage may be granted. This is indicated in the kind 888 event by using "unlimited" as the total bytes value in the storage tag:
 
 ### Standard Storage Tag
 ```json
@@ -197,7 +197,7 @@ When a user has unlimited storage:
 - The `used_bytes` field still tracks actual usage for monitoring purposes
 - The `total_bytes` field is set to the string "unlimited"
 - Storage enforcement is bypassed for these users
-- This is typically used for personal relay owners and privileged exclusive users
+- This is typically used for only-me relay owners and privileged invite-only users
 
 ## Lightning Network Implementation (Future)
 

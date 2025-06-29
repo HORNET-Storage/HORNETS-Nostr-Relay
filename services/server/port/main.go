@@ -331,6 +331,22 @@ func main() {
 	)
 	logging.Info("Global subscription manager initialized successfully")
 
+	// Batch update existing kind 888 events on startup to ensure they reflect current config
+	logging.Info("Updating existing kind 888 events to reflect current configuration...")
+	if manager := subscription.GetGlobalManager(); manager != nil {
+		go func() {
+			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
+				logging.Errorf("Failed to update existing kind 888 events on startup: %v", err)
+			} else {
+				logging.Info("Successfully updated existing kind 888 events on startup")
+			}
+		}()
+	}
+
+	// Initialize daily free tier subscription renewal
+	logging.Info("Initializing daily free tier subscription renewal...")
+	subscription.InitDailyFreeSubscriptionRenewal()
+
 	// Initialize the global access control
 	logging.Info("Initializing global access control...")
 	if statsStore := store.GetStatsStore(); statsStore != nil {

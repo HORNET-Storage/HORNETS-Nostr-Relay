@@ -150,17 +150,17 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 	// Store the file in the statistics database
 	s.storage.GetStatsStore().SaveFile("blossom", encodedHash, name, mtype.String(), 0, int64(len(data)))
 
-	// Update subscription storage usage for the file upload
-	subManager := subscription.GetGlobalManager()
-	if subManager != nil {
-		if err := subManager.UpdateStorageUsage(pubkey, int64(len(data))); err != nil {
-			log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pubkey, err)
-			// Don't return error since the file was already stored successfully
-			// Storage tracking is important but not critical for file storage
+	// Update subscription storage usage for the file upload asynchronously
+	go func(pk string, size int64) {
+		subManager := subscription.GetGlobalManager()
+		if subManager != nil {
+			if err := subManager.UpdateStorageUsage(pk, size); err != nil {
+				log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pk, err)
+			}
+		} else {
+			log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pk)
 		}
-	} else {
-		log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pubkey)
-	}
+	}(pubkey, int64(len(data)))
 
 	// Return success with the hash for confirmation
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{

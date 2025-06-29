@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -326,12 +327,25 @@ func StartServer(store stores.Store) error {
 		return access.GetAllowedUsersPaginated(c, store)
 	})
 
-	secured.Get("/allowed/add", func(c *fiber.Ctx) error {
+	secured.Post("/allowed/add", func(c *fiber.Ctx) error {
 		return access.AddAllowedUser(c, store)
 	})
 
-	secured.Get("/allowed/remove", func(c *fiber.Ctx) error {
+	secured.Delete("/allowed/remove", func(c *fiber.Ctx) error {
 		return access.RemoveAllowedUser(c, store)
+	})
+
+	// Relay owner management
+	secured.Get("/admin/owner", func(c *fiber.Ctx) error {
+		return access.GetRelayOwner(c, store)
+	})
+
+	secured.Post("/admin/owner", func(c *fiber.Ctx) error {
+		return access.SetRelayOwner(c, store)
+	})
+
+	secured.Delete("/admin/owner", func(c *fiber.Ctx) error {
+		return access.RemoveRelayOwner(c, store)
 	})
 
 	// ================================
@@ -341,9 +355,18 @@ func StartServer(store stores.Store) error {
 		Root:   http.Dir("./web"),
 		Browse: false,
 		Index:  "index.html",
+		// Only serve static files, don't catch API routes
+		Next: func(c *fiber.Ctx) bool {
+			return strings.HasPrefix(c.Path(), "/api/")
+		},
 	}))
 
+	// Catch-all for non-API routes only
 	app.Use(func(c *fiber.Ctx) error {
+		// Don't interfere with API routes
+		if strings.HasPrefix(c.Path(), "/api/") {
+			return c.Next()
+		}
 		return c.SendFile("./web/index.html")
 	})
 

@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 	"golang.org/x/crypto/bcrypt"
@@ -65,6 +65,7 @@ func (store *GormStatisticsStore) Init() error {
 		&types.PaymentNotification{},
 		&types.ReportNotification{}, // Add ReportNotification to be migrated
 		&types.AllowedUser{},
+		&types.RelayOwner{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -332,18 +333,18 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 					return err
 				}
 
-				// Update subscription storage usage for the event
-				subManager := subscription.GetGlobalManager()
-				if subManager != nil {
-					// Convert PubKey from hex to npub format for subscription manager
-					if err := subManager.UpdateStorageUsage(event.PubKey, int64(sizeBytes)); err != nil {
-						log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", event.PubKey, err)
-						// Don't return error since the database update succeeded
-						// Storage tracking is important but not critical for event storage
+				// Update subscription storage usage for the event asynchronously
+				go func(pubKey string, size int64) {
+					subManager := subscription.GetGlobalManager()
+					if subManager != nil {
+						// Convert PubKey from hex to npub format for subscription manager
+						if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
+							log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pubKey, err)
+						}
+					} else {
+						log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pubKey)
 					}
-				} else {
-					log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", event.PubKey)
-				}
+				}(event.PubKey, int64(sizeBytes))
 			}
 
 			return nil
@@ -1852,7 +1853,7 @@ func (store *GormStatisticsStore) GetUsersPaginated(page int, pageSize int) ([]*
 	totalPages := int(math.Ceil(float64(total) / float64(pageSize)))
 
 	var users []*types.AllowedUser
-	result = store.DB.Model(&types.AllowedUser{}).Limit(pageSize).Offset(offset).Find(users)
+	result = store.DB.Model(&types.AllowedUser{}).Limit(pageSize).Offset(offset).Find(&users)
 	if result.Error != nil {
 		return nil, nil, result.Error
 	}
@@ -1867,4 +1868,68 @@ func (store *GormStatisticsStore) GetUsersPaginated(page int, pageSize int) ([]*
 	}
 
 	return users, metaData, nil
+}
+
+// RelayOwner CRUD operations
+
+func (store *GormStatisticsStore) GetRelayOwner() (*types.RelayOwner, error) {
+	var owner types.RelayOwner
+	err := store.DB.Model(&types.RelayOwner{}).First(&owner).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &owner, nil
+}
+
+func (store *GormStatisticsStore) SetRelayOwner(npub string, createdBy string) error {
+	// First clear any existing owner (only one owner allowed)
+	store.DB.Where("1 = 1").Delete(&types.RelayOwner{})
+
+	relayOwner := types.RelayOwner{
+		Npub:      npub,
+		CreatedBy: createdBy,
+	}
+
+	return store.DB.Create(&relayOwner).Error
+}
+
+func (store *GormStatisticsStore) RemoveRelayOwner() error {
+	return store.DB.Where("1 = 1").Delete(&types.RelayOwner{}).Error
+}
+
+// Bitcoin address management for mode switching
+
+func (store *GormStatisticsStore) GetAvailableBitcoinAddressCount() (int, error) {
+	var count int64
+	err := store.DB.Model(&types.SubscriberAddress{}).
+		Where("status = ?", "available").
+		Count(&count).Error
+	return int(count), err
+}
+
+func (store *GormStatisticsStore) CountUsersWithoutBitcoinAddresses() (int, error) {
+	// Count total unique users from UserProfile table
+	var totalUsers int64
+	err := store.DB.Model(&types.UserProfile{}).Count(&totalUsers).Error
+	if err != nil {
+		return 0, err
+	}
+
+	// Count users who already have Bitcoin addresses allocated
+	var usersWithAddresses int64
+	err = store.DB.Model(&types.SubscriberAddress{}).
+		Where("status IN ?", []string{"allocated", "used"}).
+		Count(&usersWithAddresses).Error
+	if err != nil {
+		return 0, err
+	}
+
+	// Return the difference
+	usersWithoutAddresses := int(totalUsers - usersWithAddresses)
+	if usersWithoutAddresses < 0 {
+		usersWithoutAddresses = 0
+	}
+
+	return usersWithoutAddresses, nil
 }

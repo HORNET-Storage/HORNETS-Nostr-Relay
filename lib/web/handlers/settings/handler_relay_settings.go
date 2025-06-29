@@ -1,17 +1,27 @@
 package settings
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
 // GetSettings returns the entire configuration
@@ -146,6 +156,171 @@ func normalizeDataTypes(settings map[string]interface{}) {
 	}
 }
 
+// validateModeSwitch validates mode changes, especially switching to subscription mode
+func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings, store stores.Store) error {
+	// Check if switching TO subscription mode from another mode
+	if newSettings.Mode == "subscription" && currentSettings.Mode != "subscription" {
+		log.Printf("Mode switch detected: %s -> subscription. Checking Bitcoin address availability...", currentSettings.Mode)
+
+		// First, check if wallet service is reachable
+		walletHealthy, err := checkWalletServiceHealth()
+		if err != nil || !walletHealthy {
+			return fmt.Errorf("cannot switch to subscription mode: wallet service is not available")
+		}
+
+		// Check if we have Bitcoin addresses in the pool
+		statsStore := store.GetStatsStore()
+		addressCount, err := statsStore.GetAvailableBitcoinAddressCount()
+		if err != nil {
+			return fmt.Errorf("failed to check Bitcoin address availability: %v", err)
+		}
+
+		// Check if existing users need addresses
+		usersWithoutAddresses, err := statsStore.CountUsersWithoutBitcoinAddresses()
+		if err != nil {
+			return fmt.Errorf("failed to check users without addresses: %v", err)
+		}
+
+		// Define minimum buffer (e.g., 20% extra addresses or at least 100 addresses)
+		bufferSize := int(float64(usersWithoutAddresses) * 0.2)
+		if bufferSize < 100 {
+			bufferSize = 100
+		}
+
+		requiredAddresses := usersWithoutAddresses + bufferSize
+
+		if addressCount < requiredAddresses {
+			addressesNeeded := requiredAddresses - addressCount
+			log.Printf("Insufficient Bitcoin addresses (%d needed + %d buffer = %d total required, but only %d available). Requesting %d more addresses...",
+				usersWithoutAddresses, bufferSize, requiredAddresses, addressCount, addressesNeeded)
+
+			// Request additional addresses from wallet service asynchronously
+			go func() {
+				subManager := subscription.GetGlobalManager()
+				if subManager != nil {
+					if err := subManager.RequestNewAddresses(addressesNeeded); err != nil {
+						log.Printf("Warning: Failed to request additional Bitcoin addresses: %v", err)
+					} else {
+						log.Printf("Successfully requested %d additional Bitcoin addresses from wallet service", addressesNeeded)
+					}
+				}
+			}()
+
+			// Allow the mode switch to proceed - addresses will be generated in background
+			log.Printf("Mode switch proceeding - requested %d additional addresses, they will be available shortly", addressesNeeded)
+		}
+
+		log.Printf("Mode switch validation passed: %d addresses available for %d users (with %d buffer)",
+			addressCount, usersWithoutAddresses, bufferSize)
+	}
+
+	return nil
+}
+
+// checkWalletServiceHealth checks if the wallet service is reachable
+func checkWalletServiceHealth() (bool, error) {
+	// Get API key from config
+	apiKey := viper.GetString("external_services.wallet.key")
+	log.Printf("Wallet health check: API key configured: %t", len(apiKey) > 0)
+
+	// Generate JWT token using API key
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"api_key": apiKey,
+		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+		"iat":     time.Now().Unix(),
+	})
+
+	// Sign token with API key
+	tokenString, err := token.SignedString([]byte(apiKey))
+	if err != nil {
+		log.Printf("Wallet health check: Failed to generate token: %v", err)
+		return false, fmt.Errorf("failed to generate token: %v", err)
+	}
+
+	// Create request body
+	reqBody := map[string]interface{}{
+		"request_id": fmt.Sprintf("health-check-%d", time.Now().Unix()),
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Printf("Wallet health check: Failed to marshal request: %v", err)
+		return false, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	// Prepare HMAC signature
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	message := apiKey + timestamp + string(jsonData)
+	h := hmac.New(sha256.New, []byte(apiKey))
+	h.Write([]byte(message))
+	signature := hex.EncodeToString(h.Sum(nil))
+
+	walletAddress := config.GetExternalURL("wallet")
+	healthURL := walletAddress + "/health"
+	log.Printf("Wallet health check: Attempting request to %s", healthURL)
+
+	// Create POST request
+	req, err := http.NewRequest("POST", healthURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Wallet health check: Failed to create request: %v", err)
+		return false, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add all required headers (same as /generate-addresses)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenString))
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("X-Timestamp", timestamp)
+	req.Header.Set("X-Signature", signature)
+
+	log.Printf("Wallet health check: Request headers set, sending request...")
+
+	// Send request
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Wallet health check: Request failed: %v", err)
+		return false, fmt.Errorf("wallet service unreachable: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Wallet health check: Received response with status: %d (%s)", resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		// Read response body for more details
+		body := make([]byte, 1024)
+		n, _ := resp.Body.Read(body)
+		log.Printf("Wallet health check: Non-200 response body: %s", string(body[:n]))
+		return false, fmt.Errorf("wallet service returned status: %v", resp.Status)
+	}
+
+	// Parse the health response for logging purposes
+	var healthData struct {
+		Status       string `json:"status"`
+		Timestamp    string `json:"timestamp"`
+		WalletLocked bool   `json:"wallet_locked"`
+		ChainSynced  bool   `json:"chain_synced"`
+		PeerCount    int    `json:"peer_count"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&healthData); err != nil {
+		log.Printf("Warning: could not parse wallet health response: %v", err)
+		// Still return true as the wallet responded with 200
+		return true, nil
+	}
+
+	// Log wallet status details
+	log.Printf("Wallet health check: status=%s, locked=%v, synced=%v, peers=%d",
+		healthData.Status, healthData.WalletLocked, healthData.ChainSynced, healthData.PeerCount)
+
+	// Only check if wallet is responding (status 200)
+	// The other fields are informational only
+	log.Printf("Wallet health check: SUCCESS - wallet is responding")
+	return true, nil
+}
+
 // UpdateSettings updates configuration values
 func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	log.Println("Update settings request received")
@@ -180,6 +355,46 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	allowedUsersUpdated := false
 	if _, exists := settings["allowed_users"]; exists {
 		allowedUsersUpdated = true
+
+		// VALIDATION: Check mode switch requirements before saving
+		if allowedUsersInterface, ok := settings["allowed_users"].(map[string]interface{}); ok {
+			// Get current config to compare mode changes
+			currentConfig, err := config.GetConfig()
+			if err != nil {
+				log.Printf("Error getting current config for validation: %v", err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error": "Failed to get current configuration for validation",
+				})
+			}
+
+			// Convert the new settings to a proper struct for validation
+			var newAllowedUsersSettings types.AllowedUsersSettings
+			
+			// Marshal to JSON and back to properly convert types
+			jsonData, err := json.Marshal(allowedUsersInterface)
+			if err != nil {
+				log.Printf("Error marshaling allowed_users settings: %v", err)
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "Invalid allowed_users settings format",
+				})
+			}
+			
+			if err := json.Unmarshal(jsonData, &newAllowedUsersSettings); err != nil {
+				log.Printf("Error unmarshaling allowed_users settings: %v", err)
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "Invalid allowed_users settings structure",
+				})
+			}
+
+			// Validate the mode switch
+			if err := validateModeSwitch(&currentConfig.AllowedUsersSettings, &newAllowedUsersSettings, store); err != nil {
+				log.Printf("Mode switch validation failed: %v", err)
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": fmt.Sprintf("Mode switch validation failed: %v", err),
+				})
+			}
+		}
+
 		// Set the last updated timestamp for allowed_users
 		if allowedUsersMap, ok := settings["allowed_users"].(map[string]interface{}); ok {
 			allowedUsersMap["last_updated"] = time.Now().Unix()

@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -103,15 +104,24 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
-	// Initialize subscriber
-	if err := subManager.InitializeSubscriber(env.Event.PubKey); err != nil {
+	// Get current relay configuration
+	settings, err := config.GetConfig()
+	if err != nil {
+		log.Printf("Failed to get config: %v", err)
+		write("OK", env.Event.ID, false, "Failed to get relay configuration")
+		return
+	}
+
+	// Initialize subscriber with current mode
+	currentMode := settings.AllowedUsersSettings.Mode
+	if err := subManager.InitializeSubscriber(env.Event.PubKey, currentMode); err != nil {
 		log.Printf("Failed to initialize subscriber %s: %v", env.Event.PubKey, err)
 
 		// Check for common errors and provide more specific messages
 		errMsg := err.Error()
-		if strings.Contains(errMsg, "no available addresses") {
+		if strings.Contains(errMsg, "no available addresses") && currentMode == "subscription" {
 			write("OK", env.Event.ID, false, "Failed to allocate Bitcoin address: No addresses available in the pool")
-		} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") {
+		} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") && currentMode == "subscription" {
 			write("OK", env.Event.ID, false, fmt.Sprintf("Bitcoin address allocation error: %v", err))
 		} else {
 			write("OK", env.Event.ID, false, fmt.Sprintf("Subscriber initialization failed: %v", err))
