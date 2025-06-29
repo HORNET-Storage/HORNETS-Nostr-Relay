@@ -98,6 +98,16 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	}
 
 	log.Printf("Completed batch update, processed %d kind 888 events", processed)
+
+	// If we're in subscription mode, also allocate Bitcoin addresses for users who don't have them
+	if allowedUsersSettings.Mode == "subscription" {
+		log.Printf("Relay is in subscription mode, allocating Bitcoin addresses for users without them")
+		if err := m.AllocateBitcoinAddressesForExistingUsers(); err != nil {
+			log.Printf("Error allocating Bitcoin addresses: %v", err)
+			return fmt.Errorf("failed to allocate Bitcoin addresses: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -193,19 +203,29 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 	log.Printf("Starting batch Bitcoin address allocation for existing users")
 
-	// Query all kind 888 events without Bitcoin addresses
-	events, err := m.store.QueryEvents(nostr.Filter{
+	// Query all kind 888 events first
+	allEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{888},
-		Tags: nostr.TagMap{
-			"relay_bitcoin_address": []string{""}, // Empty address
-		},
 	})
 
 	if err != nil {
 		return fmt.Errorf("failed to query events: %v", err)
 	}
 
-	usersNeedingAddresses := len(events)
+	log.Printf("Found %d total kind 888 events, checking for empty Bitcoin addresses", len(allEvents))
+
+	// Filter events that have empty Bitcoin addresses
+	var eventsNeedingAddresses []*nostr.Event
+	for _, event := range allEvents {
+		bitcoinAddress := getTagValue(event.Tags, "relay_bitcoin_address")
+		if bitcoinAddress == "" {
+			eventsNeedingAddresses = append(eventsNeedingAddresses, event)
+			pubkey := getTagValue(event.Tags, "p")
+			log.Printf("User %s needs Bitcoin address allocation", pubkey)
+		}
+	}
+
+	usersNeedingAddresses := len(eventsNeedingAddresses)
 	log.Printf("Found %d users without Bitcoin addresses", usersNeedingAddresses)
 
 	if usersNeedingAddresses == 0 {
@@ -219,7 +239,7 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 	}
 
 	successCount := 0
-	for _, event := range events {
+	for _, event := range eventsNeedingAddresses {
 		// Extract user pubkey
 		pubkey := getTagValue(event.Tags, "p")
 		if pubkey == "" {
@@ -244,7 +264,7 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 		log.Printf("Allocated address %s for user %s", addressObj.Address, pubkey)
 	}
 
-	log.Printf("Batch allocation complete: %d/%d successful", successCount, len(events))
+	log.Printf("Batch allocation complete: %d/%d successful", successCount, len(eventsNeedingAddresses))
 	return nil
 }
 
@@ -295,7 +315,7 @@ func (m *SubscriptionManager) ensureSufficientAddresses(usersNeedingAddresses in
 	if bufferSize < 50 {
 		bufferSize = 50
 	}
-	
+
 	requiredAddresses := usersNeedingAddresses + bufferSize
 	maxRetries := 30 // Maximum 5 minutes of waiting (30 * 10 seconds)
 	retryCount := 0
@@ -308,11 +328,11 @@ func (m *SubscriptionManager) ensureSufficientAddresses(usersNeedingAddresses in
 			return fmt.Errorf("failed to check available address count: %v", err)
 		}
 
-		log.Printf("Address check: %d available, %d required (%d users + %d buffer)", 
+		log.Printf("Address check: %d available, %d required (%d users + %d buffer)",
 			availableCount, requiredAddresses, usersNeedingAddresses, bufferSize)
 
 		if availableCount >= requiredAddresses {
-			log.Printf("Sufficient addresses available (%d >= %d), proceeding with batch allocation", 
+			log.Printf("Sufficient addresses available (%d >= %d), proceeding with batch allocation",
 				availableCount, requiredAddresses)
 			return nil
 		}
