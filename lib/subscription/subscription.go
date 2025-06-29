@@ -23,25 +23,34 @@ import (
 )
 
 // InitializeSubscriber creates a new subscriber or retrieves an existing one and creates their initial NIP-88 event.
-func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
-	log.Printf("Initializing subscriber for npub: %s", npub)
+func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) error {
+	log.Printf("Initializing subscriber for npub: %s in mode: %s", npub, mode)
 
-	// Run address pool check in background
-	go func() {
-		if err := m.checkAddressPoolStatus(); err != nil {
-			log.Printf("Warning: error checking address pool status: %v", err)
+	// Step 1: Conditionally allocate a Bitcoin address based on mode
+	var addressStr string
+	if mode == "subscription" {
+		// Run address pool check in background for subscription mode
+		go func() {
+			if err := m.checkAddressPoolStatus(); err != nil {
+				log.Printf("Warning: error checking address pool status: %v", err)
+			}
+		}()
+
+		log.Println("Address Pool checked Going to allocate address")
+
+		// Allocate a Bitcoin address for subscription mode
+		address, err := m.store.GetStatsStore().AllocateBitcoinAddress(npub)
+		if err != nil {
+			log.Printf("Error allocating bitcoin address: %v", err)
+			return fmt.Errorf("failed to allocate Bitcoin address: %v", err)
 		}
-	}()
-
-	log.Println("Address Pool checked Going to allocate address")
-
-	// Step 1: Allocate a Bitcoin address (if necessary)
-	address, err := m.store.GetStatsStore().AllocateBitcoinAddress(npub)
-	if err != nil {
-		log.Printf("Error allocating bitcoin address: %v", err)
-		return fmt.Errorf("failed to allocate Bitcoin address: %v", err)
+		addressStr = address.Address
+		log.Printf("Successfully allocated address: %s", address.Address)
+	} else {
+		// For non-subscription modes, use empty string
+		addressStr = ""
+		log.Printf("Skipping Bitcoin address allocation for mode: %s", mode)
 	}
-	log.Printf("Successfully allocated address: %s", address.Address)
 
 	// Step 2: Load allowed users settings to determine appropriate tier
 	settings, err := config.GetConfig()
@@ -89,7 +98,7 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string) error {
 	}
 	err = m.createNIP88EventIfNotExists(&types.Subscriber{
 		Npub:    npub,
-		Address: address.Address,
+		Address: addressStr,
 	}, tierLimitStr, expirationDate, &storageInfo)
 
 	if err != nil {

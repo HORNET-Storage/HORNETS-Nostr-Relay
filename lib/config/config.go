@@ -114,13 +114,13 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.protocols.allowed_protocols", []string{})
 
 	// Allowed users defaults - free mode for rapid testing
-	viper.SetDefault("allowed_users.mode", "free")
+	viper.SetDefault("allowed_users.mode", "public")
 	viper.SetDefault("allowed_users.read_access.enabled", true)
 	viper.SetDefault("allowed_users.read_access.scope", "all_users")
 	viper.SetDefault("allowed_users.write_access.enabled", true)
 	viper.SetDefault("allowed_users.write_access.scope", "all_users") // Free mode allows all users to write
 	viper.SetDefault("allowed_users.last_updated", 0)
-	
+
 	// Default free tier with 100MB monthly storage (matches working config)
 	viper.SetDefault("allowed_users.tiers", []map[string]interface{}{
 		{

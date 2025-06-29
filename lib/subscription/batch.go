@@ -5,6 +5,7 @@ package subscription
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -186,4 +187,92 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		Npub:    pubkey,
 		Address: address,
 	}, activeTier, expirationDate, &storageInfo)
+}
+
+// AllocateBitcoinAddressesForExistingUsers allocates Bitcoin addresses for users who don't have them
+func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
+	log.Printf("Starting batch Bitcoin address allocation for existing users")
+
+	// Query all kind 888 events without Bitcoin addresses
+	events, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{888},
+		Tags: nostr.TagMap{
+			"relay_bitcoin_address": []string{""}, // Empty address
+		},
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to query events: %v", err)
+	}
+
+	log.Printf("Found %d users without Bitcoin addresses", len(events))
+
+	successCount := 0
+	for _, event := range events {
+		// Extract user pubkey
+		pubkey := getTagValue(event.Tags, "p")
+		if pubkey == "" {
+			log.Printf("Skipping event %s: no pubkey found", event.ID)
+			continue
+		}
+
+		// Allocate Bitcoin address
+		addressObj, err := m.store.GetStatsStore().AllocateBitcoinAddress(pubkey)
+		if err != nil {
+			log.Printf("Failed to allocate address for %s: %v", pubkey, err)
+			continue
+		}
+
+		// Update the kind 888 event with the new address
+		if err := m.updateEventWithBitcoinAddress(event, addressObj.Address); err != nil {
+			log.Printf("Failed to update kind 888 event for %s: %v", pubkey, err)
+			continue
+		}
+
+		successCount++
+		log.Printf("Allocated address %s for user %s", addressObj.Address, pubkey)
+	}
+
+	log.Printf("Batch allocation complete: %d/%d successful", successCount, len(events))
+	return nil
+}
+
+// updateEventWithBitcoinAddress updates an existing kind 888 event to include a Bitcoin address
+func (m *SubscriptionManager) updateEventWithBitcoinAddress(originalEvent *nostr.Event, bitcoinAddress string) error {
+	// Extract current event data
+	pubkey := getTagValue(originalEvent.Tags, "p")
+	if pubkey == "" {
+		return fmt.Errorf("no pubkey found in event")
+	}
+
+	// Extract storage info
+	storageInfo, err := m.extractStorageInfo(originalEvent)
+	if err != nil {
+		return fmt.Errorf("failed to extract storage info: %v", err)
+	}
+
+	// Extract tier information
+	var activeTier string
+	var expirationDate time.Time
+	for _, tag := range originalEvent.Tags {
+		if tag[0] == "active_subscription" && len(tag) > 1 {
+			activeTier = tag[1]
+			if len(tag) > 2 {
+				expirationTimeUnix, err := strconv.ParseInt(tag[2], 10, 64)
+				if err == nil {
+					expirationDate = time.Unix(expirationTimeUnix, 0)
+				}
+			}
+			break
+		}
+	}
+
+	// Create updated subscriber with Bitcoin address
+	subscriber := &types.Subscriber{
+		Npub:    pubkey,
+		Address: bitcoinAddress,
+	}
+
+	// Create a new event with the Bitcoin address
+	return m.createOrUpdateNIP88Event(subscriber, activeTier, expirationDate, &storageInfo)
 }

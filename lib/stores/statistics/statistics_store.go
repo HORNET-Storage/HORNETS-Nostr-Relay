@@ -154,4 +154,8 @@ type StatisticsStore interface {
 	GetRelayOwner() (*types.RelayOwner, error)
 	SetRelayOwner(npub string, createdBy string) error
 	RemoveRelayOwner() error
+
+	// Bitcoin address management for mode switching
+	GetAvailableBitcoinAddressCount() (int, error)
+	CountUsersWithoutBitcoinAddresses() (int, error)
 }

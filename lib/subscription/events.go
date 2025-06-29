@@ -55,10 +55,17 @@ func (m *SubscriptionManager) createEvent(
 		{"subscription_duration", "1 month"},
 		{"p", subscriber.Npub},
 		{"subscription_status", status},
-		{"relay_bitcoin_address", subscriber.Address},
+		{"relay_bitcoin_address", subscriber.Address}, // This can now be empty string for non-subscription modes
 		{"relay_dht_key", m.relayDHTKey},
 		{"storage", fmt.Sprintf("%d", storageInfo.UsedBytes), totalBytesStr, fmt.Sprintf("%d", storageInfo.UpdatedAt.Unix())},
 		{"relay_mode", relayMode},
+	}
+
+	// Log address handling for debugging
+	if subscriber.Address == "" {
+		log.Printf("Creating kind 888 event without Bitcoin address for user %s", subscriber.Npub)
+	} else {
+		log.Printf("Creating kind 888 event with Bitcoin address %s for user %s", subscriber.Address, subscriber.Npub)
 	}
 
 	// Add credit information if there is any

@@ -1897,3 +1897,39 @@ func (store *GormStatisticsStore) SetRelayOwner(npub string, createdBy string) e
 func (store *GormStatisticsStore) RemoveRelayOwner() error {
 	return store.DB.Where("1 = 1").Delete(&types.RelayOwner{}).Error
 }
+
+// Bitcoin address management for mode switching
+
+func (store *GormStatisticsStore) GetAvailableBitcoinAddressCount() (int, error) {
+	var count int64
+	err := store.DB.Model(&types.Address{}).
+		Where("status = ?", "available").
+		Count(&count).Error
+	return int(count), err
+}
+
+func (store *GormStatisticsStore) CountUsersWithoutBitcoinAddresses() (int, error) {
+	// Count total unique users from UserProfile table
+	var totalUsers int64
+	err := store.DB.Model(&types.UserProfile{}).Count(&totalUsers).Error
+	if err != nil {
+		return 0, err
+	}
+
+	// Count users who already have Bitcoin addresses allocated
+	var usersWithAddresses int64
+	err = store.DB.Model(&types.Address{}).
+		Where("status IN ?", []string{"allocated", "used"}).
+		Count(&usersWithAddresses).Error
+	if err != nil {
+		return 0, err
+	}
+
+	// Return the difference
+	usersWithoutAddresses := int(totalUsers - usersWithAddresses)
+	if usersWithoutAddresses < 0 {
+		usersWithoutAddresses = 0
+	}
+
+	return usersWithoutAddresses, nil
+}
