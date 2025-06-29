@@ -101,7 +101,7 @@ func (m *SubscriptionManager) checkAddressPoolStatus() error {
 	// If we have less than 50% of addresses available, request more
 	if availableCount < 50 {
 		log.Printf("Address pool running low (%d available). Requesting 100 new addresses", availableCount)
-		return m.requestNewAddresses(20)
+		return m.RequestNewAddresses(20)
 	}
 
 	return nil

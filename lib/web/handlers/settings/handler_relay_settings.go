@@ -190,8 +190,24 @@ func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings
 		requiredAddresses := usersWithoutAddresses + bufferSize
 
 		if addressCount < requiredAddresses {
-			return fmt.Errorf("cannot switch to subscription mode: insufficient Bitcoin addresses (%d needed + %d buffer = %d total required, but only %d available)",
-				usersWithoutAddresses, bufferSize, requiredAddresses, addressCount)
+			addressesNeeded := requiredAddresses - addressCount
+			log.Printf("Insufficient Bitcoin addresses (%d needed + %d buffer = %d total required, but only %d available). Requesting %d more addresses...",
+				usersWithoutAddresses, bufferSize, requiredAddresses, addressCount, addressesNeeded)
+
+			// Request additional addresses from wallet service asynchronously
+			go func() {
+				subManager := subscription.GetGlobalManager()
+				if subManager != nil {
+					if err := subManager.RequestNewAddresses(addressesNeeded); err != nil {
+						log.Printf("Warning: Failed to request additional Bitcoin addresses: %v", err)
+					} else {
+						log.Printf("Successfully requested %d additional Bitcoin addresses from wallet service", addressesNeeded)
+					}
+				}
+			}()
+
+			// Allow the mode switch to proceed - addresses will be generated in background
+			log.Printf("Mode switch proceeding - requested %d additional addresses, they will be available shortly", addressesNeeded)
 		}
 
 		log.Printf("Mode switch validation passed: %d addresses available for %d users (with %d buffer)",
@@ -205,6 +221,7 @@ func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings
 func checkWalletServiceHealth() (bool, error) {
 	// Get API key from config
 	apiKey := viper.GetString("external_services.wallet.key")
+	log.Printf("Wallet health check: API key configured: %t", len(apiKey) > 0)
 
 	// Generate JWT token using API key
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -216,6 +233,7 @@ func checkWalletServiceHealth() (bool, error) {
 	// Sign token with API key
 	tokenString, err := token.SignedString([]byte(apiKey))
 	if err != nil {
+		log.Printf("Wallet health check: Failed to generate token: %v", err)
 		return false, fmt.Errorf("failed to generate token: %v", err)
 	}
 
@@ -226,6 +244,7 @@ func checkWalletServiceHealth() (bool, error) {
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
+		log.Printf("Wallet health check: Failed to marshal request: %v", err)
 		return false, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
@@ -237,12 +256,13 @@ func checkWalletServiceHealth() (bool, error) {
 	signature := hex.EncodeToString(h.Sum(nil))
 
 	walletAddress := config.GetExternalURL("wallet")
+	healthURL := walletAddress + "/health"
+	log.Printf("Wallet health check: Attempting request to %s", healthURL)
 
 	// Create POST request
-	req, err := http.NewRequest("POST",
-		walletAddress+"/health",
-		bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", healthURL, bytes.NewBuffer(jsonData))
 	if err != nil {
+		log.Printf("Wallet health check: Failed to create request: %v", err)
 		return false, fmt.Errorf("failed to create request: %v", err)
 	}
 
@@ -253,17 +273,26 @@ func checkWalletServiceHealth() (bool, error) {
 	req.Header.Set("X-Timestamp", timestamp)
 	req.Header.Set("X-Signature", signature)
 
+	log.Printf("Wallet health check: Request headers set, sending request...")
+
 	// Send request
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("Wallet health check: Request failed: %v", err)
 		return false, fmt.Errorf("wallet service unreachable: %v", err)
 	}
 	defer resp.Body.Close()
 
+	log.Printf("Wallet health check: Received response with status: %d (%s)", resp.StatusCode, resp.Status)
+
 	if resp.StatusCode != http.StatusOK {
+		// Read response body for more details
+		body := make([]byte, 1024)
+		n, _ := resp.Body.Read(body)
+		log.Printf("Wallet health check: Non-200 response body: %s", string(body[:n]))
 		return false, fmt.Errorf("wallet service returned status: %v", resp.Status)
 	}
 
@@ -288,6 +317,7 @@ func checkWalletServiceHealth() (bool, error) {
 
 	// Only check if wallet is responding (status 200)
 	// The other fields are informational only
+	log.Printf("Wallet health check: SUCCESS - wallet is responding")
 	return true, nil
 }
 

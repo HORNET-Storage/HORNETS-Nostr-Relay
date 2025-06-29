@@ -91,25 +91,35 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 		log.Printf("Setting no tier limit with expiration: %v", expirationDate)
 	}
 
-	// Step 4: Create the NIP-88 event
+	// Step 4: Create the NIP-88 event asynchronously to avoid blocking event processing
 	var tierLimitStr string
 	if tierLimit != nil {
 		tierLimitStr = tierLimit.Name
 	}
-	err = m.createNIP88EventIfNotExists(&types.Subscriber{
-		Npub:    npub,
-		Address: addressStr,
-	}, tierLimitStr, expirationDate, &storageInfo)
 
-	if err != nil {
-		log.Printf("Error creating NIP-88 event: %v", err)
-		return err
-	}
+	// Create NIP-88 event in background to avoid blocking the authentication flow
+	go func() {
+		subscriber := &types.Subscriber{
+			Npub:    npub,
+			Address: addressStr,
+		}
+		
+		if err := m.createNIP88EventIfNotExists(subscriber, tierLimitStr, expirationDate, &storageInfo); err != nil {
+			log.Printf("Error creating NIP-88 event asynchronously for %s: %v", npub, err)
+		} else {
+			if tierLimit != nil {
+				log.Printf("Successfully created NIP-88 event for subscriber %s with tier: %s", npub, tierLimit.Name)
+			} else {
+				log.Printf("Successfully created NIP-88 event for subscriber %s with no tier", npub)
+			}
+		}
+	}()
 
+	// Return immediately without waiting for NIP-88 event creation
 	if tierLimit != nil {
-		log.Printf("Successfully initialized subscriber %s with tier: %s", npub, tierLimit.Name)
+		log.Printf("Successfully initialized subscriber %s with tier: %s (NIP-88 event creating asynchronously)", npub, tierLimit.Name)
 	} else {
-		log.Printf("Successfully initialized subscriber %s with no tier", npub)
+		log.Printf("Successfully initialized subscriber %s with no tier (NIP-88 event creating asynchronously)", npub)
 	}
 	return nil
 }
@@ -214,8 +224,8 @@ func (m *SubscriptionManager) CheckStorageAvailability(npub string, requestedByt
 	return nil
 }
 
-// requestNewAddresses sends a request to the wallet to generate new addresses
-func (m *SubscriptionManager) requestNewAddresses(count int) error {
+// RequestNewAddresses sends a request to the wallet to generate new addresses
+func (m *SubscriptionManager) RequestNewAddresses(count int) error {
 	// Get API key from config
 	apiKey := viper.GetString("external_services.wallet.key")
 

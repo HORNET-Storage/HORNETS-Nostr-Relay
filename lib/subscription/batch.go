@@ -205,7 +205,18 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 		return fmt.Errorf("failed to query events: %v", err)
 	}
 
-	log.Printf("Found %d users without Bitcoin addresses", len(events))
+	usersNeedingAddresses := len(events)
+	log.Printf("Found %d users without Bitcoin addresses", usersNeedingAddresses)
+
+	if usersNeedingAddresses == 0 {
+		log.Printf("No users need Bitcoin addresses, batch allocation complete")
+		return nil
+	}
+
+	// Check if we have enough available addresses before starting
+	if err := m.ensureSufficientAddresses(usersNeedingAddresses); err != nil {
+		return fmt.Errorf("failed to ensure sufficient Bitcoin addresses: %v", err)
+	}
 
 	successCount := 0
 	for _, event := range events {
@@ -275,4 +286,54 @@ func (m *SubscriptionManager) updateEventWithBitcoinAddress(originalEvent *nostr
 
 	// Create a new event with the Bitcoin address
 	return m.createOrUpdateNIP88Event(subscriber, activeTier, expirationDate, &storageInfo)
+}
+
+// ensureSufficientAddresses checks if enough addresses are available and requests more if needed
+func (m *SubscriptionManager) ensureSufficientAddresses(usersNeedingAddresses int) error {
+	// Add 20% buffer or minimum 50 addresses, whichever is higher
+	bufferSize := int(float64(usersNeedingAddresses) * 0.2)
+	if bufferSize < 50 {
+		bufferSize = 50
+	}
+	
+	requiredAddresses := usersNeedingAddresses + bufferSize
+	maxRetries := 30 // Maximum 5 minutes of waiting (30 * 10 seconds)
+	retryCount := 0
+
+	for retryCount < maxRetries {
+		// Check current available address count
+		statsStore := m.store.GetStatsStore()
+		availableCount, err := statsStore.GetAvailableBitcoinAddressCount()
+		if err != nil {
+			return fmt.Errorf("failed to check available address count: %v", err)
+		}
+
+		log.Printf("Address check: %d available, %d required (%d users + %d buffer)", 
+			availableCount, requiredAddresses, usersNeedingAddresses, bufferSize)
+
+		if availableCount >= requiredAddresses {
+			log.Printf("Sufficient addresses available (%d >= %d), proceeding with batch allocation", 
+				availableCount, requiredAddresses)
+			return nil
+		}
+
+		// Calculate how many more addresses we need
+		addressesNeeded := requiredAddresses - availableCount
+		log.Printf("Insufficient addresses, requesting %d more from wallet service...", addressesNeeded)
+
+		// Request additional addresses
+		if err := m.RequestNewAddresses(addressesNeeded); err != nil {
+			log.Printf("Warning: Failed to request addresses: %v", err)
+		} else {
+			log.Printf("Successfully requested %d additional addresses from wallet", addressesNeeded)
+		}
+
+		// Wait 10 seconds before checking again
+		log.Printf("Waiting 10 seconds for wallet to generate addresses... (attempt %d/%d)", retryCount+1, maxRetries)
+		time.Sleep(10 * time.Second)
+		retryCount++
+	}
+
+	// If we've exhausted all retries, return an error
+	return fmt.Errorf("timeout waiting for sufficient Bitcoin addresses after %d attempts (5 minutes)", maxRetries)
 }

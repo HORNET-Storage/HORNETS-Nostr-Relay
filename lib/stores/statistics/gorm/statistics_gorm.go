@@ -1902,7 +1902,7 @@ func (store *GormStatisticsStore) RemoveRelayOwner() error {
 
 func (store *GormStatisticsStore) GetAvailableBitcoinAddressCount() (int, error) {
 	var count int64
-	err := store.DB.Model(&types.Address{}).
+	err := store.DB.Model(&types.SubscriberAddress{}).
 		Where("status = ?", "available").
 		Count(&count).Error
 	return int(count), err
@@ -1918,7 +1918,7 @@ func (store *GormStatisticsStore) CountUsersWithoutBitcoinAddresses() (int, erro
 
 	// Count users who already have Bitcoin addresses allocated
 	var usersWithAddresses int64
-	err = store.DB.Model(&types.Address{}).
+	err = store.DB.Model(&types.SubscriberAddress{}).
 		Where("status IN ?", []string{"allocated", "used"}).
 		Count(&usersWithAddresses).Error
 	if err != nil {

@@ -67,7 +67,7 @@ func setDefaults() {
 	viper.SetDefault("external_services.ollama.model", "gemma2:2b")
 	viper.SetDefault("external_services.ollama.timeout", 10000)
 	viper.SetDefault("external_services.moderator.url", "http://moderator:8000")
-	viper.SetDefault("external_services.wallet.url", "http://wallet:9003")
+	viper.SetDefault("external_services.wallet.url", "http://localhost:9003")
 	viper.SetDefault("external_services.wallet.key", "")
 	viper.SetDefault("external_services.wallet.name", "default")
 
@@ -105,7 +105,7 @@ func setDefaults() {
 	// Event filtering defaults
 	viper.SetDefault("event_filtering.mode", "whitelist")
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002"})
 	// Note: media_definitions defaults removed to prevent field name conflicts
 	// The config.yaml file contains the complete media definitions
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
