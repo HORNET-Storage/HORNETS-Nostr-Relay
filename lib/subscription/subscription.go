@@ -586,3 +586,107 @@ func (m *SubscriptionManager) isUserInAllowedLists(pubkey string) bool {
 
 	return true
 }
+
+// CheckWalletServiceHealth checks if the wallet service is reachable
+func CheckWalletServiceHealth() (bool, error) {
+	// Get API key from config
+	apiKey := viper.GetString("external_services.wallet.key")
+	log.Printf("Wallet health check: API key configured: %t", len(apiKey) > 0)
+
+	// Generate JWT token using API key
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"api_key": apiKey,
+		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+		"iat":     time.Now().Unix(),
+	})
+
+	// Sign token with API key
+	tokenString, err := token.SignedString([]byte(apiKey))
+	if err != nil {
+		log.Printf("Wallet health check: Failed to generate token: %v", err)
+		return false, fmt.Errorf("failed to generate token: %v", err)
+	}
+
+	// Create request body
+	reqBody := map[string]interface{}{
+		"request_id": fmt.Sprintf("health-check-%d", time.Now().Unix()),
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Printf("Wallet health check: Failed to marshal request: %v", err)
+		return false, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	// Prepare HMAC signature
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	message := apiKey + timestamp + string(jsonData)
+	h := hmac.New(sha256.New, []byte(apiKey))
+	h.Write([]byte(message))
+	signature := hex.EncodeToString(h.Sum(nil))
+
+	walletAddress := config.GetExternalURL("wallet")
+	healthURL := walletAddress + "/health"
+	log.Printf("Wallet health check: Attempting request to %s", healthURL)
+
+	// Create POST request
+	req, err := http.NewRequest("POST", healthURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Wallet health check: Failed to create request: %v", err)
+		return false, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Add all required headers (same as /generate-addresses)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenString))
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("X-Timestamp", timestamp)
+	req.Header.Set("X-Signature", signature)
+
+	log.Printf("Wallet health check: Request headers set, sending request...")
+
+	// Send request
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Wallet health check: Request failed: %v", err)
+		return false, fmt.Errorf("wallet service unreachable: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Wallet health check: Received response with status: %d (%s)", resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		// Read response body for more details
+		body := make([]byte, 1024)
+		n, _ := resp.Body.Read(body)
+		log.Printf("Wallet health check: Non-200 response body: %s", string(body[:n]))
+		return false, fmt.Errorf("wallet service returned status: %v", resp.Status)
+	}
+
+	// Parse the health response for logging purposes
+	var healthData struct {
+		Status       string `json:"status"`
+		Timestamp    string `json:"timestamp"`
+		WalletLocked bool   `json:"wallet_locked"`
+		ChainSynced  bool   `json:"chain_synced"`
+		PeerCount    int    `json:"peer_count"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&healthData); err != nil {
+		log.Printf("Warning: could not parse wallet health response: %v", err)
+		// Still return true as the wallet responded with 200
+		return true, nil
+	}
+
+	// Log wallet status details
+	log.Printf("Wallet health check: status=%s, locked=%v, synced=%v, peers=%d",
+		healthData.Status, healthData.WalletLocked, healthData.ChainSynced, healthData.PeerCount)
+
+	// Only check if wallet is responding (status 200)
+	// The other fields are informational only
+	log.Printf("Wallet health check: SUCCESS - wallet is responding")
+	return true, nil
+}
