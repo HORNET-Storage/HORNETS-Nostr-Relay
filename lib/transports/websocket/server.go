@@ -9,10 +9,9 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv"
-	"strings"
+	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 
@@ -21,12 +20,51 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/blossom"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 )
 
 type connectionState struct {
 	authenticated bool
+	pubkey        string    // Store the pubkey to know who owns this connection
+	blockedCheck  time.Time // When we last checked if this pubkey is blocked
+}
+
+// isConnectionBlocked checks if a connection's pubkey is blocked
+func isConnectionBlocked(state *connectionState, store stores.Store) (bool, error) {
+	// Skip if no pubkey (not authenticated yet)
+	if state.pubkey == "" {
+		return false, nil
+	}
+
+	// Only check once per minute to avoid excessive database lookups
+	if time.Since(state.blockedCheck) < time.Minute {
+		return false, nil
+	}
+
+	// Check if pubkey is blocked
+	state.blockedCheck = time.Now()
+	return store.IsBlockedPubkey(state.pubkey)
+}
+
+// terminateIfBlocked checks if a connection is blocked and terminates it if so
+func terminateIfBlocked(c *websocket.Conn, state *connectionState, store stores.Store) bool {
+	isBlocked, err := isConnectionBlocked(state, store)
+	if err != nil {
+		log.Printf("Error checking if pubkey is blocked: %v", err)
+		return false
+	}
+
+	if isBlocked {
+		log.Printf("Terminating connection from blocked pubkey: %s", state.pubkey)
+		c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4403, "Blocked pubkey"))
+		c.Close()
+		return true
+	}
+	return false
 }
 
 func BuildServer(store stores.Store) *fiber.App {
@@ -41,7 +79,12 @@ func BuildServer(store stores.Store) *fiber.App {
 		challenge := getGlobalChallenge()
 		log.Printf("Using global challenge for connection: %s", challenge)
 
-		state := &connectionState{authenticated: false}
+		// Initialize state with empty pubkey and current time for blocked check
+		state := &connectionState{
+			authenticated: false,
+			pubkey:        "",
+			blockedCheck:  time.Now(),
+		}
 
 		// Send the AUTH challenge immediately upon connection
 		authChallenge := []interface{}{"AUTH", challenge}
@@ -51,6 +94,38 @@ func BuildServer(store stores.Store) *fiber.App {
 		}
 
 		handleIncomingMessage(c, jsonAuth)
+
+		// Start a background goroutine to periodically check if the pubkey becomes blocked
+		connClosed := make(chan struct{})
+		defer close(connClosed)
+
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					if state.pubkey != "" {
+						isBlocked, err := store.IsBlockedPubkey(state.pubkey)
+						if err != nil {
+							log.Printf("Error checking if pubkey is blocked: %v", err)
+							continue
+						}
+
+						if isBlocked {
+							log.Printf("Terminating connection from newly blocked pubkey: %s", state.pubkey)
+							c.WriteMessage(websocket.CloseMessage,
+								websocket.FormatCloseMessage(4403, "Blocked pubkey"))
+							c.Close()
+							return
+						}
+					}
+				case <-connClosed:
+					return
+				}
+			}
+		}()
 
 		for {
 			if err := processWebSocketMessage(c, challenge, state, store); err != nil {
@@ -73,24 +148,22 @@ func StartServer(app *fiber.App) error {
 		log.Fatalf("Failed to generate global challenge: %v", err)
 	}
 
-	port := viper.GetString("port")
-	p, err := strconv.Atoi(port)
+	address := viper.GetString("server.address")
+	port := config.GetPort("nostr")
+
+	err = app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
-		log.Fatalf("Error parsing port %s: %v", port, err)
+		log.Fatalf("error starting nostr server: %v\n", err)
 	}
 
-	for {
-		port := fmt.Sprintf(":%d", p+1)
-		err := app.Listen(port)
+	if viper.GetBool("server.upnp") {
+		upnp := upnp.Get()
+
+		err := upnp.ForwardPort(uint16(port), "Hornet Storage Nostr Relay")
 		if err != nil {
-			log.Printf("Error starting web-server: %v\n", err)
-			if strings.Contains(err.Error(), "address already in use") {
-				p += 1
-			} else {
-				break
-			}
-		} else {
-			break
+			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+				"port": port,
+			})
 		}
 	}
 
@@ -107,17 +180,18 @@ func handleRelayInfoRequests(c *fiber.Ctx) error {
 }
 
 func GetRelayInfo() NIP11RelayInfo {
+	// These values are set in main.go init() for backward compatibility
 	relayInfo := NIP11RelayInfo{
-		Name:          viper.GetString("RelayName"),
-		Description:   viper.GetString("RelayDescription"),
-		Pubkey:        viper.GetString("RelayPubkey"),
-		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: viper.GetIntSlice("RelaySupportedNips"),
-		Software:      viper.GetString("RelaySoftware"),
-		Version:       viper.GetString("RelayVersion"),
+		Name:          viper.GetString("relay.name"),
+		Description:   viper.GetString("relay.description"),
+		Pubkey:        viper.GetString("relay.public_key"),
+		Contact:       viper.GetString("relay.contact"),
+		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
+		Software:      viper.GetString("relay.software"),
+		Version:       viper.GetString("relay.version"),
 	}
 
-	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("key"))
+	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("relay.private_key"))
 	libp2pId := viper.GetString("LibP2PID")
 	libp2pAddrs := viper.GetStringSlice("LibP2PAddrs")
 	if libp2pId != "" && len(libp2pAddrs) > 0 && err == nil {
@@ -130,7 +204,7 @@ func GetRelayInfo() NIP11RelayInfo {
 			log.Printf("Error signing relay info: %v", err)
 		}
 	} else {
-		log.Printf("Not advertising hornet extenstion because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
+		log.Printf("Not advertising hornet extension because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
 	}
 
 	return relayInfo
@@ -150,6 +224,7 @@ func SignRelay(relay *NIP11RelayInfo, privKey *btcec.PrivateKey) error {
 	}
 
 	relay.HornetExtension.Signature = hex.EncodeToString(signature.Serialize())
+	relay.HornetExtension.LastUpdated = time.Now()
 	return nil
 }
 
@@ -220,33 +295,138 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		return fmt.Errorf("read error: %w", err)
 	}
 
+	log.Printf("Received raw message: %s", string(message))
+
+	// Special handling for AUTH messages
+	var rawArray []interface{}
+	if err := json.Unmarshal(message, &rawArray); err == nil {
+		if len(rawArray) >= 2 {
+			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
+				log.Printf("Detected AUTH message")
+
+				// If second element is a string, it's the initial challenge
+				if challenge, ok := rawArray[1].(string); ok {
+					log.Printf("Initial AUTH challenge received: %s", challenge)
+					return nil
+				}
+
+				// If second element is a map, it's the auth event
+				if eventMap, ok := rawArray[1].(map[string]interface{}); ok {
+					log.Printf("Received AUTH event")
+					eventBytes, err := json.Marshal(eventMap)
+					if err != nil {
+						log.Printf("Failed to marshal event map: %v", err)
+						return nil
+					}
+
+					var event nostr.Event
+					if err := json.Unmarshal(eventBytes, &event); err != nil {
+						log.Printf("Failed to unmarshal event: %v", err)
+						return nil
+					}
+
+					authEnv := &nostr.AuthEnvelope{Event: event}
+					log.Printf("Handling AUTH event")
+					handleAuthMessage(c, authEnv, challenge, state, store)
+					return nil
+				}
+			}
+		}
+	}
+
+	// For all non-AUTH messages from authenticated users, check if blocked
+	if state.authenticated && state.pubkey != "" && terminateIfBlocked(c, state, store) {
+		return fmt.Errorf("connection terminated: blocked pubkey")
+	}
+
+	// Parse the message
 	rawMessage := nostr.ParseMessage(message)
 
+	// Handle different message types
 	switch env := rawMessage.(type) {
 	case *nostr.EventEnvelope:
-		handleEventMessage(c, env)
-
+		handleEventMessage(c, env, state, store)
 	case *nostr.ReqEnvelope:
-		handleReqMessage(c, env)
-
+		handleReqMessage(c, env, state, store)
 	case *nostr.AuthEnvelope:
+		log.Printf("Handling AUTH message")
 		handleAuthMessage(c, env, challenge, state, store)
-
 	case *nostr.CloseEnvelope:
 		handleCloseMessage(c, env)
-
 	case *nostr.CountEnvelope:
 		handleCountMessage(c, env, challenge)
-
 	default:
 		firstComma := bytes.Index(message, []byte{','})
 		if firstComma == -1 {
 			return nil
 		}
 		label := message[0:firstComma]
-
-		log.Println("Unknown message type: " + string(label))
+		log.Printf("Unknown message type: %s", string(label))
 	}
 
 	return nil
 }
+
+// func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store stores.Store) error {
+// 	_, message, err := c.ReadMessage()
+// 	if err != nil {
+// 		return fmt.Errorf("read error: %w", err)
+// 	}
+
+// 	log.Printf("Received raw message: %s", string(message))
+
+// 	// Special handling for AUTH messages since ParseMessage might not handle them correctly
+// 	var rawArray []interface{}
+// 	if err := json.Unmarshal(message, &rawArray); err == nil {
+// 		if len(rawArray) >= 2 {
+// 			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
+// 				log.Printf("Detected AUTH message")
+// 				if len(rawArray) == 2 {
+// 					log.Printf("Initial AUTH challenge received")
+// 					return nil
+// 				} else if len(rawArray) == 3 {
+// 					if eventJSON, ok := rawArray[1].(map[string]interface{}); ok {
+// 						eventBytes, _ := json.Marshal(eventJSON)
+// 						var event nostr.Event // Create as value, not pointer
+// 						if err := json.Unmarshal(eventBytes, &event); err == nil {
+// 							authEnv := &nostr.AuthEnvelope{Event: event} // Use the value directly
+// 							handleAuthMessage(c, authEnv, challenge, state, store)
+// 							return nil
+// 						}
+// 					}
+// 				}
+// 			}
+// 		}
+// 	}
+
+// 	rawMessage := nostr.ParseMessage(message)
+
+// 	switch env := rawMessage.(type) {
+// 	case *nostr.EventEnvelope:
+// 		handleEventMessage(c, env)
+
+// 	case *nostr.ReqEnvelope:
+// 		handleReqMessage(c, env)
+
+// 	case *nostr.AuthEnvelope:
+// 		log.Printf("Handling AUTH message")
+// 		handleAuthMessage(c, env, challenge, state, store)
+
+// 	case *nostr.CloseEnvelope:
+// 		handleCloseMessage(c, env)
+
+// 	case *nostr.CountEnvelope:
+// 		handleCountMessage(c, env, challenge)
+
+// 	default:
+// 		firstComma := bytes.Index(message, []byte{','})
+// 		if firstComma == -1 {
+// 			return nil
+// 		}
+// 		label := message[0:firstComma]
+
+// 		log.Println("Unknown message type: " + string(label))
+// 	}
+
+// 	return nil
+// }

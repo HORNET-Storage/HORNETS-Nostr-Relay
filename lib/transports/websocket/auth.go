@@ -1,23 +1,19 @@
 package websocket
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 )
 
 const (
@@ -36,12 +32,14 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 
 	log.Printf("Handling auth message for user with pubkey: %s", env.Event.PubKey)
 
+	// Validate auth event kind
 	if env.Event.Kind != 22242 {
 		log.Printf("Invalid auth event kind: %d", env.Event.Kind)
 		write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
 		return
 	}
 
+	// Check auth time validity
 	isValid, errMsg := lib_nostr.AuthTimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !isValid {
 		log.Printf("Auth time check failed: %s", errMsg)
@@ -49,10 +47,11 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
+	// Verify signature
 	success, err := env.Event.CheckSignature()
 	if err != nil {
 		log.Printf("Failed to check signature: %v", err)
-		write("NOTICE", "Failed to check signature")
+		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to check signature: %v", err))
 		return
 	}
 
@@ -62,87 +61,81 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		return
 	}
 
-	var hasRelayTag, hasChallengeTag bool
-	for _, tag := range env.Event.Tags {
-		if len(tag) >= 2 {
-			if tag[0] == "relay" {
-				hasRelayTag = true
-			} else if tag[0] == "challenge" {
-				hasChallengeTag = true
-				if tag[1] != challenge {
-					log.Printf("Challenge mismatch for user %s. Expected: %s, Got: %s", env.Event.PubKey, challenge, tag[1])
-					write("OK", env.Event.ID, false, "Error checking session challenge")
-					return
-				}
-			}
-		}
-	}
-
-	if !hasRelayTag || !hasChallengeTag {
-		log.Printf("Missing required tags for user %s. Has relay tag: %v, Has challenge tag: %v", env.Event.PubKey, hasRelayTag, hasChallengeTag)
+	// Verify required tags
+	if !verifyAuthTags(env.Event.Tags, challenge) {
+		log.Printf("Missing required tags for user %s", env.Event.PubKey)
 		write("OK", env.Event.ID, false, "Error event does not have required tags")
 		return
 	}
 
-	// Retrieve the subscriber using their npub
-	subscriber, err := store.GetSubscriber(env.Event.PubKey)
+	// Check if pubkey is blocked
+	isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
 	if err != nil {
-		log.Printf("Error retrieving subscriber for %s: %v", env.Event.PubKey, err)
-		// Create a new subscriber with default values
-		subscriber = &types.Subscriber{
-			Npub:      env.Event.PubKey,
-			Tier:      "",
-			StartDate: time.Time{},
-			EndDate:   time.Time{},
-		}
-		err = store.SaveSubscriber(subscriber)
+		log.Printf("Error checking if pubkey is blocked: %v", err)
+		// Continue processing as normal, don't block due to errors
+	} else if isBlocked {
+		log.Printf("Blocked pubkey attempted connection: %s", env.Event.PubKey)
+		write("OK", env.Event.ID, false, "Relay connection rejected: Pubkey is blocked")
+		return
+	}
+
+	// Check read access permissions using H.O.R.N.E.T Allowed Users system
+	if accessControl := GetAccessControl(); accessControl != nil {
+		err := accessControl.CanRead(env.Event.PubKey)
 		if err != nil {
-			log.Printf("Failed to create new subscriber for %s: %v", env.Event.PubKey, err)
-			write("NOTICE", "Failed to create new subscriber")
+			log.Printf("Read access denied for pubkey: %s", env.Event.PubKey)
+			write("OK", env.Event.ID, false, "Authentication rejected: Read access denied")
 			return
 		}
-		log.Printf("Created new subscriber for %s", env.Event.PubKey)
-	} else {
-		log.Printf("Retrieved existing subscriber for %s", env.Event.PubKey)
 	}
 
-	// Check if the subscription is active
-	if subscriber.Tier != "" && time.Now().Before(subscriber.EndDate) {
-		log.Printf("Subscriber %s has an active subscription until %s", subscriber.Npub, subscriber.EndDate)
-		state.authenticated = true
-	} else {
-		log.Printf("Subscriber %s does not have an active subscription", subscriber.Npub)
-		state.authenticated = false
-	}
-
-	// Create session regardless of subscription status
-	err = sessions.CreateSession(env.Event.PubKey)
-	if err != nil {
+	// Create user session
+	if err := createUserSession(env.Event.PubKey, env.Event.Sig); err != nil {
 		log.Printf("Failed to create session for %s: %v", env.Event.PubKey, err)
-		write("NOTICE", "Failed to create session")
+		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
 
-	userSession := sessions.GetSession(env.Event.PubKey)
-	userSession.Signature = &env.Event.Sig
-	userSession.Authenticated = true
-
-	// Load keys from environment for signing kind 411
-	privateKey, _, err := signing.DeserializePrivateKey(viper.GetString("private_key"))
-	if err != nil {
-		log.Printf("failed to deserialize private key")
-	}
-
-	// Create or update NIP-88 event
-	err = CreateNIP88Event(privateKey, env.Event.PubKey, store)
-	if err != nil {
-		log.Printf("Failed to create/update NIP-88 event for %s: %v", env.Event.PubKey, err)
-		write("NOTICE", "Failed to create/update NIP-88 event: %v", err)
+	// Get the global subscription manager
+	subManager := subscription.GetGlobalManager()
+	if subManager == nil {
+		log.Printf("Failed to get global subscription manager")
+		write("OK", env.Event.ID, false, "Failed to get subscription manager: Global manager not initialized")
 		return
 	}
 
-	log.Printf("Successfully created/updated NIP-88 event for %s", env.Event.PubKey)
-	write("OK", env.Event.ID, true, "NIP-88 event successfully created/updated")
+	// Get current relay configuration
+	settings, err := config.GetConfig()
+	if err != nil {
+		log.Printf("Failed to get config: %v", err)
+		write("OK", env.Event.ID, false, "Failed to get relay configuration")
+		return
+	}
+
+	// Initialize subscriber with current mode
+	currentMode := settings.AllowedUsersSettings.Mode
+	if err := subManager.InitializeSubscriber(env.Event.PubKey, currentMode); err != nil {
+		log.Printf("Failed to initialize subscriber %s: %v", env.Event.PubKey, err)
+
+		// Check for common errors and provide more specific messages
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "no available addresses") && currentMode == "subscription" {
+			write("OK", env.Event.ID, false, "Failed to allocate Bitcoin address: No addresses available in the pool")
+		} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") && currentMode == "subscription" {
+			write("OK", env.Event.ID, false, fmt.Sprintf("Bitcoin address allocation error: %v", err))
+		} else {
+			write("OK", env.Event.ID, false, fmt.Sprintf("Subscriber initialization failed: %v", err))
+		}
+		return
+	}
+
+	log.Printf("Successfully initialized subscriber %s", env.Event.PubKey)
+	write("OK", env.Event.ID, true, "Subscriber successfully initialized")
+
+	// Store the pubkey in connection state for future block checks
+	state.pubkey = env.Event.PubKey
+	state.authenticated = true
+	state.blockedCheck = time.Now()
 
 	if !state.authenticated {
 		log.Printf("Session established but subscription inactive for %s", env.Event.PubKey)
@@ -150,101 +143,36 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	}
 }
 
-// Allocate the address to a specific npub (subscriber)
-func generateUniqueBitcoinAddress(store stores.Store, npub string) (*types.Address, error) {
-	// Use the store method to allocate the address
-	address, err := store.AllocateBitcoinAddress(npub)
+// Helper functions
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to allocate Bitcoin address: %v", err)
+func verifyAuthTags(tags nostr.Tags, challenge string) bool {
+	var hasRelayTag, hasChallengeTag bool
+	for _, tag := range tags {
+		if len(tag) >= 2 {
+			switch tag[0] {
+			case "relay":
+				hasRelayTag = true
+			case "challenge":
+				hasChallengeTag = true
+				if tag[1] != challenge {
+					return false
+				}
+			}
+		}
 	}
-	return address, nil
+	return hasRelayTag && hasChallengeTag
 }
 
-func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store) error {
-	// Check if a NIP-88 event already exists for this user
-	existingEvent, err := getExistingNIP88Event(store, userPubKey)
-	if err != nil {
-		return fmt.Errorf("error checking existing NIP-88 event: %v", err)
-	}
-	if existingEvent != nil {
-		return nil // Event already exists, no need to create a new one
+// createUserSession creates a new session with the given pubkey and signature
+func createUserSession(pubKey string, sig string) error {
+	if err := sessions.CreateSession(pubKey); err != nil {
+		return err
 	}
 
-	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10000"},
-		{DataLimit: "5 GB per month", Price: "40000"},
-		{DataLimit: "10 GB per month", Price: "70000"},
-	}
-
-	uniqueAddress, err := generateUniqueBitcoinAddress(store, userPubKey)
-	if err != nil {
-		return fmt.Errorf("failed to generate unique Bitcoin address: %v", err)
-	}
-
-	tags := []nostr.Tag{
-		{"subscription_duration", "1 month"},
-		{"p", userPubKey},
-		{"subscription_status", "inactive"},
-		{"relay_bitcoin_address", uniqueAddress.Address},
-		{"relay_dht_key", viper.GetString("RelayDHTkey")},
-	}
-
-	for _, tier := range subscriptionTiers {
-		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
-	}
-
-	serializedPrivateKey, err := signing.SerializePrivateKey(relayPrivKey)
-	if err != nil {
-		log.Printf("failed to serialize private key")
-	}
-
-	event := &nostr.Event{
-		PubKey:    *serializedPrivateKey,
-		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      764,
-		Tags:      tags,
-		Content:   "",
-	}
-
-	// Generate the event ID
-	serializedEvent := event.Serialize()
-	hash := sha256.Sum256(serializedEvent)
-	event.ID = hex.EncodeToString(hash[:])
-
-	// Sign the event
-	sig, err := schnorr.Sign(relayPrivKey, hash[:])
-	if err != nil {
-		return fmt.Errorf("error signing event: %v", err)
-	}
-	event.Sig = hex.EncodeToString(sig.Serialize())
-
-	// Store the event
-	err = store.StoreEvent(event)
-	if err != nil {
-		return fmt.Errorf("failed to store NIP-88 event: %v", err)
-	}
-
+	userSession := sessions.GetSession(pubKey)
+	userSession.Signature = &sig
+	userSession.Authenticated = true
 	return nil
 }
 
-func getExistingNIP88Event(store stores.Store, userPubKey string) (*nostr.Event, error) {
-	filter := nostr.Filter{
-		Kinds: []int{88},
-		Tags: nostr.TagMap{
-			"p": []string{userPubKey},
-		},
-		Limit: 1,
-	}
-
-	events, err := store.QueryEvents(filter)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(events) > 0 {
-		return events[0], nil
-	}
-
-	return nil, nil
-}
+// Removed unused function: initializeSubscriptionManager

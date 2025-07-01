@@ -4,10 +4,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/nbd-wtf/go-nostr"
 	"io"
 	"log"
+	"strconv"
+
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 const NegentropyProtocol = "/negentropy/1.0.0"
@@ -34,17 +36,13 @@ func SendNegentropyMessage(
 			return err
 		}
 		msgArray = append(msgArray, string(jsonFilter))
-		msgArray = append(msgArray, string(IdSize))
+		msgArray = append(msgArray, strconv.Itoa(IdSize))
 		msgArray = append(msgArray, msgString)
-		break
 	case "NEG-MSG":
 		msgArray = append(msgArray, msgString)
-		break
 	case "NEG-ERR":
 		msgArray = append(msgArray, errMsg)
-		break
 	case "NEG-CLOSE":
-		break
 	case "NEG-HAVE":
 
 		msgArray = append(msgArray, string(haveBytes))

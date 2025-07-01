@@ -1,136 +1,143 @@
 package scionic
 
 import (
-	"fmt"
-	"io"
-	"slices"
-	"strconv"
-	"time"
+	"path/filepath"
+	"regexp"
+	"strings"
 
-	"github.com/fxamacker/cbor/v2"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/types"
 
-	merkle_dag "github.com/HORNET-Storage/scionic-merkletree/dag"
-
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 )
 
 type DagWriter func(message interface{}) error
 
-type UploadDagReader func() (*types.UploadMessage, error)
+type UploadDagReader func() (*lib_types.UploadMessage, error)
 type UploadDagHandler func(read UploadDagReader, write DagWriter)
 
-type DownloadDagReader func() (*types.DownloadMessage, error)
+type DownloadDagReader func() (*lib_types.DownloadMessage, error)
 type DownloadDagHandler func(read DownloadDagReader, write DagWriter)
 
-type QueryDagReader func() (*types.QueryMessage, error)
+type QueryDagReader func() (*lib_types.QueryMessage, error)
 type QueryDagHandler func(read QueryDagReader, write DagWriter)
 
-func CheckFilter(leaf *merkle_dag.DagLeaf, filter *types.DownloadFilter) (bool, error) {
-	label := merkle_dag.GetLabel(leaf.Hash)
-
-	if len(filter.Leaves) <= 0 && len(filter.LeafRanges) <= 0 {
-		return true, nil
-	}
-
-	if slices.Contains(filter.Leaves, label) {
-		return true, nil
-	}
-
-	labelInt, err := strconv.Atoi(label)
+func IsMimeTypePermitted(mimeType string) bool {
+	settings, err := config.GetConfig()
 	if err != nil {
-		return false, err
+		return false
 	}
 
-	for _, rangeItem := range filter.LeafRanges {
-		fromInt, err := strconv.Atoi(rangeItem.From)
-		if err != nil {
-			continue // Skip invalid ranges
-		}
-		toInt, err := strconv.Atoi(rangeItem.To)
-		if err != nil {
-			continue // Skip invalid ranges
-		}
-
-		if labelInt >= fromInt && labelInt <= toInt {
-			return true, nil
-		}
+	// Only check if media
+	if len(settings.EventFiltering.MediaDefinitions) > 0 {
+		return checkMimeTypeInDefinitions(mimeType, settings.EventFiltering.MediaDefinitions)
 	}
 
-	return false, nil
+	// Default: allow if no restrictions are configured
+	return true
 }
 
-func BuildErrorMessage(message string, err error) types.ErrorMessage {
-	return types.ErrorMessage{
-		Message: fmt.Sprintf(message, err),
+// IsFilePermitted checks both MIME type and file extension
+func IsFilePermitted(filename, mimeType string) bool {
+	settings, err := config.GetConfig()
+	if err != nil {
+		return false
 	}
-}
 
-func BuildResponseMessage(response bool) types.ResponseMessage {
-	return types.ResponseMessage{
-		Ok: response,
+	// Check against new MediaDefinitions
+	if settings.EventFiltering.MediaDefinitions != nil {
+		return checkFileInDefinitions(filename, mimeType, settings.EventFiltering.MediaDefinitions)
 	}
+
+	// Fallback to legacy check
+	return IsMimeTypePermitted(mimeType)
 }
 
-func WriteErrorToStream(stream types.Stream, message string, err error) error {
-	return WriteMessageToStream(stream, BuildErrorMessage(message, err))
-}
-
-func WriteResponseToStream(stream types.Stream, response bool) error {
-	return WriteMessageToStream(stream, BuildResponseMessage(response))
-}
-
-func WaitForResponse(stream types.Stream) (*types.ResponseMessage, error) {
-	return ReadMessageFromStream[types.ResponseMessage](stream)
-}
-
-func WaitForUploadMessage(stream types.Stream) (*types.UploadMessage, error) {
-	return ReadMessageFromStream[types.UploadMessage](stream)
-}
-
-func WaitForDownloadMessage(stream types.Stream) (*types.DownloadMessage, error) {
-	return ReadMessageFromStream[types.DownloadMessage](stream)
-}
-
-func WaitForQueryMessage(stream types.Stream) (*types.QueryMessage, error) {
-	return ReadMessageFromStream[types.QueryMessage](stream)
-}
-
-func ReadMessageFromStream[T any](stream types.Stream) (*T, error) {
-	streamDecoder := cbor.NewDecoder(stream)
-
-	var message T
-
-	timeout := time.NewTimer(5 * time.Second)
-
-wait:
-	for {
-		select {
-		case <-timeout.C:
-			return nil, fmt.Errorf("WaitForMessage timed out")
-		default:
-			err := streamDecoder.Decode(&message)
-
-			if err != nil {
-				return nil, err
+// checkMimeTypeInDefinitions checks if MIME type matches any enabled media definition
+func checkMimeTypeInDefinitions(mimeType string, definitions map[string]types.MediaDefinition) bool {
+	for _, definition := range definitions {
+		// Check MIME patterns
+		for _, pattern := range definition.MimePatterns {
+			if matchesMimePattern(mimeType, pattern) {
+				return true
 			}
+		}
+	}
+	return false
+}
 
-			if err == io.EOF {
-				return nil, err
+// checkFileInDefinitions checks both extension and MIME type against enabled definitions
+func checkFileInDefinitions(filename, mimeType string, definitions map[string]types.MediaDefinition) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	for _, definition := range definitions {
+		// Check extensions first (faster)
+		for _, allowedExt := range definition.Extensions {
+			if ext == strings.ToLower(allowedExt) {
+				return true
 			}
+		}
 
-			break wait
+		// Check MIME patterns
+		for _, pattern := range definition.MimePatterns {
+			if matchesMimePattern(mimeType, pattern) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchesMimePattern checks if a MIME type matches a pattern (supports wildcards)
+func matchesMimePattern(mimeType, pattern string) bool {
+	// Direct match
+	if mimeType == pattern {
+		return true
+	}
+
+	// Wildcard pattern matching (e.g., "image/*", "video/*")
+	if strings.Contains(pattern, "*") {
+		// Convert glob pattern to regex
+		regexPattern := strings.ReplaceAll(pattern, "*", ".*")
+		regexPattern = "^" + regexPattern + "$"
+
+		if regex, err := regexp.Compile(regexPattern); err == nil {
+			return regex.MatchString(mimeType)
 		}
 	}
 
-	return &message, nil
+	return false
 }
 
-func WriteMessageToStream[T any](stream types.Stream, message T) error {
-	enc := cbor.NewEncoder(stream)
-
-	if err := enc.Encode(&message); err != nil {
-		return err
+// GetMediaTypeInfo returns information about a file's media type
+func GetMediaTypeInfo(filename, mimeType string) (mediaType string, definition *types.MediaDefinition) {
+	settings, err := config.GetConfig()
+	if err != nil {
+		return "unknown", nil
 	}
 
-	return nil
+	if settings.EventFiltering.MediaDefinitions == nil {
+		return "unknown", nil
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// Find matching media type
+	for typeName, def := range settings.EventFiltering.MediaDefinitions {
+		// Check extensions
+		for _, allowedExt := range def.Extensions {
+			if ext == strings.ToLower(allowedExt) {
+				return typeName, &def
+			}
+		}
+
+		// Check MIME patterns
+		for _, pattern := range def.MimePatterns {
+			if matchesMimePattern(mimeType, pattern) {
+				return typeName, &def
+			}
+		}
+	}
+
+	return "unknown", nil
 }

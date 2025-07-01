@@ -1,4 +1,4 @@
-package kind411creator
+package kind411
 
 import (
 	"crypto/sha256"
@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -28,18 +28,68 @@ const (
 )
 
 type RelayInfo struct {
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Pubkey        string `json:"pubkey"`
-	Contact       string `json:"contact"`
-	SupportedNIPs []int  `json:"supported_nips"`
-	Software      string `json:"software"`
-	Version       string `json:"version"`
-	DHTkey        string `json:"dhtkey,omitempty"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description,omitempty"`
+	Pubkey            string                 `json:"pubkey"`
+	Contact           string                 `json:"contact"`
+	SupportedNIPs     []int                  `json:"supported_nips"`
+	Software          string                 `json:"software"`
+	Version           string                 `json:"version"`
+	DHTkey            string                 `json:"dhtkey,omitempty"`
+	SubscriptionTiers []SubscriptionTierInfo `json:"subscription_tiers,omitempty"`
+}
+
+type SubscriptionTierInfo struct {
+	DataLimit string `json:"datalimit"`
+	Price     string `json:"price"`
+}
+
+func formatDataLimit(bytes int64, unlimited bool) string {
+	if unlimited {
+		return "Unlimited"
+	}
+
+	const (
+		GB = 1024 * 1024 * 1024
+		MB = 1024 * 1024
+	)
+
+	if bytes >= GB {
+		return fmt.Sprintf("%d GB per month", bytes/GB)
+	}
+	return fmt.Sprintf("%d MB per month", bytes/MB)
 }
 
 func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
-	// Retrieve existing kind 411 events
+	// Get subscription tiers from allowed_users.tiers
+	var allTiers []types.SubscriptionTier
+	if err := viper.UnmarshalKey("allowed_users.tiers", &allTiers); err != nil {
+		return fmt.Errorf("error getting subscription tiers from allowed_users.tiers: %v", err)
+	}
+
+	// Transform to relay info format, excluding free tier
+	var tiers []types.SubscriptionTier
+	for _, tier := range allTiers {
+		// Skip free tier (price = 0)
+		if tier.PriceSats <= 0 {
+			continue
+		}
+
+		// Convert bytes to human-readable format for the datalimit field
+		datalimit := formatDataLimit(tier.MonthlyLimitBytes, tier.Unlimited)
+
+		// Create a custom tier structure that matches the expected format
+		tiers = append(tiers, types.SubscriptionTier{
+			Name:              datalimit,
+			PriceSats:         tier.PriceSats,
+			MonthlyLimitBytes: tier.MonthlyLimitBytes,
+			Unlimited:         tier.Unlimited,
+		})
+	}
+
+	log.Println("Paid Tiers for kind 411:", tiers)
+
+	// Delete existing kind 411 events
 	filter := nostr.Filter{
 		Kinds: []int{411},
 	}
@@ -48,26 +98,33 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 		return fmt.Errorf("error querying existing kind 411 events: %v", err)
 	}
 
-	// Delete existing kind 411 events if any
-	if len(existingEvents) > 0 {
-		for _, oldEvent := range existingEvents {
-			if err := store.DeleteEvent(oldEvent.ID); err != nil {
-				return fmt.Errorf("error deleting old kind 411 event %s: %v", oldEvent.ID, err)
-			}
-			log.Printf("Deleted existing kind 411 event with ID: %s", oldEvent.ID)
+	for _, oldEvent := range existingEvents {
+		if err := store.DeleteEvent(oldEvent.ID); err != nil {
+			return fmt.Errorf("error deleting old kind 411 event %s: %v", oldEvent.ID, err)
 		}
+		log.Printf("Deleted existing kind 411 event with ID: %s", oldEvent.ID)
+	}
+
+	// Convert tiers to the expected format
+	var tierInfos []SubscriptionTierInfo
+	for _, tier := range tiers {
+		tierInfos = append(tierInfos, SubscriptionTierInfo{
+			DataLimit: tier.Name, // We stored the formatted data limit in Name
+			Price:     fmt.Sprintf("%d", tier.PriceSats),
+		})
 	}
 
 	// Get relay info
 	relayInfo := RelayInfo{
-		Name:          viper.GetString("RelayName"),
-		Description:   viper.GetString("RelayDescription"),
-		Pubkey:        viper.GetString("RelayPubkey"),
-		Contact:       viper.GetString("RelayContact"),
-		SupportedNIPs: []int{1, 11, 2, 9, 18, 23, 24, 25, 51, 56, 57, 42, 45, 50, 65, 116},
-		Software:      viper.GetString("RelaySoftware"),
-		Version:       viper.GetString("RelayVersion"),
-		DHTkey:        viper.GetString("RelayDHTkey"),
+		Name:              viper.GetString("relay.name"),
+		Description:       viper.GetString("relay.description"),
+		Pubkey:            viper.GetString("relay.public_key"),
+		Contact:           viper.GetString("relay.contact"),
+		SupportedNIPs:     viper.GetIntSlice("relay.supported_nips"),
+		Software:          viper.GetString("relay.software"),
+		Version:           viper.GetString("relay.version"),
+		DHTkey:            viper.GetString("relay.dht_key"),
+		SubscriptionTiers: tierInfos,
 	}
 
 	// Convert relay info to JSON
@@ -77,7 +134,7 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 	}
 
 	// Create the event
-	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), nil)
+	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), []nostr.Tag{})
 	if err != nil {
 		return fmt.Errorf("error creating kind 411 event: %v", err)
 	}
@@ -156,11 +213,6 @@ func serializeEventForID(event *nostr.Event) string {
 }
 
 func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store stores.Store) (*nostr.Event, error) {
-	subscriptionTiers := []types.SubscriptionTier{
-		{DataLimit: "1 GB per month", Price: "10,000 sats"},
-		{DataLimit: "5 GB per month", Price: "40,000 sats"},
-		{DataLimit: "10 GB per month", Price: "70,000 sats"},
-	}
 
 	// Allocate a new address for this subscription
 	addr, err := store.AllocateAddress()
@@ -173,11 +225,7 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 		{"npub", userPubKey},
 		{"relay-bitcoin-address", addr.Address},
 		// Add Lightning invoice if applicable
-		{"relay-dht-key", viper.GetString("RelayDHTkey")},
-	}
-
-	for _, tier := range subscriptionTiers {
-		tags = append(tags, nostr.Tag{"subscription-tier", tier.DataLimit, tier.Price})
+		{"relay-dht-key", viper.GetString("relay.dht_key")},
 	}
 
 	event := &nostr.Event{

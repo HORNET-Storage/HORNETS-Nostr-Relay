@@ -1,0 +1,12 @@
+2025/04/22 13:56:18 Starting content filter benchmark
+2025/04/22 13:56:25 
+===== MUTE WORD BENCHMARK RESULTS =====
+2025/04/22 13:56:25 Total events processed: 93
+2025/04/22 13:56:25 Mute word filtering is nearly instantaneous (microseconds)
+2025/04/22 13:56:25 =========================================
+2025/04/23 09:31:54 
+===== MUTE WORD BENCHMARK RESULTS =====
+2025/04/23 09:31:54 Total events processed: 3
+2025/04/23 09:31:54 Mute word filtering is nearly instantaneous (microseconds)
+2025/04/23 09:31:54 =========================================
+2025/04/23 09:33:39 Starting content filter benchmark

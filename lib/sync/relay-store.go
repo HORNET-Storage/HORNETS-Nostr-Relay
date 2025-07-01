@@ -351,7 +351,7 @@ func createSignatureInput(put *bep44.Put) ([]byte, error) {
 
 	buf.WriteString(fmt.Sprintf("3:seqi%d", put.Seq))
 	// Bencode already prefixes the length of V before writing it
-	buf.WriteString(fmt.Sprintf("e1:v"))
+	buf.WriteString("e1:v")
 
 	// Encode and write the value
 	encoder := bencode.NewEncoder(&buf)

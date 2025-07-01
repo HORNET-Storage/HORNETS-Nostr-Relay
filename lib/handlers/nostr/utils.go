@@ -3,17 +3,14 @@ package nostr
 import (
 	"fmt"
 	"log"
-	"strconv"
 
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/fxamacker/cbor/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
-
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 )
 
 // Gerneric event validation that almost all kinds will use
@@ -26,15 +23,8 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 		}
 	}
 
-	// Load and check relay settings
-	settings, err := LoadRelaySettings()
-	if err != nil {
-		write("NOTICE", "Failed to load relay settings")
-		return false
-	}
-
 	// Check if the event kind is allowed
-	blocked := IsTheKindAllowed(env.Event.Kind, settings)
+	blocked := IsKindAllowed(env.Event.Kind)
 	if !blocked {
 		write("OK", env.Event.ID, false, "This kind is not handled by the relay")
 		return false
@@ -43,6 +33,7 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 	timeCheck := TimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !timeCheck {
 		write("OK", env.Event.ID, false, "The event creation date must be after January 1, 2019")
+		return false
 	}
 
 	// Validate the event signature
@@ -64,7 +55,7 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 func TimeCheck(eventCreatedAt int64) bool {
 	currentTime := time.Now()
 
-	return eventCreatedAt <= currentTime.Unix()
+	return eventCreatedAt <= currentTime.Add(2*time.Second).Unix()
 }
 
 func AuthTimeCheck(eventCreatedAt int64) (bool, string) {
@@ -160,64 +151,29 @@ func CloseStream(stream network.Stream) {
 	}
 }
 
-func LoadRelaySettings() (*types.RelaySettings, error) {
-	viper.SetConfigName("config") // Name of config file (without extension)
-	viper.SetConfigType("json")   // Type of the config file
-	viper.AddConfigPath(".")      // Path to look for the config file in
-
-	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading config file: %s", err)
-		return nil, err
-	}
-
-	var settings types.RelaySettings
-	if err := viper.UnmarshalKey("relay_settings", &settings); err != nil {
-		log.Fatalf("Error unmarshaling config into struct: %s (nostr/utils)", err)
-		return nil, err
-	}
-
-	return &settings, nil
-}
-
-func IsTheKindAllowed(kind int, settings *types.RelaySettings) bool {
-	if settings.Mode != "smart" {
-		return true
-	}
-
-	kindStr := "kind" + strconv.Itoa(kind)
-	for _, k := range settings.Kinds {
-		if k == kindStr {
-			return true
-		}
-	}
-
-	kindStrWithoutPrefix := strconv.Itoa(kind)
-	for _, dk := range settings.DynamicKinds {
-		if dk == kindStrWithoutPrefix {
-			return true
-		}
-	}
-
-	return false
-}
-
-func IsKindBlocked(kind int, settings *types.RelaySettings) bool {
-	kindStr := "kind" + strconv.Itoa(kind)
-	kindStrWithoutPrefix := strconv.Itoa(kind)
-
-	if settings.Mode == "unlimited" {
-		for _, k := range settings.Kinds {
-			if k == kindStr {
-				return true
-			}
-		}
-		for _, dk := range settings.DynamicKinds {
-			if dk == kindStrWithoutPrefix {
-				return true
-			}
-		}
+func IsKindAllowed(kind int) bool {
+	settings, err := config.GetConfig()
+	if err != nil {
 		return false
 	}
 
-	return true // Default: allow all kinds if mode is not specified
+	// Format the kind number to match the whitelist format
+	kindStr := fmt.Sprintf("kind%d", kind)
+
+	if len(settings.EventFiltering.KindWhitelist) > 0 {
+		if !contains(settings.EventFiltering.KindWhitelist, kindStr) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func contains(list []string, item string) bool {
+	for _, element := range list {
+		if element == item {
+			return true
+		}
+	}
+	return false
 }

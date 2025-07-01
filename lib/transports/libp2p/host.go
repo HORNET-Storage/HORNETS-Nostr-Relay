@@ -20,7 +20,7 @@ import (
 
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/signing"
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -142,19 +142,18 @@ func (n *connectionNotifier) ListenClose(net network.Network, multiaddr multiadd
 }
 
 func GetHostOnPort(serializedPrivateKey string, port string) host.Host {
-	decodedKey, err := signing.DecodeKey(serializedPrivateKey)
-
+	privateKey, _, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	privateKey, err := crypto.UnmarshalSecp256k1PrivateKey(decodedKey)
+	libp2pPrivateKey, err := crypto.UnmarshalSecp256k1PrivateKey(privateKey.Serialize())
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	listenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic-v1", port)
-	webtransportListenAddress := fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", port)
+	listenAddress := fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic-v1", port)
+	webtransportListenAddress := fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic/webtransport", port)
 	log.Printf("Starting server on %s\n", listenAddress)
 
 	connManager, err := connmgr.NewConnManager(
@@ -167,7 +166,7 @@ func GetHostOnPort(serializedPrivateKey string, port string) host.Host {
 	}
 
 	host, err := libp2p.New(
-		libp2p.Identity(privateKey),
+		libp2p.Identity(libp2pPrivateKey),
 		libp2p.ListenAddrStrings(listenAddress, webtransportListenAddress),
 		libp2p.ConnectionManager(connManager),
 		libp2p.Muxer(yamux.ID, yamux.DefaultTransport),

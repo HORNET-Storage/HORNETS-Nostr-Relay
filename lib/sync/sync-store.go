@@ -3,6 +3,8 @@ package sync
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -10,12 +12,12 @@ import (
 // GORM models for sync / dht related structs
 type SyncAuthor struct {
 	gorm.Model
-	PublicKey string `gorm:"uniqueIndex"`
+	PublicKey string `gorm:"size:128;uniqueIndex"`
 }
 
 type SyncRelay struct {
 	gorm.Model
-	PublicKey string `gorm:"uniqueIndex"`
+	PublicKey string `gorm:"size:128;uniqueIndex"`
 	RelayInfo string `gorm:"type:text"`
 }
 
@@ -119,10 +121,10 @@ func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, salt []byte, s
 }
 
 // Helper function to initialize database connection
-func InitSyncDB(dbPath string) (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+func InitSyncDB() (*gorm.DB, error) {
+	db, err := gorm.Open(sqlite.Open("statistics.db"), &gorm.Config{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to immudb: %v", err)
 	}
 
 	// Auto Migrate the schema

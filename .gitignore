@@ -5,6 +5,8 @@
 *.so
 *.dylib
 *.db
+*.db-shm
+*.db-wal
 
 # Test binary, built with `go test -c`
 *.test
@@ -17,15 +19,26 @@
 # vendor/
 
 data
+temp
 
-
-leaves
-content
-gravitondb
-hornet-storage
+/gravitondb
+/immudb
+/hornet-storage
+/web
 
 config.json
+config.json.backup
+demo-config.json
 
 
 **/.DS_Store
 
+/temp-*
+
+/memory-bank
+.clinerules
+# Demo binaries
+hornet-demo-generator
+hornet-storage-demo
+
+config.yaml
