@@ -150,13 +150,13 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 		}
 
-		// Initialize subscription manager if needed for kind 888 events
+		// Initialize subscription manager if needed for kind 11888 events
 		var subManager *subscription.SubscriptionManager
-		// Check if any filter is requesting kind 888 events
+		// Check if any filter is requesting kind 11888 events
 		needsSubscriptionManager := false
 		for _, filter := range request.Filters {
 			for _, kind := range filter.Kinds {
-				if kind == 888 {
+				if kind == 11888 {
 					needsSubscriptionManager = true
 					break
 				}
@@ -502,41 +502,41 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				}
 			}
 
-			// Special handling for kind 888 events
-			if event.Kind == 888 {
-				log.Printf("Processing kind 888 event with ID: %s", event.ID)
+			// Special handling for kind 11888 events
+			if event.Kind == 11888 {
+				log.Printf("Processing kind 11888 event with ID: %s", event.ID)
 
 				// Extract the pubkey the event is about (from the p tag)
 				eventPubkey := ""
 				for _, tag := range event.Tags {
 					if tag[0] == "p" && len(tag) > 1 {
 						eventPubkey = tag[1]
-						log.Printf("Kind 888 event is about pubkey: %s", eventPubkey)
+						log.Printf("Kind 11888 event is about pubkey: %s", eventPubkey)
 						break
 					}
 				}
 
 				// Log the auth and authorization check
-				log.Printf("Auth check for kind 888: event pubkey=%s, connection pubkey=%s",
+				log.Printf("Auth check for kind 11888: event pubkey=%s, connection pubkey=%s",
 					eventPubkey, connPubkey)
 
 				// If the pubkey in the event is not empty and doesn't match the authenticated user
 				if eventPubkey != "" && connPubkey != "" && eventPubkey != connPubkey {
 					// Skip this event - user is not authorized to see subscription details for other users
-					log.Printf("DENIED: Skipping kind 888 event for pubkey %s - requested by different pubkey %s",
+					log.Printf("DENIED: Skipping kind 11888 event for pubkey %s - requested by different pubkey %s",
 						eventPubkey, connPubkey)
 					continue
 				} else {
-					log.Printf("ALLOWED: Showing kind 888 event for pubkey %s to connection with pubkey %s",
+					log.Printf("ALLOWED: Showing kind 11888 event for pubkey %s to connection with pubkey %s",
 						eventPubkey, connPubkey)
 				}
 
 				// Only update if we have a subscription manager
 				if subManager != nil {
-					log.Printf("Checking if kind 888 event needs update...")
+					log.Printf("Checking if kind 11888 event needs update...")
 					updatedEvent, err := subManager.CheckAndUpdateSubscriptionEvent(event)
 					if err != nil {
-						log.Printf("Error updating kind 888 event: %v", err)
+						log.Printf("Error updating kind 11888 event: %v", err)
 					} else if updatedEvent != event {
 						log.Printf("Event was updated with new information")
 						event = updatedEvent

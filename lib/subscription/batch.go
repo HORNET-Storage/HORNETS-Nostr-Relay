@@ -14,7 +14,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
-// ScheduleBatchUpdateAfter schedules a batch update of all kind 888 events after
+// ScheduleBatchUpdateAfter schedules a batch update of all kind 11888 events after
 // the specified delay. If called multiple times, it cancels any previous scheduled update
 // and restarts the timer with a new delay (sliding window approach).
 func ScheduleBatchUpdateAfter(delay time.Duration) {
@@ -24,9 +24,9 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 	// Cancel any existing scheduled update
 	if scheduledUpdateTimer != nil {
 		scheduledUpdateTimer.Stop()
-		log.Printf("Rescheduling batch update of kind 888 events (settings changed again)")
+		log.Printf("Rescheduling batch update of kind 11888 events (settings changed again)")
 	} else {
-		log.Printf("Scheduling batch update of kind 888 events in %v", delay)
+		log.Printf("Scheduling batch update of kind 11888 events in %v", delay)
 	}
 
 	// Schedule new update
@@ -35,22 +35,22 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 		scheduledUpdateTimer = nil
 		scheduledUpdateMutex.Unlock()
 
-		log.Printf("Starting batch update of kind 888 events after %v cooldown", delay)
+		log.Printf("Starting batch update of kind 11888 events after %v cooldown", delay)
 		manager := GetGlobalManager()
 		if manager != nil {
 			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
 				log.Printf("Error in batch update: %v", err)
 			} else {
-				log.Printf("Successfully completed batch update of kind 888 events")
+				log.Printf("Successfully completed batch update of kind 11888 events")
 			}
 		}
 	})
 }
 
-// BatchUpdateAllSubscriptionEvents processes all kind 888 events in batches
+// BatchUpdateAllSubscriptionEvents processes all kind 11888 events in batches
 // to update storage allocations after allowed users settings have changed
 func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
-	log.Printf("Starting batch update of all kind 888 subscription events")
+	log.Printf("Starting batch update of all kind 11888 subscription events")
 
 	// Get the current allowed users settings
 	var allowedUsersSettings types.AllowedUsersSettings
@@ -65,7 +65,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	for {
 		// Query the next batch of events
 		filter := nostr.Filter{
-			Kinds: []int{888},
+			Kinds: []int{11888},
 			Limit: batchSize,
 		}
 
@@ -89,7 +89,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 			processed++
 		}
 
-		log.Printf("Processed %d kind 888 events so far", processed)
+		log.Printf("Processed %d kind 11888 events so far", processed)
 
 		// If we received fewer events than requested, we've reached the end of available events
 		if len(events) < batchSize {
@@ -97,7 +97,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 		}
 	}
 
-	log.Printf("Completed batch update, processed %d kind 888 events", processed)
+	log.Printf("Completed batch update, processed %d kind 11888 events", processed)
 
 	// If we're in subscription mode, also allocate Bitcoin addresses for users who don't have them
 	if allowedUsersSettings.Mode == "subscription" {
@@ -111,7 +111,7 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	return nil
 }
 
-// processSingleSubscriptionEvent handles updating relay_mode tag and storage limits for existing kind 888 events
+// processSingleSubscriptionEvent handles updating relay_mode tag and storage limits for existing kind 11888 events
 func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event) error {
 	// Extract pubkey
 	pubkey := getTagValue(event.Tags, "p")
@@ -203,16 +203,16 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 	log.Printf("Starting batch Bitcoin address allocation for existing users")
 
-	// Query all kind 888 events first
+	// Query all kind 11888 events first
 	allEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 	})
 
 	if err != nil {
 		return fmt.Errorf("failed to query events: %v", err)
 	}
 
-	log.Printf("Found %d total kind 888 events, checking for empty Bitcoin addresses", len(allEvents))
+	log.Printf("Found %d total kind 11888 events, checking for empty Bitcoin addresses", len(allEvents))
 
 	// Filter events that have empty Bitcoin addresses
 	var eventsNeedingAddresses []*nostr.Event
@@ -254,9 +254,9 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 			continue
 		}
 
-		// Update the kind 888 event with the new address
+		// Update the kind 11888 event with the new address
 		if err := m.updateEventWithBitcoinAddress(event, addressObj.Address); err != nil {
-			log.Printf("Failed to update kind 888 event for %s: %v", pubkey, err)
+			log.Printf("Failed to update kind 11888 event for %s: %v", pubkey, err)
 			continue
 		}
 
@@ -268,7 +268,7 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 	return nil
 }
 
-// updateEventWithBitcoinAddress updates an existing kind 888 event to include a Bitcoin address
+// updateEventWithBitcoinAddress updates an existing kind 11888 event to include a Bitcoin address
 func (m *SubscriptionManager) updateEventWithBitcoinAddress(originalEvent *nostr.Event, bitcoinAddress string) error {
 	// Extract current event data
 	pubkey := getTagValue(originalEvent.Tags, "p")

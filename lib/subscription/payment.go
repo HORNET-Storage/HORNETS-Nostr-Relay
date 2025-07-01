@@ -83,7 +83,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 			// Update the NIP-88 event to reflect the new credit amount
 			events, err := m.store.QueryEvents(nostr.Filter{
-				Kinds: []int{888},
+				Kinds: []int{11888},
 				Tags:  nostr.TagMap{"p": []string{npub}},
 				Limit: 1,
 			})
@@ -137,7 +137,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 	// Fetch current NIP-88 event to get existing state
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags:  nostr.TagMap{"p": []string{npub}},
 		Limit: 1,
 	})
@@ -208,7 +208,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 	// Verify the update
 	updatedEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags:  nostr.TagMap{"p": []string{npub}},
 		Limit: 1,
 	})
@@ -274,7 +274,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 
 	// Fetch current NIP-88 event to get existing state
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags:  nostr.TagMap{"p": []string{npub}},
 		Limit: 1,
 	})

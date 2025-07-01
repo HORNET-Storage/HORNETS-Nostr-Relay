@@ -1,4 +1,4 @@
-// events.go - Kind 888 event management
+// events.go - Kind 11888 event management
 
 package subscription
 
@@ -44,7 +44,7 @@ func (m *SubscriptionManager) createEvent(
 		return fmt.Sprintf("%d", storageInfo.TotalBytes)
 	}()
 
-	log.Printf("[DEBUG] Creating kind 888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t",
+	log.Printf("[DEBUG] Creating kind 11888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t",
 		subscriber.Npub, storageInfo.UsedBytes, totalBytesStr, storageInfo.IsUnlimited)
 
 	// Get relay mode from config
@@ -63,9 +63,9 @@ func (m *SubscriptionManager) createEvent(
 
 	// Log address handling for debugging
 	if subscriber.Address == "" {
-		log.Printf("Creating kind 888 event without Bitcoin address for user %s", subscriber.Npub)
+		log.Printf("Creating kind 11888 event without Bitcoin address for user %s", subscriber.Npub)
 	} else {
-		log.Printf("Creating kind 888 event with Bitcoin address %s for user %s", subscriber.Address, subscriber.Npub)
+		log.Printf("Creating kind 11888 event with Bitcoin address %s for user %s", subscriber.Address, subscriber.Npub)
 	}
 
 	// Add credit information if there is any
@@ -88,7 +88,7 @@ func (m *SubscriptionManager) createEvent(
 	event := &nostr.Event{
 		PubKey:    hex.EncodeToString(m.relayPrivateKey.PubKey().SerializeCompressed()),
 		CreatedAt: nostr.Timestamp(time.Now().Unix()),
-		Kind:      888,
+		Kind:      11888,
 		Tags:      tags,
 		Content:   "",
 	}
@@ -132,7 +132,7 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	}
 
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags: nostr.TagMap{
 			"p": []string{npub, hex}, // Check both formats
 		},
@@ -167,7 +167,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 
 	// Check for existing event
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags: nostr.TagMap{
 			"p": []string{subscriber.Npub},
 		},
@@ -201,7 +201,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 
 	// Verification
 	storedEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags: nostr.TagMap{
 			"p": []string{subscriber.Npub},
 		},

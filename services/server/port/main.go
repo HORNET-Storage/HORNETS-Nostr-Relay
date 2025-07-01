@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -331,14 +330,14 @@ func main() {
 	)
 	logging.Info("Global subscription manager initialized successfully")
 
-	// Batch update existing kind 888 events on startup to ensure they reflect current config
-	logging.Info("Updating existing kind 888 events to reflect current configuration...")
+	// Batch update existing kind 11888 events on startup to ensure they reflect current config
+	logging.Info("Updating existing kind 11888 events to reflect current configuration...")
 	if manager := subscription.GetGlobalManager(); manager != nil {
 		go func() {
 			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
-				logging.Errorf("Failed to update existing kind 888 events on startup: %v", err)
+				logging.Errorf("Failed to update existing kind 11888 events on startup: %v", err)
 			} else {
-				logging.Info("Successfully updated existing kind 888 events on startup")
+				logging.Info("Successfully updated existing kind 11888 events on startup")
 			}
 		}()
 	}
@@ -346,6 +345,24 @@ func main() {
 	// Initialize daily free tier subscription renewal
 	logging.Info("Initializing daily free tier subscription renewal...")
 	subscription.InitDailyFreeSubscriptionRenewal()
+
+	// Validate subscription mode configuration and ensure address availability
+	if settings.AllowedUsersSettings.Mode == "subscription" {
+		logging.Info("Relay is in subscription mode - validating Bitcoin address availability...")
+		if manager := subscription.GetGlobalManager(); manager != nil {
+			if err := validateSubscriptionModeStartup(manager, store); err != nil {
+				logging.Fatal("Subscription mode validation failed", map[string]interface{}{
+					"error": err,
+				})
+			}
+		} else {
+			logging.Fatal("Subscription manager not available for subscription mode validation")
+		}
+	} else {
+		logging.Info("Relay not in subscription mode - skipping Bitcoin address validation", map[string]interface{}{
+			"mode": settings.AllowedUsersSettings.Mode,
+		})
+	}
 
 	// Initialize the global access control
 	logging.Info("Initializing global access control...")
@@ -561,4 +578,49 @@ func main() {
 	}()
 
 	wg.Wait()
+}
+
+// validateSubscriptionModeStartup ensures that when the relay starts in subscription mode,
+// all existing Kind 11888 events have Bitcoin addresses assigned and the wallet service is available
+func validateSubscriptionModeStartup(manager *subscription.SubscriptionManager, store *badgerhold.BadgerholdStore) error {
+	logging.Info("Starting subscription mode validation at startup...")
+
+	// Step 1: Check wallet service connectivity using subscription package function
+	walletHealthy, err := subscription.CheckWalletServiceHealth()
+	if err != nil || !walletHealthy {
+		return fmt.Errorf("wallet service is not available - cannot start in subscription mode: %v", err)
+	}
+	logging.Info("Wallet service connectivity verified")
+
+	// Step 2: Check if there are existing Kind 11888 events without Bitcoin addresses
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		return fmt.Errorf("statistics store not available")
+	}
+
+	usersWithoutAddresses, err := statsStore.CountUsersWithoutBitcoinAddresses()
+	if err != nil {
+		return fmt.Errorf("failed to count users without Bitcoin addresses: %v", err)
+	}
+
+	if usersWithoutAddresses == 0 {
+		logging.Info("All existing users already have Bitcoin addresses assigned")
+		return nil
+	}
+
+	logging.Info("Found users without Bitcoin addresses, starting migration", map[string]interface{}{
+		"users_needing_addresses": usersWithoutAddresses,
+	})
+
+	// Step 3: Run the batch allocation to assign addresses to existing users
+	// This will handle ensuring sufficient addresses are available
+	if err := manager.AllocateBitcoinAddressesForExistingUsers(); err != nil {
+		return fmt.Errorf("failed to allocate Bitcoin addresses for existing users: %v", err)
+	}
+
+	logging.Info("Successfully completed subscription mode startup validation", map[string]interface{}{
+		"users_processed": usersWithoutAddresses,
+	})
+
+	return nil
 }

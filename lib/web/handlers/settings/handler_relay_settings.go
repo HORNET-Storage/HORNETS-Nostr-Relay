@@ -318,7 +318,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	if allowedUsersUpdated {
 		log.Println("Allowed users settings updated, triggering event regeneration...")
 
-		// Schedule batch update of kind 888 events after a short delay
+		// Schedule batch update of kind 11888 events after a short delay
 		// This allows for multiple rapid setting changes to be batched together
 		subscription.ScheduleBatchUpdateAfter(5 * time.Second)
 	}
