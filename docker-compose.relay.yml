@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: HORNETS-Nostr-Relay/Dockerfile
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+      - "9002:9002"
+    volumes:
+      - .:/source:ro
+      - ../HORNETS-Relay-Panel:/panel-source:ro
+      - ./data:/data
+      - ./temp:/temp
+      - ./statistics:/statistics
+      - ./config/relay_config.json:/config.json
+    environment:
+      OLLAMA_URL: http://ollama:11434/api/generate
+      IMAGE_MODERATION_API: http://moderator:8000/moderate?moderation_mode=full
+      WALLET_URL: http://wallet:9003
+    restart: unless-stopped
