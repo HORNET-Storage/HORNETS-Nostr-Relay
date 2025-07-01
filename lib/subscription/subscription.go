@@ -453,6 +453,88 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	return updatedEvent, nil
 }
 
+// UpdateUserSubscriptionFromDatabase updates a user's kind 11888 event by looking up their tier from the database
+// This follows the correct flow: DB lookup -> config lookup -> update event
+func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) error {
+	log.Printf("Updating kind 11888 event for npub %s (looking up tier from database)", npub)
+
+	// Load allowed users settings to get tier configuration
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		return fmt.Errorf("failed to load allowed users settings: %v", err)
+	}
+
+	// Look up the user's assigned tier from the database
+	statsStore := m.store.GetStatsStore()
+	if statsStore == nil {
+		return fmt.Errorf("statistics store not available")
+	}
+
+	// Normalize the pubkey to ensure we're using the right format
+	hexKey, _, err := normalizePubkey(npub)
+	if err != nil {
+		return fmt.Errorf("error normalizing pubkey %s: %v", npub, err)
+	}
+
+	allowedUser, err := statsStore.GetAllowedUser(hexKey)
+	if err != nil {
+		return fmt.Errorf("error getting allowed user: %v", err)
+	}
+
+	if allowedUser == nil {
+		return fmt.Errorf("user %s not found in allowed users table", npub)
+	}
+
+	if allowedUser.Tier == "" {
+		return fmt.Errorf("user %s has no tier assigned", npub)
+	}
+
+	log.Printf("Found user %s with assigned tier: %s", npub, allowedUser.Tier)
+
+	// Find the tier configuration that matches the user's assigned tier
+	var activeTier *types.SubscriptionTier
+	for i := range allowedUsersSettings.Tiers {
+		if allowedUsersSettings.Tiers[i].Name == allowedUser.Tier {
+			activeTier = &allowedUsersSettings.Tiers[i]
+			break
+		}
+	}
+
+	if activeTier == nil {
+		return fmt.Errorf("tier %s not found in configuration", allowedUser.Tier)
+	}
+
+	log.Printf("Found tier configuration: Name=%s, MonthlyLimitBytes=%d", activeTier.Name, activeTier.MonthlyLimitBytes)
+
+	// Create subscriber info
+	subscriber := &types.Subscriber{
+		Npub: npub,
+	}
+
+	// Set expiration date based on tier type
+	expirationDate := time.Now().AddDate(0, 1, 0) // Default to 1 month
+	if activeTier.PriceSats <= 0 {
+		// For free tiers, set longer expiration
+		expirationDate = time.Now().AddDate(1, 0, 0) // 1 year for free
+	}
+
+	// Create storage info from tier - check for unlimited storage
+	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
+
+	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t",
+		npub, activeTier.Name, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited)
+
+	storageInfo := &StorageInfo{
+		TotalBytes:  activeTier.MonthlyLimitBytes,
+		UsedBytes:   0, // Start with 0 used bytes
+		IsUnlimited: isUnlimited,
+		UpdatedAt:   time.Now(),
+	}
+
+	// Create or update the NIP-88 event
+	return m.createOrUpdateNIP88Event(subscriber, activeTier.Name, expirationDate, storageInfo)
+}
+
 // UpdateNpubSubscriptionEvent updates the kind 11888 event for a specific npub with new tier information
 // This is called when access control lists are updated and we need to sync the kind 11888 events
 func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string) error {

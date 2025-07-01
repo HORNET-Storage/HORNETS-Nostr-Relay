@@ -1,9 +1,14 @@
 package access
 
 import (
+	"log"
+	"strings"
+
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/gofiber/fiber/v2"
+	"github.com/spf13/viper"
 )
 
 func GetAllowedUsersPaginated(c *fiber.Ctx, store stores.Store) error {
@@ -77,6 +82,38 @@ func AddAllowedUser(c *fiber.Ctx, store stores.Store) error {
 			"error": "Failed to add NPUB to read list",
 		})
 	}
+
+	// Update the user's kind 11888 event if we're in invite-only mode
+	// This ensures their storage allocation reflects their new tier immediately
+	go func() {
+		var allowedUsersSettings struct {
+			Mode string `json:"mode"`
+		}
+		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+			log.Printf("Warning: Could not load allowed_users settings to check mode: %v", err)
+			return
+		}
+
+		currentMode := strings.ToLower(allowedUsersSettings.Mode)
+		log.Printf("User %s added with tier %s in mode %s", req.Npub, req.Tier, currentMode)
+
+		// Only update subscription events in invite-only mode
+		// In other modes, the batch update or initialization handles it
+		if currentMode == "invite-only" && req.Tier != "" {
+			manager := subscription.GetGlobalManager()
+			if manager != nil {
+				log.Printf("Updating kind 11888 event for newly added user %s (will lookup tier from database)", req.Npub)
+				// Use the new function that follows the correct flow: DB lookup -> config lookup -> update event
+				if err := manager.UpdateUserSubscriptionFromDatabase(req.Npub); err != nil {
+					log.Printf("Error updating subscription event for %s: %v", req.Npub, err)
+				} else {
+					log.Printf("Successfully updated subscription event for %s", req.Npub)
+				}
+			} else {
+				log.Printf("Warning: Global subscription manager not available")
+			}
+		}
+	}()
 
 	return c.JSON(fiber.Map{
 		"success": true,
