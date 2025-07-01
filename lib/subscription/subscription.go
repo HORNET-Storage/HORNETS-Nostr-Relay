@@ -518,15 +518,37 @@ func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) er
 		expirationDate = time.Now().AddDate(1, 0, 0) // 1 year for free
 	}
 
+	// Get current storage usage from existing kind 11888 event if it exists
+	var currentUsedBytes int64 = 0
+	existingEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{11888},
+		Tags: nostr.TagMap{
+			"p": []string{npub, hexKey}, // Check both formats
+		},
+		Limit: 1,
+	})
+	if err == nil && len(existingEvents) > 0 {
+		// Extract current usage from existing event
+		existingStorageInfo, err := m.extractStorageInfo(existingEvents[0])
+		if err == nil {
+			currentUsedBytes = existingStorageInfo.UsedBytes
+			log.Printf("Preserving current used storage for %s: %d bytes", npub, currentUsedBytes)
+		} else {
+			log.Printf("Warning: Could not extract existing storage info for %s: %v", npub, err)
+		}
+	} else {
+		log.Printf("No existing kind 11888 event found for %s, starting with 0 used bytes", npub)
+	}
+
 	// Create storage info from tier - check for unlimited storage
 	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
 
-	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t",
-		npub, activeTier.Name, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited)
+	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t, preservedUsedBytes=%d",
+		npub, activeTier.Name, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited, currentUsedBytes)
 
 	storageInfo := &StorageInfo{
 		TotalBytes:  activeTier.MonthlyLimitBytes,
-		UsedBytes:   0, // Start with 0 used bytes
+		UsedBytes:   currentUsedBytes, // Preserve current usage
 		IsUnlimited: isUnlimited,
 		UpdatedAt:   time.Now(),
 	}
