@@ -46,6 +46,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1063"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
@@ -61,7 +62,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30078"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -376,9 +376,9 @@ func main() {
 		logging.Warn("Warning: Statistics store not available, access control not initialized")
 	}
 
-	// Create and store kind 411 event
-	if err := kind411.CreateKind411Event(privateKey, publicKey, store); err != nil {
-		logging.Errorf("Failed to create kind 411 event: %v", err)
+	// Create and store kind 10411 event
+	if err := kind10411.CreateKind10411Event(privateKey, publicKey, store); err != nil {
+		logging.Errorf("Failed to create kind 10411 event: %v", err)
 		return
 	}
 

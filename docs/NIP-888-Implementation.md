@@ -33,18 +33,18 @@ Upon connecting to the new relay, the user's client automatically sends a NIP42 
 
 ### Step 4: Displaying and Selecting a Subscription Plan
 
-Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 411 nostr note (previously referred to as kind 88 in early implementations). Each subscription tier is listed in the content section of the note, providing details on the data limit and the corresponding price.
+Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 10411 nostr note (previously referred to as kind 88 in early implementations). Each subscription tier is listed in the content section of the note, providing details on the data limit and the corresponding price.
 
 To facilitate payment tracking and automatic user registration, the relay generates a unique Bitcoin address for each user. This unique address is specifically tied to the user's payment and is crucial for correlating the payment with the specific user in the backend system.
 
-The kind 411 nostr note structure would be as follows:
+The kind 10411 nostr note structure would be as follows:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<relay_public_key_hex>",
   "created_at": <timestamp>,
-  "kind": 411,
+  "kind": 10411,
   "tags": [],
   "content": {
     "name": "Relay Name",
@@ -217,16 +217,16 @@ Upon connecting to the new relay, the user's client automatically sends a NIP42 
 
 ### Step 4: Displaying Subscription Plans
 
-Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 411 nostr note. Each subscription tier is listed in the content section, providing details on the data limit and the corresponding price.
+Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 10411 nostr note. Each subscription tier is listed in the content section, providing details on the data limit and the corresponding price.
 
-The kind 411 nostr note structure would be as follows:
+The kind 10411 nostr note structure would be as follows:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<relay_public_key_hex>",
   "created_at": <timestamp>,
-  "kind": 411,
+  "kind": 10411,
   "tags": [],
   "content": {
     "name": "Relay Name",

@@ -12,7 +12,7 @@ import (
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10411"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
@@ -291,11 +291,11 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	// Check if relay settings are being updated (affects kind 411 relay info)
+	// Check if relay settings are being updated (affects kind 10411 relay info)
 	relaySettingsUpdated := false
 	if _, exists := settings["relay"]; exists {
 		relaySettingsUpdated = true
-		log.Println("Relay settings updated, will regenerate kind 411 event...")
+		log.Println("Relay settings updated, will regenerate kind 10411 event...")
 	}
 
 	// Update each setting
@@ -323,9 +323,9 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		subscription.ScheduleBatchUpdateAfter(5 * time.Second)
 	}
 
-	// If either allowed_users or relay settings were updated, regenerate kind 411 event
+	// If either allowed_users or relay settings were updated, regenerate kind 10411 event
 	if allowedUsersUpdated || relaySettingsUpdated {
-		// Regenerate kind 411 event immediately in a goroutine
+		// Regenerate kind 10411 event immediately in a goroutine
 		if store != nil {
 			go func() {
 				var reason string
@@ -337,7 +337,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 					reason = "relay settings changes"
 				}
 
-				log.Printf("Regenerating kind 411 event due to %s...", reason)
+				log.Printf("Regenerating kind 10411 event due to %s...", reason)
 
 				// Get the private and public keys from viper (same way as main.go does)
 				serializedPrivateKey := viper.GetString("relay.private_key")
@@ -354,14 +354,14 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 
 				// Use the existing store instance passed from the web server
 				// This avoids the database lock issue
-				if err := kind411.CreateKind411Event(privateKey, publicKey, store); err != nil {
-					log.Printf("Error regenerating kind 411 event: %v", err)
+				if err := kind10411.CreateKind10411Event(privateKey, publicKey, store); err != nil {
+					log.Printf("Error regenerating kind 10411 event: %v", err)
 				} else {
-					log.Printf("Successfully regenerated kind 411 event")
+					log.Printf("Successfully regenerated kind 10411 event")
 				}
 			}()
 		} else {
-			log.Printf("Warning: Store not available, skipping kind 411 regeneration")
+			log.Printf("Warning: Store not available, skipping kind 10411 regeneration")
 		}
 	}
 
