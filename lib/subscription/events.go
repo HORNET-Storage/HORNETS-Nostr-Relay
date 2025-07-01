@@ -230,9 +230,17 @@ func (m *SubscriptionManager) extractStorageInfo(event *nostr.Event) (StorageInf
 				return info, fmt.Errorf("invalid used storage value: %v", err)
 			}
 
-			total, err := strconv.ParseInt(tag[2], 10, 64)
-			if err != nil {
-				return info, fmt.Errorf("invalid total storage value: %v", err)
+			// Handle "unlimited" storage case
+			if tag[2] == "unlimited" {
+				info.IsUnlimited = true
+				info.TotalBytes = 0 // 0 with IsUnlimited=true means unlimited
+			} else {
+				total, err := strconv.ParseInt(tag[2], 10, 64)
+				if err != nil {
+					return info, fmt.Errorf("invalid total storage value: %v", err)
+				}
+				info.TotalBytes = total
+				info.IsUnlimited = false
 			}
 
 			updated, err := strconv.ParseInt(tag[3], 10, 64)
@@ -241,7 +249,6 @@ func (m *SubscriptionManager) extractStorageInfo(event *nostr.Event) (StorageInf
 			}
 
 			info.UsedBytes = used
-			info.TotalBytes = total
 			info.UpdatedAt = time.Unix(updated, 0)
 			return info, nil
 		}
@@ -249,8 +256,9 @@ func (m *SubscriptionManager) extractStorageInfo(event *nostr.Event) (StorageInf
 
 	// Return zero values if no storage tag found
 	return StorageInfo{
-		UsedBytes:  0,
-		TotalBytes: 0,
-		UpdatedAt:  time.Now(),
+		UsedBytes:   0,
+		TotalBytes:  0,
+		IsUnlimited: false,
+		UpdatedAt:   time.Now(),
 	}, nil
 }

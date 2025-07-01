@@ -162,17 +162,48 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 
 	case "invite-only", "exclusive":
 		// In invite-only/exclusive mode, tier is manually assigned
-		// Check if user is still in allowed lists
-		if m.isUserInAllowedLists(pubkey) {
-			if currentTier != nil {
-				return currentTier
+		// Get the user's assigned tier from the allowed users table
+		statsStore := m.store.GetStatsStore()
+		if statsStore != nil {
+			// Normalize the pubkey to ensure we're using the right format
+			hexKey, _, err := normalizePubkey(pubkey)
+			if err != nil {
+				log.Printf("DEBUG: Error normalizing pubkey %s: %v", pubkey, err)
+			} else {
+				log.Printf("DEBUG: Looking up allowed user with hex key: %s", hexKey)
+				allowedUser, err := statsStore.GetAllowedUser(hexKey)
+				if err != nil {
+					log.Printf("DEBUG: Error getting allowed user: %v", err)
+				} else if allowedUser == nil {
+					log.Printf("DEBUG: User %s not found in allowed users table", hexKey)
+				} else {
+					log.Printf("DEBUG: Found allowed user %s with tier: '%s'", hexKey, allowedUser.Tier)
+					if allowedUser.Tier != "" {
+						// Find the tier in the configuration that matches the user's assigned tier
+						for i := range allowedUsersSettings.Tiers {
+							if allowedUsersSettings.Tiers[i].Name == allowedUser.Tier {
+								log.Printf("User %s assigned tier '%s' from allowed users table", pubkey, allowedUser.Tier)
+								return &allowedUsersSettings.Tiers[i]
+							}
+						}
+						log.Printf("Warning: User %s has tier '%s' but it's not in current config", pubkey, allowedUser.Tier)
+					}
+				}
 			}
-			// User is allowed but no tier assigned, give first available tier
+		} else {
+			log.Printf("DEBUG: Stats store is nil")
+		}
+
+		// Fallback: if user is in allowed list but no tier found, give first available tier
+		if m.isUserInAllowedLists(pubkey) {
 			if len(allowedUsersSettings.Tiers) > 0 {
+				log.Printf("User %s in allowed list but no tier assigned, using first available tier", pubkey)
 				return &allowedUsersSettings.Tiers[0]
 			}
 		}
-		// User not in allowed lists, no tier
+
+		log.Printf("DEBUG: User %s not in allowed lists or no tier available", pubkey)
+		// User not in allowed lists or no tier available
 		return nil
 
 	case "only-me", "personal":

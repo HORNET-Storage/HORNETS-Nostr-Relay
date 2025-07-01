@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -38,11 +39,14 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 		log.Printf("Starting batch update of kind 11888 events after %v cooldown", delay)
 		manager := GetGlobalManager()
 		if manager != nil {
+			log.Printf("DEBUG: BatchUpdateAllSubscriptionEvents called via scheduled update")
 			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
 				log.Printf("Error in batch update: %v", err)
 			} else {
 				log.Printf("Successfully completed batch update of kind 11888 events")
 			}
+		} else {
+			log.Printf("ERROR: Global subscription manager is nil, cannot run batch update")
 		}
 	})
 }
@@ -57,6 +61,8 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
+
+	currentMode := strings.ToLower(allowedUsersSettings.Mode)
 
 	// Process events in batches of 50
 	batchSize := 50
@@ -99,13 +105,16 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 
 	log.Printf("Completed batch update, processed %d kind 11888 events", processed)
 
-	// If we're in subscription mode, also allocate Bitcoin addresses for users who don't have them
-	if allowedUsersSettings.Mode == "subscription" {
+	// Only allocate Bitcoin addresses in subscription (paid) mode
+	// Never allocate addresses in free modes
+	if currentMode == "subscription" {
 		log.Printf("Relay is in subscription mode, allocating Bitcoin addresses for users without them")
 		if err := m.AllocateBitcoinAddressesForExistingUsers(); err != nil {
 			log.Printf("Error allocating Bitcoin addresses: %v", err)
 			return fmt.Errorf("failed to allocate Bitcoin addresses: %v", err)
 		}
+	} else {
+		log.Printf("Relay is in %s mode, skipping Bitcoin address allocation", currentMode)
 	}
 
 	return nil
@@ -142,6 +151,26 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 	address := getTagValue(event.Tags, "relay_bitcoin_address")
 	status := getTagValue(event.Tags, "subscription_status")
 
+	// Determine if this is a mode transition
+	isTransition := currentRelayMode != "" && currentRelayMode != expectedRelayMode
+
+	// Handle mode-specific logic
+	needsUpdate := false
+
+	if isTransition {
+		log.Printf("Mode transition detected for %s: %s -> %s", pubkey, currentRelayMode, expectedRelayMode)
+		needsUpdate = true
+
+		// Apply transition-specific rules
+		needsUpdate = m.applyModeTransitionRules(
+			pubkey,
+			currentRelayMode,
+			expectedRelayMode,
+			&storageInfo,
+			&activeTier,
+		) || needsUpdate
+	}
+
 	// Check if user should have a tier based on current settings
 	var currentTierObj *types.SubscriptionTier
 	if activeTier != "" {
@@ -153,20 +182,34 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		}
 	}
 
+	log.Printf("DEBUG processSingleSubscriptionEvent: pubkey=%s, currentRelayMode=%s, expectedRelayMode=%s, activeTier=%s, isTransition=%v",
+		pubkey, currentRelayMode, expectedRelayMode, activeTier, isTransition)
+
 	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, &allowedUsersSettings)
 
-	needsUpdate := false
+	if expectedTier != nil {
+		log.Printf("DEBUG: Expected tier for %s: Name=%s, Bytes=%d", pubkey, expectedTier.Name, expectedTier.MonthlyLimitBytes)
+	} else {
+		log.Printf("DEBUG: No expected tier found for %s", pubkey)
+	}
 
-	// Check if relay mode needs update
-	if currentRelayMode != expectedRelayMode {
+	// Check if relay mode needs update (if not already handled by transition)
+	if !isTransition && currentRelayMode != expectedRelayMode {
 		log.Printf("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
 		needsUpdate = true
 	}
 
-	// Check if storage limits need update
+	// Update storage limits based on mode and transition rules
 	if expectedTier != nil {
 		expectedBytes := expectedTier.MonthlyLimitBytes
-		if storageInfo.TotalBytes != expectedBytes {
+
+		// Special handling for free-to-paid transitions
+		if isTransition && isFreeMode(currentRelayMode) && !isFreeMode(expectedRelayMode) {
+			// Keep current allocation until cycle ends
+			log.Printf("Free-to-paid transition for %s: keeping current allocation until cycle ends", pubkey)
+			expectedBytes = storageInfo.TotalBytes
+		} else if storageInfo.TotalBytes != expectedBytes {
+			// For all other cases, update immediately
 			log.Printf("Updating storage limit for %s from %d to %d bytes", pubkey, storageInfo.TotalBytes, expectedBytes)
 			storageInfo.TotalBytes = expectedBytes
 			needsUpdate = true
@@ -188,7 +231,7 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 
 	// If nothing needs update, skip
 	if !needsUpdate {
-		log.Printf("Event for %s already up to date", pubkey)
+		log.Printf("Event for %s already up to date (no changes needed)", pubkey)
 		return nil
 	}
 
@@ -356,4 +399,119 @@ func (m *SubscriptionManager) ensureSufficientAddresses(usersNeedingAddresses in
 
 	// If we've exhausted all retries, return an error
 	return fmt.Errorf("timeout waiting for sufficient Bitcoin addresses after %d attempts (5 minutes)", maxRetries)
+}
+
+// isFreeMode checks if a mode is a free mode
+func isFreeMode(mode string) bool {
+	return mode == "public" || mode == "invite-only" || mode == "only-me"
+}
+
+// applyModeTransitionRules applies specific rules for mode transitions
+func (m *SubscriptionManager) applyModeTransitionRules(
+	pubkey string,
+	oldMode string,
+	newMode string,
+	storageInfo *StorageInfo,
+	activeTier *string,
+) bool {
+	needsUpdate := false
+
+	// Handle only-me mode transitions
+	if newMode == "only-me" {
+		// Check if any owner is configured in database
+		statsStore := m.store.GetStatsStore()
+		if statsStore != nil {
+			owner, err := statsStore.GetRelayOwner()
+			if err != nil || owner == nil {
+				log.Printf("WARNING: Transitioning to only-me mode but no relay owner is set in database! Use /admin/owner API to set owner.")
+			}
+		}
+
+		if m.isRelayOwner(pubkey) {
+			// Owner gets unlimited storage
+			log.Printf("Setting unlimited storage for relay owner %s in only-me mode", pubkey)
+			storageInfo.IsUnlimited = true
+			storageInfo.TotalBytes = 0 // 0 indicates unlimited when IsUnlimited is true
+			needsUpdate = true
+		} else {
+			// Non-owners lose access
+			log.Printf("Removing access for non-owner %s in only-me mode", pubkey)
+			storageInfo.TotalBytes = 0
+			storageInfo.IsUnlimited = false
+			*activeTier = ""
+			needsUpdate = true
+		}
+		return needsUpdate
+	}
+
+	// Handle transitions FROM only-me mode
+	if oldMode == "only-me" && newMode != "only-me" {
+		// Reset unlimited flag if it was set
+		if storageInfo.IsUnlimited {
+			storageInfo.IsUnlimited = false
+			needsUpdate = true
+		}
+	}
+
+	// Handle free-to-free transitions
+	if isFreeMode(oldMode) && isFreeMode(newMode) {
+		// Storage caps update immediately for free-to-free transitions
+		log.Printf("Free-to-free transition: updating storage caps immediately")
+		// Force tier reassignment to pick up new tier configuration
+		*activeTier = ""
+		needsUpdate = true
+	}
+
+	// Handle free-to-paid transitions
+	if isFreeMode(oldMode) && !isFreeMode(newMode) {
+		// Keep current allocation until cycle ends
+		log.Printf("Free-to-paid transition: preserving current allocation until cycle ends")
+		// Storage update will be handled in the main function
+	}
+
+	// Handle paid-to-free transitions
+	if !isFreeMode(oldMode) && isFreeMode(newMode) {
+		// Update storage caps immediately
+		log.Printf("Paid-to-free transition: updating storage caps immediately")
+		needsUpdate = true
+	}
+
+	return needsUpdate
+}
+
+// isRelayOwner checks if the given pubkey is the relay owner
+func (m *SubscriptionManager) isRelayOwner(pubkey string) bool {
+	// Normalize user key first
+	userHex, _, err := normalizePubkey(pubkey)
+	if err != nil {
+		log.Printf("Error normalizing user key: %v", err)
+		return false
+	}
+
+	// Check database for relay owner
+	statsStore := m.store.GetStatsStore()
+	if statsStore == nil {
+		log.Printf("WARNING: Statistics store not available, cannot check relay owner")
+		return false
+	}
+
+	owner, err := statsStore.GetRelayOwner()
+	if err != nil {
+		// No owner set in database
+		return false
+	}
+
+	if owner == nil {
+		// No owner configured
+		return false
+	}
+
+	// Normalize owner key and compare
+	ownerHex, _, err := normalizePubkey(owner.Npub)
+	if err != nil {
+		log.Printf("Error normalizing owner key from database: %v", err)
+		return false
+	}
+
+	return ownerHex == userHex
 }
