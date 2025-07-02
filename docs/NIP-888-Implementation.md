@@ -79,7 +79,10 @@ When a user first connects to the relay and authenticates, the system automatica
     ["subscription_status", "inactive"],
     ["relay_bitcoin_address", "<unique_bitcoin_address_for_payment>"],
     ["relay_dht_key", "<relay_dht_key>"],
-    ["storage", "0", "0", "<timestamp>"]
+    ["storage", "0", "0", "<timestamp>"],
+    ["credit", "<credit_amount_in_sats>"],
+    ["active_subscription", "<tier_name>", "<expiration_timestamp>"],
+    ["relay_mode", "public|subscription|invite-only|only-me"]
   ],
   "content": "",
   "sig": "<signature_from_relay>"
@@ -284,3 +287,186 @@ Upon receiving the Lightning payment, the relay verifies the transaction. Once v
 The relay records the subscription's expiration date in the panel when you click on the person's name.
 A graviton profile bucket can be made for that user to monitor if they exceed the allocated GB they are assigned, using the same GB counting logic the panel currently utilizes for its charts.
 To ensure proper access management, the relay periodically checks each subscriber's expiration date. Users whose subscriptions have expired are automatically removed from the active users' list, suspending their access until they renew their subscription.
+
+## Relay Operating Modes
+
+The HORNETS relay supports four distinct operating modes, each with different access control and subscription behaviors. The active mode is indicated in the `relay_mode` tag of kind 11888 events.
+
+### 1. Subscription Mode (Paid)
+
+**Description**: Users must pay for storage tiers to access the relay.
+
+**Access Control**: 
+- Read: `paid_users` (only users with active paid subscriptions)
+- Write: `paid_users` (only users with active paid subscriptions)
+
+**Subscription Behavior**:
+- Users start with minimal/no storage allocation
+- Must make Bitcoin payments to purchase storage tiers
+- Storage allocation matches purchased tier specifications
+- Bitcoin addresses are automatically allocated for payment tracking
+- Credit system handles overpayments and partial payments
+
+**Kind 11888 Example**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", "<bitcoin_address>"],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "1073741824", "5368709120", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "5GB Tier", "<expiration_timestamp>"],
+    ["relay_mode", "subscription"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+### 2. Public Mode (Free)
+
+**Description**: Open access relay where anyone can read and write with predefined storage limits.
+
+**Access Control**:
+- Read: `all_users` (anyone can read)
+- Write: `all_users` (anyone can write)
+
+**Subscription Behavior**:
+- Users automatically receive the configured free tier allocation
+- No payment required
+- No Bitcoin address allocation
+- Storage limits enforced based on free tier configuration
+
+**Kind 11888 Example**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "52428800", "104857600", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "Free Public", "<expiration_timestamp>"],
+    ["relay_mode", "public"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+### 3. Invite-Only Mode
+
+**Description**: Curated access where admin manually assigns users to specific tiers.
+
+**Access Control**:
+- Read: `allowed_users` or `all_users` (configurable)
+- Write: `allowed_users` (only manually approved users)
+
+**Subscription Behavior**:
+- Admin manually adds users to allowed list with specific tier assignments
+- Users receive storage allocation based on their assigned tier
+- Tier assignments stored in database and reflected in kind 11888 events
+- No payment required - allocations are administrative decisions
+- No Bitcoin address allocation
+
+**Kind 11888 Example**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "2147483648", "10737418240", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "Premium Invite", "<expiration_timestamp>"],
+    ["relay_mode", "invite-only"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+### 4. Only-Me Mode (Personal)
+
+**Description**: Private relay for owner use only.
+
+**Access Control**:
+- Read: `only-me`, `all_users`, or `allowed_users` (configurable)
+- Write: `only-me` (only relay owner)
+
+**Subscription Behavior**:
+- Relay owner gets unlimited storage
+- Non-owners receive no allocation (0 bytes)
+- Owner status determined by database configuration or config fallback
+- No payment system active
+- No Bitcoin address allocation
+
+**Kind 11888 Example (Owner)**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<owner_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "1073741824", "unlimited", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "Owner Unlimited", "<expiration_timestamp>"],
+    ["relay_mode", "only-me"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+**Kind 11888 Example (Non-Owner)**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "inactive"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "0", "0", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "", "<timestamp>"],
+    ["relay_mode", "only-me"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+## Mode Transitions and Event Updates
+
+When relay operators change modes, the system automatically updates existing kind 11888 events to reflect the new access policies:
+
+1. **Immediate Updates**: Mode changes trigger batch updates of all subscription events
+2. **Graceful Transitions**: Existing allocations are preserved during free-to-paid transitions until cycle ends
+3. **Storage Adjustments**: Paid-to-free transitions update storage caps immediately
+4. **Bitcoin Address Management**: Addresses allocated only in subscription mode
+5. **Owner Privileges**: Owner status maintained across mode changes

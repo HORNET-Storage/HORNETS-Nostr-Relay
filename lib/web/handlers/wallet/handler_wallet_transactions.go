@@ -153,12 +153,12 @@ func UpdateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// Initialize subscription manager
-	subManager, err := InitializeSubscriptionManager(store)
-	if err != nil {
-		log.Printf("Failed to initialize subscription manager: %v", err)
+	// Get the global subscription manager
+	subManager := subscription.GetGlobalManager()
+	if subManager == nil {
+		log.Printf("Global subscription manager not initialized")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to initialize subscription system",
+			"error": "Subscription system not available",
 		})
 	}
 
