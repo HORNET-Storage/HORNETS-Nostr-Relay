@@ -4,8 +4,6 @@ import (
 	"log"
 	"strings"
 
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
-	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -166,32 +164,12 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			}
 		}
 
-		// Only initialize subscription manager if necessary
+		// Only get subscription manager if necessary
 		if needsSubscriptionManager {
-			// Get relay private key for signing
-			serializedPrivateKey := viper.GetString("private_key")
-
-			// Use existing DeserializePrivateKey function from signing package
-			relayPrivKey, _, err := signing.DeserializePrivateKey(serializedPrivateKey)
-			if err != nil {
-				log.Printf("Error loading private key: %v", err)
-			} else {
-				// Load allowed users settings to get tiers
-				config, err := config.GetConfig()
-				if err != nil {
-					log.Printf("Error loading allowed users settings: %v", err)
-				}
-
-				// Get relay DHT key
-				relayDHTKey := viper.GetString("RelayDHTkey")
-
-				// Initialize subscription manager
-				subManager = subscription.NewSubscriptionManager(
-					store,
-					relayPrivKey,
-					relayDHTKey,
-					config.AllowedUsersSettings.Tiers,
-				)
+			// Use the global subscription manager instead of creating a new one
+			subManager = subscription.GetGlobalManager()
+			if subManager == nil {
+				log.Printf("Warning: Global subscription manager not available for kind 11888 event processing")
 			}
 		}
 
