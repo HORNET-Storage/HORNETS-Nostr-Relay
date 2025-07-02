@@ -510,17 +510,19 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				}
 
 				// Only update if we have a subscription manager
+				// Run update asynchronously to avoid blocking event processing
 				if subManager != nil {
-					log.Printf("Checking if kind 11888 event needs update...")
-					updatedEvent, err := subManager.CheckAndUpdateSubscriptionEvent(event)
-					if err != nil {
-						log.Printf("Error updating kind 11888 event: %v", err)
-					} else if updatedEvent != event {
-						log.Printf("Event was updated with new information")
-						event = updatedEvent
-					} else {
-						log.Printf("Event did not need updating")
-					}
+					go func(eventCopy *nostr.Event, manager *subscription.SubscriptionManager) {
+						log.Printf("Checking if kind 11888 event needs update...")
+						updatedEvent, err := manager.CheckAndUpdateSubscriptionEvent(eventCopy)
+						if err != nil {
+							log.Printf("Error updating kind 11888 event: %v", err)
+						} else if updatedEvent != eventCopy {
+							log.Printf("Event was updated with new information")
+						} else {
+							log.Printf("Event did not need updating")
+						}
+					}(event, subManager)
 				}
 			}
 
