@@ -1,8 +1,8 @@
-# Kind 888 Multi-Mode Relay System
+# Kind 11888 Multi-Mode Relay System
 
 ## Overview
 
-Kind 888 events serve as the subscription and storage management system for the HORNETS Nostr relay. This system handles four distinct relay modes and provides clients with comprehensive information about user storage allocations, subscription status, and payment requirements.
+Kind 11888 events serve as the subscription and storage management system for the HORNETS Nostr relay. This system handles four distinct relay modes and provides clients with comprehensive information about user storage allocations, subscription status, and payment requirements.
 
 ## Relay Modes
 
@@ -34,11 +34,11 @@ Kind 888 events serve as the subscription and storage management system for the 
 - **Storage Policy**: No limits
 - **UI Behavior**: Simple storage usage display
 
-## Kind 888 Event Structure
+## Kind 11888 Event Structure
 
 ```json
 {
-  "kind": 888,
+  "kind": 11888,
   "pubkey": "<relay_public_key>",
   "created_at": <timestamp>,
   "tags": [
@@ -107,13 +107,13 @@ Kind 888 events serve as the subscription and storage management system for the 
 ### Credit Application
 - Credit automatically applied on next payment
 - Credit used to purchase additional storage when threshold reached
-- Visible in kind 888 events for transparency
+- Visible in kind 11888 events for transparency
 
 ## Client Integration Guidelines
 
 ### Reading relay_mode Tag
 ```javascript
-function parseKind888Event(event) {
+function parseKind11888Event(event) {
   const relayMode = getTagValue(event.tags, 'relay_mode');
   const storage = getTagValues(event.tags, 'storage');
   const isUnlimited = storage[1] === 'unlimited';
@@ -150,7 +150,7 @@ function getStorageDisplayText(storage) {
 When relay operators change modes, the system:
 
 1. **Preserves existing subscriptions** until natural expiration
-2. **Updates new kind 888 events** with current mode
+2. **Updates new kind 11888 events** with current mode
 3. **Batch updates existing events** to include relay_mode tag
 4. **Maintains storage allocations** during transition period
 
@@ -172,7 +172,7 @@ When relay operators change modes, the system:
 ### Update Process
 1. Calculate storage delta for operation
 2. Check against current limits
-3. Update kind 888 event with new usage
+3. Update kind 11888 event with new usage
 4. Enforce limits if exceeded
 
 ## Backend Implementation Notes
@@ -183,7 +183,7 @@ When relay operators change modes, the system:
 - Default to "unknown" if config unavailable
 
 ### Event Creation
-- All kind 888 events automatically include relay_mode tag
+- All kind 11888 events automatically include relay_mode tag
 - Mode read fresh from config on each event creation
 - Ensures consistency even during mode transitions
 
@@ -195,7 +195,7 @@ When relay operators change modes, the system:
 ## Migration and Compatibility
 
 ### Existing Events
-- Old kind 888 events without relay_mode tag remain valid
+- Old kind 11888 events without relay_mode tag remain valid
 - Batch update process adds relay_mode to existing events
 - Backward compatibility maintained for clients
 
@@ -209,7 +209,7 @@ When relay operators change modes, the system:
 ### Log Messages
 - Mode loading: `"[DEBUG] Creating storage info for npub X: mode=Y"`
 - Event creation: `"Creating/updating NIP-88 event for X with tier Y"`
-- Storage updates: `"[DEBUG] Creating kind 888 event: totalBytes=X"`
+- Storage updates: `"[DEBUG] Creating kind 11888 event: totalBytes=X"`
 
 ### Common Issues
 - "Unknown mode" logs indicate config loading problems

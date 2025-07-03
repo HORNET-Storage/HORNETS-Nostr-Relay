@@ -94,10 +94,20 @@ func validateRelayListTags(tags nostr.Tags) error {
 			return fmt.Errorf("invalid relay URI: %s", tag[1])
 		}
 
-		// Check for valid read/write marker if present
+		// Check for valid markers if present
+		// Accept both standard NIP-65 markers (read/write) and nestr markers (text/media/code/etc)
 		if len(tag) > 2 {
-			if tag[2] != "read" && tag[2] != "write" {
-				return fmt.Errorf("invalid read/write marker: %s", tag[2])
+			marker := tag[2]
+			// Standard NIP-65 markers
+			isStandardMarker := marker == "read" || marker == "write"
+			// Classic/extended markers for content types
+			isClassicMarker := marker == "text" || marker == "media" || marker == "code" ||
+				marker == "image" || marker == "video" || marker == "audio"
+
+			if !isStandardMarker && !isClassicMarker {
+				// Allow any non-empty marker for maximum compatibility
+				// Just log unrecognized markers but don't reject
+				log.Printf("Warning: unrecognized relay marker '%s' in kind 10002 event", marker)
 			}
 		}
 	}

@@ -64,9 +64,9 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 	refreshed := 0
 
 	for {
-		// Query all kind 888 events in batches
+		// Query all kind 11888 events in batches
 		filter := nostr.Filter{
-			Kinds: []int{888},
+			Kinds: []int{11888},
 			Limit: batchSize,
 		}
 

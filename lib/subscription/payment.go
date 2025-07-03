@@ -83,7 +83,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 			// Update the NIP-88 event to reflect the new credit amount
 			events, err := m.store.QueryEvents(nostr.Filter{
-				Kinds: []int{888},
+				Kinds: []int{11888},
 				Tags:  nostr.TagMap{"p": []string{npub}},
 				Limit: 1,
 			})
@@ -136,15 +136,40 @@ func (m *SubscriptionManager) ProcessPayment(
 	log.Printf("Found matching tier: %+v", tier)
 
 	// Fetch current NIP-88 event to get existing state
-	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
-		Tags:  nostr.TagMap{"p": []string{npub}},
-		Limit: 1,
+	// Normalize pubkey to search in both formats
+	hexKey, npubKey, err := normalizePubkey(npub)
+	if err != nil {
+		return fmt.Errorf("failed to normalize pubkey: %v", err)
+	}
+	
+	// Get all kind 11888 events and filter manually (like batch processing does)
+	allEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{11888},
 	})
-	if err != nil || len(events) == 0 {
+	if err != nil {
+		return fmt.Errorf("failed to query events: %v", err)
+	}
+	
+	// Find the event for this specific user
+	var userEvent *nostr.Event
+	for _, event := range allEvents {
+		for _, tag := range event.Tags {
+			if tag[0] == "p" && len(tag) > 1 {
+				if tag[1] == npubKey || tag[1] == hexKey {
+					userEvent = event
+					break
+				}
+			}
+		}
+		if userEvent != nil {
+			break
+		}
+	}
+	
+	if userEvent == nil {
 		return fmt.Errorf("no NIP-88 event found for user")
 	}
-	currentEvent := events[0]
+	currentEvent := userEvent
 
 	// Extract current storage info
 	storageInfo, err := m.extractStorageInfo(currentEvent)
@@ -206,17 +231,33 @@ func (m *SubscriptionManager) ProcessPayment(
 	// Also update the paid subscribers table
 	m.updatePaidSubscriberRecord(npub, tier, endDate, &storageInfo)
 
-	// Verify the update
-	updatedEvents, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
-		Tags:  nostr.TagMap{"p": []string{npub}},
-		Limit: 1,
+	// Verify the update by finding the event manually
+	verifyEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{11888},
 	})
-	if err != nil || len(updatedEvents) == 0 {
+	
+	var verifyEvent *nostr.Event
+	if err == nil {
+		for _, event := range verifyEvents {
+			for _, tag := range event.Tags {
+				if tag[0] == "p" && len(tag) > 1 {
+					if tag[1] == npubKey || tag[1] == hexKey {
+						verifyEvent = event
+						break
+					}
+				}
+			}
+			if verifyEvent != nil {
+				break
+			}
+		}
+	}
+	
+	if verifyEvent == nil {
 		log.Printf("Warning: couldn't verify NIP-88 event update")
 	} else {
 		log.Printf("Updated NIP-88 event status: %s",
-			getTagValue(updatedEvents[0].Tags, "subscription_status"))
+			getTagValue(verifyEvent.Tags, "subscription_status"))
 	}
 
 	// Check if there are any sats leftover from this payment that could be credited
@@ -274,7 +315,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 
 	// Fetch current NIP-88 event to get existing state
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags:  nostr.TagMap{"p": []string{npub}},
 		Limit: 1,
 	})

@@ -1,4 +1,4 @@
-package kind411
+package kind10411
 
 import (
 	"crypto/sha256"
@@ -60,7 +60,7 @@ func formatDataLimit(bytes int64, unlimited bool) string {
 	return fmt.Sprintf("%d MB per month", bytes/MB)
 }
 
-func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
+func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
 	// Get subscription tiers from allowed_users.tiers
 	var allTiers []types.SubscriptionTier
 	if err := viper.UnmarshalKey("allowed_users.tiers", &allTiers); err != nil {
@@ -87,22 +87,22 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 		})
 	}
 
-	log.Println("Paid Tiers for kind 411:", tiers)
+	log.Println("Paid Tiers for kind 10411:", tiers)
 
-	// Delete existing kind 411 events
+	// Delete existing kind 10411 events
 	filter := nostr.Filter{
-		Kinds: []int{411},
+		Kinds: []int{10411},
 	}
 	existingEvents, err := store.QueryEvents(filter)
 	if err != nil {
-		return fmt.Errorf("error querying existing kind 411 events: %v", err)
+		return fmt.Errorf("error querying existing kind 10411 events: %v", err)
 	}
 
 	for _, oldEvent := range existingEvents {
 		if err := store.DeleteEvent(oldEvent.ID); err != nil {
-			return fmt.Errorf("error deleting old kind 411 event %s: %v", oldEvent.ID, err)
+			return fmt.Errorf("error deleting old kind 10411 event %s: %v", oldEvent.ID, err)
 		}
-		log.Printf("Deleted existing kind 411 event with ID: %s", oldEvent.ID)
+		log.Printf("Deleted existing kind 10411 event with ID: %s", oldEvent.ID)
 	}
 
 	// Convert tiers to the expected format
@@ -134,14 +134,14 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 	}
 
 	// Create the event
-	event, err := createAnyEvent(privateKey, publicKey, 411, string(content), []nostr.Tag{})
+	event, err := createAnyEvent(privateKey, publicKey, 10411, string(content), []nostr.Tag{})
 	if err != nil {
-		return fmt.Errorf("error creating kind 411 event: %v", err)
+		return fmt.Errorf("error creating kind 10411 event: %v", err)
 	}
 
 	// Store the new event
 	if err := store.StoreEvent(event); err != nil {
-		return fmt.Errorf("error storing kind 411 event: %v", err)
+		return fmt.Errorf("error storing kind 10411 event: %v", err)
 	}
 
 	// Print the event for verification
@@ -149,10 +149,10 @@ func CreateKind411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.P
 	if err != nil {
 		log.Printf("Error marshaling event for printing: %v", err)
 	} else {
-		log.Printf("Created and stored kind 411 event:\n%s", string(eventJSON))
+		log.Printf("Created and stored kind 10411 event:\n%s", string(eventJSON))
 	}
 
-	log.Println("Kind 411 event created and stored successfully")
+	log.Println("Kind 10411 event created and stored successfully")
 	return nil
 }
 

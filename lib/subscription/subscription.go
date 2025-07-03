@@ -103,7 +103,7 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 			Npub:    npub,
 			Address: addressStr,
 		}
-		
+
 		if err := m.createNIP88EventIfNotExists(subscriber, tierLimitStr, expirationDate, &storageInfo); err != nil {
 			log.Printf("Error creating NIP-88 event asynchronously for %s: %v", npub, err)
 		} else {
@@ -129,7 +129,7 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) error {
 	// Fetch current NIP-88 event data
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags: nostr.TagMap{
 			"p": []string{npub},
 		},
@@ -183,7 +183,7 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 func (m *SubscriptionManager) CheckStorageAvailability(npub string, requestedBytes int64) error {
 	// Step 1: Fetch the user's NIP-88 event
 	events, err := m.store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags: nostr.TagMap{
 			"p": []string{npub},
 		},
@@ -296,15 +296,15 @@ func (m *SubscriptionManager) RequestNewAddresses(count int) error {
 	return nil
 }
 
-// CheckAndUpdateSubscriptionEvent checks if a kind 888 event needs to be updated
+// CheckAndUpdateSubscriptionEvent checks if a kind 11888 event needs to be updated
 // based on current allowed users settings and updates it if necessary
 func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event) (*nostr.Event, error) {
-	// Only process kind 888 events
-	if event.Kind != 888 {
+	// Only process kind 11888 events
+	if event.Kind != 11888 {
 		return event, nil
 	}
 
-	log.Printf("Checking kind 888 event for updates based on free tier status")
+	log.Printf("Checking kind 11888 event for updates based on free tier status")
 
 	// Get the pubkey from the p tag
 	var pubkey string
@@ -316,7 +316,7 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	}
 
 	if pubkey == "" {
-		return event, fmt.Errorf("no pubkey found in kind 888 event")
+		return event, fmt.Errorf("no pubkey found in kind 11888 event")
 	}
 
 	// Get subscription status
@@ -449,14 +449,118 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 		return event, fmt.Errorf("failed to store updated event: %v", err)
 	}
 
-	log.Printf("Successfully updated kind 888 event for pubkey %s", pubkey)
+	log.Printf("Successfully updated kind 11888 event for pubkey %s", pubkey)
 	return updatedEvent, nil
 }
 
-// UpdateNpubSubscriptionEvent updates the kind 888 event for a specific npub with new tier information
-// This is called when access control lists are updated and we need to sync the kind 888 events
+// UpdateUserSubscriptionFromDatabase updates a user's kind 11888 event by looking up their tier from the database
+// This follows the correct flow: DB lookup -> config lookup -> update event
+func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) error {
+	log.Printf("Updating kind 11888 event for npub %s (looking up tier from database)", npub)
+
+	// Load allowed users settings to get tier configuration
+	var allowedUsersSettings types.AllowedUsersSettings
+	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		return fmt.Errorf("failed to load allowed users settings: %v", err)
+	}
+
+	// Look up the user's assigned tier from the database
+	statsStore := m.store.GetStatsStore()
+	if statsStore == nil {
+		return fmt.Errorf("statistics store not available")
+	}
+
+	// Normalize the pubkey to ensure we're using the right format
+	hexKey, _, err := normalizePubkey(npub)
+	if err != nil {
+		return fmt.Errorf("error normalizing pubkey %s: %v", npub, err)
+	}
+
+	allowedUser, err := statsStore.GetAllowedUser(hexKey)
+	if err != nil {
+		return fmt.Errorf("error getting allowed user: %v", err)
+	}
+
+	if allowedUser == nil {
+		return fmt.Errorf("user %s not found in allowed users table", npub)
+	}
+
+	if allowedUser.Tier == "" {
+		return fmt.Errorf("user %s has no tier assigned", npub)
+	}
+
+	log.Printf("Found user %s with assigned tier: %s", npub, allowedUser.Tier)
+
+	// Find the tier configuration that matches the user's assigned tier
+	var activeTier *types.SubscriptionTier
+	for i := range allowedUsersSettings.Tiers {
+		if allowedUsersSettings.Tiers[i].Name == allowedUser.Tier {
+			activeTier = &allowedUsersSettings.Tiers[i]
+			break
+		}
+	}
+
+	if activeTier == nil {
+		return fmt.Errorf("tier %s not found in configuration", allowedUser.Tier)
+	}
+
+	log.Printf("Found tier configuration: Name=%s, MonthlyLimitBytes=%d", activeTier.Name, activeTier.MonthlyLimitBytes)
+
+	// Create subscriber info
+	subscriber := &types.Subscriber{
+		Npub: npub,
+	}
+
+	// Set expiration date based on tier type
+	expirationDate := time.Now().AddDate(0, 1, 0) // Default to 1 month
+	if activeTier.PriceSats <= 0 {
+		// For free tiers, set longer expiration
+		expirationDate = time.Now().AddDate(1, 0, 0) // 1 year for free
+	}
+
+	// Get current storage usage from existing kind 11888 event if it exists
+	var currentUsedBytes int64 = 0
+	existingEvents, err := m.store.QueryEvents(nostr.Filter{
+		Kinds: []int{11888},
+		Tags: nostr.TagMap{
+			"p": []string{npub, hexKey}, // Check both formats
+		},
+		Limit: 1,
+	})
+	if err == nil && len(existingEvents) > 0 {
+		// Extract current usage from existing event
+		existingStorageInfo, err := m.extractStorageInfo(existingEvents[0])
+		if err == nil {
+			currentUsedBytes = existingStorageInfo.UsedBytes
+			log.Printf("Preserving current used storage for %s: %d bytes", npub, currentUsedBytes)
+		} else {
+			log.Printf("Warning: Could not extract existing storage info for %s: %v", npub, err)
+		}
+	} else {
+		log.Printf("No existing kind 11888 event found for %s, starting with 0 used bytes", npub)
+	}
+
+	// Create storage info from tier - check for unlimited storage
+	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
+
+	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t, preservedUsedBytes=%d",
+		npub, activeTier.Name, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited, currentUsedBytes)
+
+	storageInfo := &StorageInfo{
+		TotalBytes:  activeTier.MonthlyLimitBytes,
+		UsedBytes:   currentUsedBytes, // Preserve current usage
+		IsUnlimited: isUnlimited,
+		UpdatedAt:   time.Now(),
+	}
+
+	// Create or update the NIP-88 event
+	return m.createOrUpdateNIP88Event(subscriber, activeTier.Name, expirationDate, storageInfo)
+}
+
+// UpdateNpubSubscriptionEvent updates the kind 11888 event for a specific npub with new tier information
+// This is called when access control lists are updated and we need to sync the kind 11888 events
 func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string) error {
-	log.Printf("Updating kind 888 event for npub %s with tier %s", npub, tierName)
+	log.Printf("Updating kind 11888 event for npub %s with tier %s", npub, tierName)
 
 	// Load allowed users settings to get tier configuration
 	var allowedUsersSettings types.AllowedUsersSettings

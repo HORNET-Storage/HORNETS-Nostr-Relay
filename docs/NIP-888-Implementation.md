@@ -33,18 +33,18 @@ Upon connecting to the new relay, the user's client automatically sends a NIP42 
 
 ### Step 4: Displaying and Selecting a Subscription Plan
 
-Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 411 nostr note (previously referred to as kind 88 in early implementations). Each subscription tier is listed in the content section of the note, providing details on the data limit and the corresponding price.
+Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 10411 nostr note (previously referred to as kind 88 in early implementations). Each subscription tier is listed in the content section of the note, providing details on the data limit and the corresponding price.
 
 To facilitate payment tracking and automatic user registration, the relay generates a unique Bitcoin address for each user. This unique address is specifically tied to the user's payment and is crucial for correlating the payment with the specific user in the backend system.
 
-The kind 411 nostr note structure would be as follows:
+The kind 10411 nostr note structure would be as follows:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<relay_public_key_hex>",
   "created_at": <timestamp>,
-  "kind": 411,
+  "kind": 10411,
   "tags": [],
   "content": {
     "name": "Relay Name",
@@ -65,28 +65,31 @@ The kind 411 nostr note structure would be as follows:
 }
 ```
 
-When a user first connects to the relay and authenticates, the system automatically initializes a subscription record by creating a kind 888 note specifically for that user. This occurs during the initialization process and before any tier selection or payment. The kind 888 event includes a unique Bitcoin address assigned to the user for payment tracking:
+When a user first connects to the relay and authenticates, the system automatically initializes a subscription record by creating a kind 11888 note specifically for that user. This occurs during the initialization process and before any tier selection or payment. The kind 11888 event includes a unique Bitcoin address assigned to the user for payment tracking:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<relay_public_key_hex>",
   "created_at": <timestamp>,
-  "kind": 888,
+  "kind": 11888,
   "tags": [
     ["subscription_duration", "1 month"],
     ["p", "<user_pubkey_hex>"],
     ["subscription_status", "inactive"],
     ["relay_bitcoin_address", "<unique_bitcoin_address_for_payment>"],
     ["relay_dht_key", "<relay_dht_key>"],
-    ["storage", "0", "0", "<timestamp>"]
+    ["storage", "0", "0", "<timestamp>"],
+    ["credit", "<credit_amount_in_sats>"],
+    ["active_subscription", "<tier_name>", "<expiration_timestamp>"],
+    ["relay_mode", "public|subscription|invite-only|only-me"]
   ],
   "content": "",
   "sig": "<signature_from_relay>"
 }
 ```
 
-This initial kind 888 event serves as a subscription record that will track the user's status, allocated storage, payment history, and credit. If the relay doesn't offer a public tier, the event starts with "inactive" status and zero storage allocation until a payment is received. However, if the relay has configured a public tier, the user's subscription would start with "active" status and would be allocated the storage amount specified in the public tier configuration, without requiring any payment.
+This initial kind 11888 event serves as a subscription record that will track the user's status, allocated storage, payment history, and credit. If the relay doesn't offer a public tier, the event starts with "inactive" status and zero storage allocation until a payment is received. However, if the relay has configured a public tier, the user's subscription would start with "active" status and would be allocated the storage amount specified in the public tier configuration, without requiring any payment.
 
 ### Step 5: Enhanced User Payment Process
 
@@ -110,14 +113,14 @@ For example, if a user pays 85,000 sats with tier prices of 70,000, 40,000, and 
 #### c) Credit Accumulation and Auto-Application
 For payments smaller than any tier price, or for remainders after tier purchases, the system stores the amount as credit. When accumulated credit reaches a tier threshold, it's automatically applied to purchase additional storage.
 
-The updated kind 888 event includes credit information:
+The updated kind 11888 event includes credit information:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<relay_public_key_hex>",
   "created_at": <timestamp>,
-  "kind": 888,
+  "kind": 11888,
   "tags": [
     ["subscription_duration", "1 month"],
     ["p", "<user_pubkey_hex>"],
@@ -153,7 +156,7 @@ Upon receiving a Bitcoin payment, the relay performs several operations:
 4. **Subscription Record Update**:
    - The subscription's expiration date is updated based on the periods purchased
    - For multi-period purchases, the expiration is extended accordingly
-   - All changes are recorded in an updated kind 888 event
+   - All changes are recorded in an updated kind 11888 event
 
 ## Credit Management System
 
@@ -174,14 +177,14 @@ The system continually evaluates accumulated credit:
 5. This process happens recursively until no more tiers can be purchased
 
 ### Credit Visibility in NIP-888 Events
-Credit information is always included in the user's kind 888 event, providing transparency:
+Credit information is always included in the user's kind 11888 event, providing transparency:
 - A `credit` tag displays the current credit amount in satoshis
 - This tag is updated after every transaction or credit application
 - The credit is visible to other relays and clients that may need this information
 
 ## Unlimited Storage Support
 
-For certain relay configurations (such as only-me mode or invite-only users), unlimited storage may be granted. This is indicated in the kind 888 event by using "unlimited" as the total bytes value in the storage tag:
+For certain relay configurations (such as only-me mode or invite-only users), unlimited storage may be granted. This is indicated in the kind 11888 event by using "unlimited" as the total bytes value in the storage tag:
 
 ### Standard Storage Tag
 ```json
@@ -217,16 +220,16 @@ Upon connecting to the new relay, the user's client automatically sends a NIP42 
 
 ### Step 4: Displaying Subscription Plans
 
-Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 411 nostr note. Each subscription tier is listed in the content section, providing details on the data limit and the corresponding price.
+Once the authentication is successful, the relay presents the user with available subscription options by issuing a kind 10411 nostr note. Each subscription tier is listed in the content section, providing details on the data limit and the corresponding price.
 
-The kind 411 nostr note structure would be as follows:
+The kind 10411 nostr note structure would be as follows:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<relay_public_key_hex>",
   "created_at": <timestamp>,
-  "kind": 411,
+  "kind": 10411,
   "tags": [],
   "content": {
     "name": "Relay Name",
@@ -249,16 +252,16 @@ The kind 411 nostr note structure would be as follows:
 
 ### Step 5: User Selection and Event Signing
 
-The user reviews the available subscription tiers and selects their desired tier by creating and signing a kind 888 nostr event. This event specifies the chosen subscription tier and includes the user's pubkey (in hex format) along with other necessary information. The relay's DHT key is included to identify the relay the user is subscribing to. Once signed, this event is sent to the relay.
+The user reviews the available subscription tiers and selects their desired tier by creating and signing a kind 11888 nostr event. This event specifies the chosen subscription tier and includes the user's pubkey (in hex format) along with other necessary information. The relay's DHT key is included to identify the relay the user is subscribing to. Once signed, this event is sent to the relay.
 
-The kind 888 nostr event structure would be as follows:
+The kind 11888 nostr event structure would be as follows:
 
 ```json
 {
   "id": "<unique_note_id>",
   "pubkey": "<user_pubkey_hex>",
   "created_at": <timestamp>,
-  "kind": 888,
+  "kind": 11888,
   "tags": [
     ["subscription-tier", "5 GB per month", "40000"],
     ["subscription-duration", "1 month"],
@@ -271,7 +274,7 @@ The kind 888 nostr event structure would be as follows:
 
 ### Step 6: Generating the Lightning Invoice
 
-Upon receiving the signed kind 888 event, the relay generates a Lightning Network (LN) invoice corresponding to the selected tier's price. The invoice is dynamically created based on the user's choice and is sent back to the user through the relay.
+Upon receiving the signed kind 11888 event, the relay generates a Lightning Network (LN) invoice corresponding to the selected tier's price. The invoice is dynamically created based on the user's choice and is sent back to the user through the relay.
 
 ### Step 7: User Payment Process for Lightning Network Transactions
 
@@ -284,3 +287,186 @@ Upon receiving the Lightning payment, the relay verifies the transaction. Once v
 The relay records the subscription's expiration date in the panel when you click on the person's name.
 A graviton profile bucket can be made for that user to monitor if they exceed the allocated GB they are assigned, using the same GB counting logic the panel currently utilizes for its charts.
 To ensure proper access management, the relay periodically checks each subscriber's expiration date. Users whose subscriptions have expired are automatically removed from the active users' list, suspending their access until they renew their subscription.
+
+## Relay Operating Modes
+
+The HORNETS relay supports four distinct operating modes, each with different access control and subscription behaviors. The active mode is indicated in the `relay_mode` tag of kind 11888 events.
+
+### 1. Subscription Mode (Paid)
+
+**Description**: Users must pay for storage tiers to access the relay.
+
+**Access Control**: 
+- Read: `paid_users` (only users with active paid subscriptions)
+- Write: `paid_users` (only users with active paid subscriptions)
+
+**Subscription Behavior**:
+- Users start with minimal/no storage allocation
+- Must make Bitcoin payments to purchase storage tiers
+- Storage allocation matches purchased tier specifications
+- Bitcoin addresses are automatically allocated for payment tracking
+- Credit system handles overpayments and partial payments
+
+**Kind 11888 Example**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", "<bitcoin_address>"],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "1073741824", "5368709120", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "5GB Tier", "<expiration_timestamp>"],
+    ["relay_mode", "subscription"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+### 2. Public Mode (Free)
+
+**Description**: Open access relay where anyone can read and write with predefined storage limits.
+
+**Access Control**:
+- Read: `all_users` (anyone can read)
+- Write: `all_users` (anyone can write)
+
+**Subscription Behavior**:
+- Users automatically receive the configured free tier allocation
+- No payment required
+- No Bitcoin address allocation
+- Storage limits enforced based on free tier configuration
+
+**Kind 11888 Example**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "52428800", "104857600", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "Free Public", "<expiration_timestamp>"],
+    ["relay_mode", "public"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+### 3. Invite-Only Mode
+
+**Description**: Curated access where admin manually assigns users to specific tiers.
+
+**Access Control**:
+- Read: `allowed_users` or `all_users` (configurable)
+- Write: `allowed_users` (only manually approved users)
+
+**Subscription Behavior**:
+- Admin manually adds users to allowed list with specific tier assignments
+- Users receive storage allocation based on their assigned tier
+- Tier assignments stored in database and reflected in kind 11888 events
+- No payment required - allocations are administrative decisions
+- No Bitcoin address allocation
+
+**Kind 11888 Example**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "2147483648", "10737418240", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "Premium Invite", "<expiration_timestamp>"],
+    ["relay_mode", "invite-only"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+### 4. Only-Me Mode (Personal)
+
+**Description**: Private relay for owner use only.
+
+**Access Control**:
+- Read: `only-me`, `all_users`, or `allowed_users` (configurable)
+- Write: `only-me` (only relay owner)
+
+**Subscription Behavior**:
+- Relay owner gets unlimited storage
+- Non-owners receive no allocation (0 bytes)
+- Owner status determined by database configuration or config fallback
+- No payment system active
+- No Bitcoin address allocation
+
+**Kind 11888 Example (Owner)**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<owner_pubkey>"],
+    ["subscription_status", "active"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "1073741824", "unlimited", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "Owner Unlimited", "<expiration_timestamp>"],
+    ["relay_mode", "only-me"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+**Kind 11888 Example (Non-Owner)**:
+```json
+{
+  "kind": 11888,
+  "pubkey": "<relay_public_key>",
+  "created_at": <timestamp>,
+  "tags": [
+    ["subscription_duration", "1 month"],
+    ["p", "<user_pubkey>"],
+    ["subscription_status", "inactive"],
+    ["relay_bitcoin_address", ""],
+    ["relay_dht_key", "<relay_dht_key>"],
+    ["storage", "0", "0", "<timestamp>"],
+    ["credit", "0"],
+    ["active_subscription", "", "<timestamp>"],
+    ["relay_mode", "only-me"]
+  ],
+  "content": "",
+  "sig": "<relay_signature>"
+}
+```
+
+## Mode Transitions and Event Updates
+
+When relay operators change modes, the system automatically updates existing kind 11888 events to reflect the new access policies:
+
+1. **Immediate Updates**: Mode changes trigger batch updates of all subscription events
+2. **Graceful Transitions**: Existing allocations are preserved during free-to-paid transitions until cycle ends
+3. **Storage Adjustments**: Paid-to-free transitions update storage caps immediately
+4. **Bitcoin Address Management**: Addresses allocated only in subscription mode
+5. **Owner Privileges**: Owner status maintained across mode changes

@@ -46,6 +46,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1063"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
@@ -61,7 +62,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30078"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -330,14 +330,14 @@ func main() {
 	)
 	logging.Info("Global subscription manager initialized successfully")
 
-	// Batch update existing kind 888 events on startup to ensure they reflect current config
-	logging.Info("Updating existing kind 888 events to reflect current configuration...")
+	// Batch update existing kind 11888 events on startup to ensure they reflect current config
+	logging.Info("Updating existing kind 11888 events to reflect current configuration...")
 	if manager := subscription.GetGlobalManager(); manager != nil {
 		go func() {
 			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
-				logging.Errorf("Failed to update existing kind 888 events on startup: %v", err)
+				logging.Errorf("Failed to update existing kind 11888 events on startup: %v", err)
 			} else {
-				logging.Info("Successfully updated existing kind 888 events on startup")
+				logging.Info("Successfully updated existing kind 11888 events on startup")
 			}
 		}()
 	}
@@ -376,9 +376,9 @@ func main() {
 		logging.Warn("Warning: Statistics store not available, access control not initialized")
 	}
 
-	// Create and store kind 411 event
-	if err := kind411.CreateKind411Event(privateKey, publicKey, store); err != nil {
-		logging.Errorf("Failed to create kind 411 event: %v", err)
+	// Create and store kind 10411 event
+	if err := kind10411.CreateKind10411Event(privateKey, publicKey, store); err != nil {
+		logging.Errorf("Failed to create kind 10411 event: %v", err)
 		return
 	}
 
@@ -581,7 +581,7 @@ func main() {
 }
 
 // validateSubscriptionModeStartup ensures that when the relay starts in subscription mode,
-// all existing Kind 888 events have Bitcoin addresses assigned and the wallet service is available
+// all existing Kind 11888 events have Bitcoin addresses assigned and the wallet service is available
 func validateSubscriptionModeStartup(manager *subscription.SubscriptionManager, store *badgerhold.BadgerholdStore) error {
 	logging.Info("Starting subscription mode validation at startup...")
 
@@ -592,7 +592,7 @@ func validateSubscriptionModeStartup(manager *subscription.SubscriptionManager, 
 	}
 	logging.Info("Wallet service connectivity verified")
 
-	// Step 2: Check if there are existing Kind 888 events without Bitcoin addresses
+	// Step 2: Check if there are existing Kind 11888 events without Bitcoin addresses
 	statsStore := store.GetStatsStore()
 	if statsStore == nil {
 		return fmt.Errorf("statistics store not available")
@@ -624,4 +624,3 @@ func validateSubscriptionModeStartup(manager *subscription.SubscriptionManager, 
 
 	return nil
 }
-

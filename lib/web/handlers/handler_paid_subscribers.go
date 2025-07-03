@@ -188,9 +188,9 @@ func GetSubscribersFromEvents(c *fiber.Ctx, store stores.Store) error {
 		return fmt.Errorf("error getting config: %v", err)
 	}
 
-	// Step 1: Get all kind 888 events (subscription events)
+	// Step 1: Get all kind 11888 events (subscription events)
 	subscriptionEvents, err := store.QueryEvents(nostr.Filter{
-		Kinds: []int{888},
+		Kinds: []int{11888},
 		Tags: nostr.TagMap{
 			"subscription_status": []string{"active"},
 		},

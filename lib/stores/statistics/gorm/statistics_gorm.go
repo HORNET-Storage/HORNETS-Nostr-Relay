@@ -1789,13 +1789,13 @@ func (store *GormStatisticsStore) DeletePaidSubscriber(npub string) error {
 
 // NPUB access control management implementation
 func (store *GormStatisticsStore) GetAllowedUser(npub string) (*types.AllowedUser, error) {
-	var user *types.AllowedUser
-	err := store.DB.Model(&types.AllowedUser{}).First(user, "npub = ?", npub).Error
+	var user types.AllowedUser
+	err := store.DB.Model(&types.AllowedUser{}).Where("npub = ?", npub).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
 
-	return user, nil
+	return &user, nil
 }
 
 func (store *GormStatisticsStore) AddAllowedUser(npub string, tier string, createdBy string) error {
