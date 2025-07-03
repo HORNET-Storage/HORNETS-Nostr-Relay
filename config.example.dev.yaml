@@ -1,0 +1,134 @@
+# ==================================================
+# SERVER CONFIGURATION (Static - requires restart)
+# ==================================================
+server:
+  port: 9000
+  bind_address: "0.0.0.0"
+  upnp: false
+  data_path: "/data"
+
+  # Services
+  nostr: true # port
+  hornets: true # port + 1
+  web: true # port + 2
+
+  # Demo
+  demo: false
+
+# ==================================================
+# EXTERNAL SERVICES (Static - requires restart)
+# ==================================================
+external_services:
+  ollama:
+    url: "http://ollama:11434"
+    model: "gemma2:2b"
+    timeout: 10000
+
+  moderator:
+    url: "http://moderator:8000"
+
+  wallet:
+    url: "http://localhost:9003"
+    key: "${WALLET_API_KEY:0bea899982c078b93799c4197c7fccb4537a9557d98319d0d3cc1286bd8e0805}"
+    name: "default"
+
+# ==================================================
+# LOGGING CONFIGURATION (Static - requires restart)
+# ==================================================
+logging:
+  level: "info"
+  output: "both"
+  path: "/logs"
+
+# ==================================================
+# RELAY CONFIGURATION (Dynamic - web panel can modify)
+# ==================================================
+relay:
+  name: "HORNETS"
+  description: "The best relay ever."
+  contact: "support@hornets.net"
+  software: "golang"
+  version: "0.1.0"
+  service_tag: "hornet-storage-service"
+  supported_nips: [1, 2, 9, 11, 18, 23, 24, 25, 42, 45, 50, 51, 56, 57, 65, 116, 555, 888]
+
+  # Keys (auto-generated if empty)
+  secret_key: "hornets-secret-key"
+  private_key:
+  dht_key:
+
+# ==================================================
+# CONTENT FILTERING (Dynamic - web panel can modify)
+# ==================================================
+content_filtering:
+  text_filter:
+    enabled: true
+    cache_size: 10000
+    cache_ttl_seconds: 60
+    full_text_search_kinds: [1]
+
+  image_moderation:
+    enabled: true
+    mode: "full"
+    threshold: 0.4
+    timeout_seconds: 60
+    check_interval_seconds: 30
+    concurrency: 5
+
+# ==================================================
+# EVENT FILTERING (Dynamic - web panel can modify)
+# ==================================================
+event_filtering:
+  mode: "blacklist"  # whitelist, blacklist
+  moderation_mode: "relaxed"  # strict, moderate, relaxed
+  kind_whitelist: []
+
+  # Only these definitions will be accepted by the relay
+  # Leave empty to disable, allowing all media types
+  media_definitions:
+    image:
+      mime_patterns: ["image/*"]
+      extensions: [".jpg", ".jpeg", ".png", ".gif", ".webp"]
+      max_size_mb: 100
+    video:
+      mime_patterns: ["video/*"]
+      extensions: [".mp4", ".webm", ".avi", ".mov"]
+      max_size_mb: 500
+    audio:
+      mime_patterns: ["audio/*"]
+      extensions: [".mp3", ".wav", ".ogg", ".flac"]
+      max_size_mb: 100
+    git:
+      mime_patterns: ["application/x-git"]
+      extensions: [".git", ".bundle", ".json"]
+      max_size_mb: 100
+
+  dynamic_kinds:
+    enabled: false
+    allowed_kinds: []
+
+  protocols:
+    enabled: false
+    allowed_protocols: []
+
+# ==================================================
+# ALLOWED USERS SETTINGS (Dynamic - web panel can modify)
+# ==================================================
+allowed_users:
+  mode: "public" # only-me, invite-only, public, subscription
+  read: "all_users" # all_users, paid_users, allowed_users, only-me
+  write: "all_users" # all_users, paid_users, allowed_users, only-me
+
+  tiers:
+    - name: "Starter"
+      price_sats: 1000
+      monthly_limit_bytes: 1073741824  # 1 GB
+      unlimited: false
+    - name: "Professional"
+      price_sats: 5000
+      monthly_limit_bytes: 5368709120  # 5 GB
+      unlimited: false
+    - name: "Business"
+      price_sats: 10000
+      monthly_limit_bytes: 10737418240  # 10 GB
+      unlimited: false

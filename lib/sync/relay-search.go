@@ -6,12 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
-	"github.com/anacrolix/dht/v2"
 	"log"
 	"reflect"
 	"sort"
 	"strings"
+
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
+	"github.com/anacrolix/dht/v2"
 )
 
 type KeyPair struct {
