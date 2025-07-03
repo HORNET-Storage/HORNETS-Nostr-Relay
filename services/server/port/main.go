@@ -223,23 +223,20 @@ func main() {
 		logging.Fatal("failed to deserialize private key")
 	}
 
-	// Ensure public key is saved to config (in case it's missing)
-	existingPublicKey := viper.GetString("relay.public_key")
-	if len(existingPublicKey) <= 0 {
-		serializedPublicKey, err := signing.SerializePublicKey(publicKey)
-		if err != nil {
-			logging.Errorf("Failed to serialize public key: %v", err)
-		} else {
-			viper.Set("relay.public_key", serializedPublicKey)
+	// Ensure public key is always derived from private_key on relay start no matter what the public key is in the config
+	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+	if err != nil {
+		logging.Errorf("Failed to serialize public key: %v", err)
+	} else {
+		viper.Set("relay.public_key", *serializedPublicKey)
 
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Errorf("Failed to save public key to config: %v", err)
-			} else {
-				logging.Info("Saved missing public key to configuration", map[string]interface{}{
-					"public_key": serializedPublicKey,
-				})
-			}
+		err = config.SaveConfig()
+		if err != nil {
+			logging.Errorf("Failed to save public key to config: %v", err)
+		} else {
+			logging.Info("Saved public key to configuration", map[string]interface{}{
+				"public_key": *serializedPublicKey,
+			})
 		}
 	}
 
