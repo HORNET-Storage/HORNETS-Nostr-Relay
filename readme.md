@@ -8,7 +8,7 @@ Unleashing the power of Nostr with a ***configurable all-in-one relay*** support
 Relay operators can select which file types and nostr features to enable in the [H.O.R.N.E.T Storage Relay Panel](https://github.com/HORNET-Storage/hornet-storage-panel) with elegant GUI toggles, displayed alongside diagrams and graphs to visualize the amount of data hosted over time.
 
 ### 17 Supported Nostr Features (NIPs)
-**✅ - Implemented:** Features that are currently available and fully operational.  
+**✅ - Implemented:** Features that are currently available and fully operational.
 **⚠️ - In-Progress:** Features that are currently under development and not yet released.
 
 | NIP Number | NIP Description                        | Kind Number Description                                                      |
@@ -30,6 +30,113 @@ Relay operators can select which file types and nostr features to enable in the 
 | NIP-65     | Propagate Tiny Relay Lists         | [***kind10002***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind10002) → Tiny Relay List [Outbox Model] ✅                          |
 | NIP-84     | Highlights                         | [***kind9802***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind9802) → Snippet of a Post or Article ✅                       |
 | NIP-116    | Event Paths                        | [***kind30079***](https://github.com/HORNET-Storage/hornet-storage/tree/main/lib/handlers/nostr/kind30079) → Paths Instead of Kind Numbers ✅                     |
+
+
+
+## ⚙️ Developer Requirements & Build Instructions
+
+### 📦 **System Requirements**
+
+To build and run HORNETS-Nostr-Relay from source, ensure the following tools are installed:
+
+✅ **Go 1.22+**
+Official Go programming language environment. Download from:
+[https://golang.org/dl/](https://golang.org/dl/)
+
+✅ **GCC (GNU Compiler Collection)**
+Required for building C-based dependencies via `cgo`.
+
+**Platform-specific installation:**
+
+* **Ubuntu/Debian Linux**
+
+  ```bash
+  sudo apt update
+  sudo apt install build-essential
+  ```
+
+* **macOS**
+
+  ```bash
+  xcode-select --install
+  ```
+
+* **Windows**
+  Recommended: [MSYS2](https://www.msys2.org/)
+
+  ```bash
+  pacman -S base-devel gcc
+  ```
+
+  Alternatively: [MinGW-w64](https://www.mingw-w64.org/downloads/)
+
+---
+
+### 🚀 **Building from Source**
+
+After cloning the repository:
+
+```bash
+git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
+cd HORNETS-Nostr-Relay
+```
+
+Use the provided build scripts:
+
+#### On **Linux/macOS**
+
+```bash
+./build.sh
+```
+
+#### On **Windows**
+
+```powershell
+./build.bat
+```
+
+The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
+
+---
+
+### 🔑 **Configuration Setup**
+
+On first run the relay will automatically generate a config.yaml with a default configuration and a new private key which makes getting started nice and easy.
+
+There are also example configs included for specific situations.
+The config.example.dev has all content moderation disabled and allows all kinds and users with no restrictions.
+
+You can copy and rename manually or use the following if you wish to use any of the example configurations.
+
+#### **Bash**
+```bash
+cp config.example.dev.yaml config.yaml
+```
+
+#### **Powershell**
+```powershell
+copy config.example.dev.yaml config.yaml
+```
+
+If copying an example config make sure to update the private key.
+
+Set the `private_key` field to a valid Nostr private key in either **nsec bech32 format** or **hexadecimal format**. This key identifies your relay on the Nostr network and is required for operation.
+
+
+### Additional Services
+
+The relay is designed to run with optional services along side it and those can be found here:
+
+[Super Neutrino Wallet](https://github.com/HORNET-Storage/Super-Neutrino-Wallet)
+- Paid relay features using a bitcoin wallet
+
+[NestShield](https://github.com/HORNET-Storage/NestShield)
+- Content moderation using python
+
+[Ollama](https://ollama.com/download)
+- More advanced and resource intensive content moderation
+
+---
 
 ## Disclaimer ##
 **WARNING**: Relay is still being developed and is not ready for production use yet. More details will be provided soon.
