@@ -136,24 +136,26 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 			return
 		}
 
-		// Initialize subscriber with current mode
+		// Initialize subscriber with current mode asynchronously
 		currentMode := settings.AllowedUsersSettings.Mode
-		if err := subManager.InitializeSubscriber(request.Event.PubKey, currentMode); err != nil {
-			log.Printf("Failed to initialize subscriber %s: %v", request.Event.PubKey, err)
+		go func(pubkey string, mode string) {
+			if err := subManager.InitializeSubscriber(pubkey, mode); err != nil {
+				log.Printf("Failed to initialize subscriber %s: %v", pubkey, err)
 
-			// Check for common errors and provide more specific messages
-			errMsg := err.Error()
-			if strings.Contains(errMsg, "no available addresses") && currentMode == "subscription" {
-				write("OK", request.Event.ID, false, "Failed to allocate Bitcoin address: No addresses available in the pool")
-			} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") && currentMode == "subscription" {
-				write("OK", request.Event.ID, false, fmt.Sprintf("Bitcoin address allocation error: %v", err))
+				// Log specific error types for monitoring
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "no available addresses") && mode == "subscription" {
+					log.Printf("Warning: No Bitcoin addresses available for subscriber %s", pubkey)
+				} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") && mode == "subscription" {
+					log.Printf("Warning: Bitcoin address allocation failed for subscriber %s: %v", pubkey, err)
+				}
 			} else {
-				write("OK", request.Event.ID, false, fmt.Sprintf("Subscriber initialization failed: %v", err))
+				log.Printf("Successfully initialized subscriber %s", pubkey)
 			}
-			return
-		}
+		}(request.Event.PubKey, currentMode)
 
-		log.Printf("Successfully initialized subscriber %s", request.Event.PubKey)
-		write("OK", request.Event.ID, true, "Subscriber successfully initialized")
+		// Return success after authentication
+		log.Printf("Successfully authenticated user %s", request.Event.PubKey)
+		write("OK", request.Event.ID, true, "Authentication successful")
 	}
 }
