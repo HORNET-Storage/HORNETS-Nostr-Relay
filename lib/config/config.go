@@ -59,8 +59,7 @@ func setDefaults() {
 	viper.SetDefault("server.hornets", true)
 	viper.SetDefault("server.web", true)
 	viper.SetDefault("server.demo", false)
-	viper.SetDefault("server.data_path", "/data")
-	viper.SetDefault("server.stats_db", "statistics.db")
+	viper.SetDefault("server.data_path", "./data")
 
 	// External services defaults
 	viper.SetDefault("external_services.ollama.url", "http://ollama:11434")
@@ -74,7 +73,6 @@ func setDefaults() {
 	// Logging defaults
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.output", "both")
-	viper.SetDefault("logging.path", "/logs")
 
 	// Relay defaults
 	viper.SetDefault("relay.name", "HORNETS")
