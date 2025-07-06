@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -119,7 +123,16 @@ func PutDHTUploadable(db *gorm.DB, payload []byte, pubkey []byte, signature []by
 
 // Helper function to initialize database connection
 func InitSyncDB() (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open("statistics.db"), &gorm.Config{})
+	statisticsPath := config.GetPath("statistics")
+
+	if _, err := os.Stat(statisticsPath); os.IsNotExist(err) {
+		err := os.Mkdir(statisticsPath, os.ModePerm)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	db, err := gorm.Open(sqlite.Open(filepath.Join(statisticsPath, "statistics.db")), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to immudb: %v", err)
 	}
