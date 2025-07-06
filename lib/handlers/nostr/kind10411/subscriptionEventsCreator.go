@@ -32,6 +32,7 @@ type RelayInfo struct {
 	Description       string                 `json:"description,omitempty"`
 	Pubkey            string                 `json:"pubkey"`
 	Contact           string                 `json:"contact"`
+	Icon              string                 `json:"icon,omitempty"`
 	SupportedNIPs     []int                  `json:"supported_nips"`
 	Software          string                 `json:"software"`
 	Version           string                 `json:"version"`
@@ -120,6 +121,7 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 		Description:       viper.GetString("relay.description"),
 		Pubkey:            viper.GetString("relay.public_key"),
 		Contact:           viper.GetString("relay.contact"),
+		Icon:              viper.GetString("relay.icon"),
 		SupportedNIPs:     viper.GetIntSlice("relay.supported_nips"),
 		Software:          viper.GetString("relay.software"),
 		Version:           viper.GetString("relay.version"),

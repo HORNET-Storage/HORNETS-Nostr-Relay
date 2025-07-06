@@ -186,6 +186,7 @@ func GetRelayInfo() NIP11RelayInfo {
 		Description:   viper.GetString("relay.description"),
 		Pubkey:        viper.GetString("relay.public_key"),
 		Contact:       viper.GetString("relay.contact"),
+		Icon:          viper.GetString("relay.icon"),
 		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
 		Software:      viper.GetString("relay.software"),
 		Version:       viper.GetString("relay.version"),
