@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
@@ -30,11 +30,11 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		}
 	}
 
-	log.Printf("Handling auth message for user with pubkey: %s", env.Event.PubKey)
+	logging.Infof("Handling auth message for user with pubkey: %s", env.Event.PubKey)
 
 	// Validate auth event kind
 	if env.Event.Kind != 22242 {
-		log.Printf("Invalid auth event kind: %d", env.Event.Kind)
+		logging.Infof("Invalid auth event kind: %d", env.Event.Kind)
 		write("OK", env.Event.ID, false, "Error auth event kind must be 22242")
 		return
 	}
@@ -42,7 +42,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Check auth time validity
 	isValid, errMsg := lib_nostr.AuthTimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !isValid {
-		log.Printf("Auth time check failed: %s", errMsg)
+		logging.Infof("Auth time check failed: %s", errMsg)
 		write("OK", env.Event.ID, false, errMsg)
 		return
 	}
@@ -50,20 +50,20 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Verify signature
 	success, err := env.Event.CheckSignature()
 	if err != nil {
-		log.Printf("Failed to check signature: %v", err)
+		logging.Infof("Failed to check signature: %v", err)
 		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to check signature: %v", err))
 		return
 	}
 
 	if !success {
-		log.Printf("Signature verification failed for user: %s", env.Event.PubKey)
+		logging.Infof("Signature verification failed for user: %s", env.Event.PubKey)
 		write("OK", env.Event.ID, false, "Signature failed to verify")
 		return
 	}
 
 	// Verify required tags
 	if !verifyAuthTags(env.Event.Tags, challenge) {
-		log.Printf("Missing required tags for user %s", env.Event.PubKey)
+		logging.Infof("Missing required tags for user %s", env.Event.PubKey)
 		write("OK", env.Event.ID, false, "Error event does not have required tags")
 		return
 	}
@@ -71,10 +71,10 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Check if pubkey is blocked
 	isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
 	if err != nil {
-		log.Printf("Error checking if pubkey is blocked: %v", err)
+		logging.Infof("Error checking if pubkey is blocked: %v", err)
 		// Continue processing as normal, don't block due to errors
 	} else if isBlocked {
-		log.Printf("Blocked pubkey attempted connection: %s", env.Event.PubKey)
+		logging.Infof("Blocked pubkey attempted connection: %s", env.Event.PubKey)
 		write("OK", env.Event.ID, false, "Relay connection rejected: Pubkey is blocked")
 		return
 	}
@@ -83,7 +83,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	if accessControl := GetAccessControl(); accessControl != nil {
 		err := accessControl.CanRead(env.Event.PubKey)
 		if err != nil {
-			log.Printf("Read access denied for pubkey: %s", env.Event.PubKey)
+			logging.Infof("Read access denied for pubkey: %s", env.Event.PubKey)
 			write("OK", env.Event.ID, false, "Authentication rejected: Read access denied")
 			return
 		}
@@ -91,7 +91,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 
 	// Create user session
 	if err := createUserSession(env.Event.PubKey, env.Event.Sig); err != nil {
-		log.Printf("Failed to create session for %s: %v", env.Event.PubKey, err)
+		logging.Infof("Failed to create session for %s: %v", env.Event.PubKey, err)
 		write("OK", env.Event.ID, false, fmt.Sprintf("Failed to create session: %v", err))
 		return
 	}
@@ -99,7 +99,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Get the global subscription manager
 	subManager := subscription.GetGlobalManager()
 	if subManager == nil {
-		log.Printf("Failed to get global subscription manager")
+		logging.Infof("Failed to get global subscription manager")
 		write("OK", env.Event.ID, false, "Failed to get subscription manager: Global manager not initialized")
 		return
 	}
@@ -107,7 +107,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	// Get current relay configuration
 	settings, err := config.GetConfig()
 	if err != nil {
-		log.Printf("Failed to get config: %v", err)
+		logging.Infof("Failed to get config: %v", err)
 		write("OK", env.Event.ID, false, "Failed to get relay configuration")
 		return
 	}
@@ -116,22 +116,22 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	currentMode := settings.AllowedUsersSettings.Mode
 	go func(pubkey string, mode string) {
 		if err := subManager.InitializeSubscriber(pubkey, mode); err != nil {
-			log.Printf("Failed to initialize subscriber %s: %v", pubkey, err)
+			logging.Infof("Failed to initialize subscriber %s: %v", pubkey, err)
 
 			// Log specific error types for monitoring
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "no available addresses") && mode == "subscription" {
-				log.Printf("Warning: No Bitcoin addresses available for subscriber %s", pubkey)
+				logging.Infof("Warning: No Bitcoin addresses available for subscriber %s", pubkey)
 			} else if strings.Contains(errMsg, "failed to allocate Bitcoin address") && mode == "subscription" {
-				log.Printf("Warning: Bitcoin address allocation failed for subscriber %s: %v", pubkey, err)
+				logging.Infof("Warning: Bitcoin address allocation failed for subscriber %s: %v", pubkey, err)
 			}
 		} else {
-			log.Printf("Successfully initialized subscriber %s", pubkey)
+			logging.Infof("Successfully initialized subscriber %s", pubkey)
 		}
 	}(env.Event.PubKey, currentMode)
 
 	// Return success after authentication
-	log.Printf("Successfully authenticated user %s", env.Event.PubKey)
+	logging.Infof("Successfully authenticated user %s", env.Event.PubKey)
 	write("OK", env.Event.ID, true, "Authentication successful")
 
 	// Store the pubkey in connection state for future block checks
@@ -140,7 +140,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	state.blockedCheck = time.Now()
 
 	if !state.authenticated {
-		log.Printf("Session established but subscription inactive for %s", env.Event.PubKey)
+		logging.Infof("Session established but subscription inactive for %s", env.Event.PubKey)
 		write("NOTICE", "Session established but subscription inactive. Renew to continue access.")
 	}
 }

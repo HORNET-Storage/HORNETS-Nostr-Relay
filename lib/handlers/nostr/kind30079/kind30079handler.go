@@ -2,10 +2,10 @@ package kind30079
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -17,7 +17,7 @@ func BuildKind30079Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-		log.Println("Handling event path event.")
+		logging.Info("Handling event path event.")
 
 		// Read data from the stream.
 		data, err := read()
@@ -53,7 +53,7 @@ func BuildKind30079Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
-			log.Printf("Error querying existing kind 30079 events: %v", err)
+			logging.Infof("Error querying existing kind 30079 events: %v", err)
 			write("NOTICE", fmt.Sprintf("Error querying existing events: %v", err))
 			return
 		}
@@ -61,7 +61,7 @@ func BuildKind30079Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Delete existing events of the same kind
 		for _, oldEvent := range existingEvents {
 			if err := store.DeleteEvent(oldEvent.ID); err != nil {
-				log.Printf("Error deleting old kind 30079 event %s: %v", oldEvent.ID, err)
+				logging.Infof("Error deleting old kind 30079 event %s: %v", oldEvent.ID, err)
 			}
 		}
 
@@ -81,9 +81,10 @@ func BuildKind30079Handler(store stores.Store) func(read lib_nostr.KindReader, w
 func validateEventPathTags(tags nostr.Tags) error {
 	var hasD, hasF bool
 	for _, tag := range tags {
-		if tag[0] == "d" {
+		switch tag[0] {
+		case "d":
 			hasD = true
-		} else if tag[0] == "f" {
+		case "f":
 			hasF = true
 		}
 	}

@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	statistics_gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm"
 )
 
@@ -24,7 +24,7 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	if _, err := os.Stat(statisticsPath); os.IsNotExist(err) {
 		err := os.Mkdir(statisticsPath, os.ModePerm)
 		if err != nil {
-			log.Fatal(err)
+			logging.Fatalf("Failed to create statistics directory: %v", err)
 		}
 	}
 
@@ -86,7 +86,7 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	store.DB.Exec("PRAGMA temp_store = MEMORY")           // Store temporary tables in memory
 
 	// Log successful initialization with detailed settings
-	fmt.Println("SQLite database initialized with optimized concurrency settings")
+	logging.Infof("SQLite database initialized with optimized concurrency settings")
 
 	return store, nil
 }

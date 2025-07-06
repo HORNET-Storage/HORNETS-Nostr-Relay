@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -88,7 +88,7 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 		})
 	}
 
-	log.Println("Paid Tiers for kind 10411:", tiers)
+	logging.Infof("Paid Tiers for kind 10411: %+v", tiers)
 
 	// Delete existing kind 10411 events
 	filter := nostr.Filter{
@@ -103,7 +103,7 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 		if err := store.DeleteEvent(oldEvent.ID); err != nil {
 			return fmt.Errorf("error deleting old kind 10411 event %s: %v", oldEvent.ID, err)
 		}
-		log.Printf("Deleted existing kind 10411 event with ID: %s", oldEvent.ID)
+		logging.Infof("Deleted existing kind 10411 event with ID: %s", oldEvent.ID)
 	}
 
 	// Convert tiers to the expected format
@@ -149,18 +149,18 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 	// Print the event for verification
 	eventJSON, err := json.MarshalIndent(event, "", "  ")
 	if err != nil {
-		log.Printf("Error marshaling event for printing: %v", err)
+		logging.Infof("Error marshaling event for printing: %v", err)
 	} else {
-		log.Printf("Created and stored kind 10411 event:\n%s", string(eventJSON))
+		logging.Infof("Created and stored kind 10411 event:\n%s", string(eventJSON))
 	}
 
-	log.Println("Kind 10411 event created and stored successfully")
+	logging.Info("Kind 10411 event created and stored successfully")
 	return nil
 }
 
 func createAnyEvent(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, kind int, content string, tags []nostr.Tag) (*nostr.Event, error) {
 	stringKey := hex.EncodeToString(schnorr.SerializePubKey(publicKey))
-	log.Println("Public Key: ", stringKey)
+	logging.Infof("Public Key: %s", stringKey)
 
 	event := &nostr.Event{
 		PubKey:    stringKey,
@@ -185,10 +185,10 @@ func createAnyEvent(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.Publi
 
 	err = signing.VerifySignature(signature, hash[:], publicKey)
 	if err != nil {
-		log.Printf("error verifying signature, %s", err)
+		logging.Infof("error verifying signature, %s", err)
 		return nil, fmt.Errorf("error verifying signature, %s", err)
 	} else {
-		log.Println("Signature is valid.")
+		logging.Info("Signature is valid.")
 	}
 
 	return event, nil

@@ -2,10 +2,10 @@ package kind3
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -42,7 +42,7 @@ func BuildKind3Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
-			log.Printf("Error querying existing contact list events: %v", err)
+			logging.Infof("Error querying existing contact list events: %v", err)
 			write("NOTICE", fmt.Sprintf("Error querying existing contact list events: %v", err))
 			return
 		}
@@ -51,7 +51,7 @@ func BuildKind3Handler(store stores.Store) func(read lib_nostr.KindReader, write
 		if len(existingEvents) > 0 {
 			for _, oldEvent := range existingEvents {
 				if err := store.DeleteEvent(oldEvent.ID); err != nil {
-					log.Printf("Error deleting old contact list event %s: %v", oldEvent.ID, err)
+					logging.Infof("Error deleting old contact list event %s: %v", oldEvent.ID, err)
 					// Decide how to handle delete failures
 				}
 			}

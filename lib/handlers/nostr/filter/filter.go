@@ -1,7 +1,6 @@
 package filter
 
 import (
-	"log"
 	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -30,20 +29,20 @@ func getAuthenticatedPubkey(data []byte) string {
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	if err := json.Unmarshal(data, &wrapper); err == nil {
-		log.Printf("Wrapper unmarshaled successfully - AuthPubkey: '%s', IsAuthenticated: %v", wrapper.AuthPubkey, wrapper.IsAuthenticated)
+		logging.Infof("Wrapper unmarshaled successfully - AuthPubkey: '%s', IsAuthenticated: %v", wrapper.AuthPubkey, wrapper.IsAuthenticated)
 		if wrapper.IsAuthenticated && wrapper.AuthPubkey != "" {
-			log.Printf("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
+			logging.Infof("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
 			return wrapper.AuthPubkey
 		} else {
-			log.Printf("Wrapper found but not authenticated or empty pubkey")
+			logging.Infof("Wrapper found but not authenticated or empty pubkey")
 		}
 	} else {
-		log.Printf("Failed to unmarshal wrapper structure: %v", err)
+		logging.Infof("Failed to unmarshal wrapper structure: %v", err)
 	}
 
 	// If we couldn't extract from wrapper, fall back to the old method
 	// Find currently authenticated pubkeys by scanning the session store
-	log.Printf("Falling back to session store check...")
+	logging.Infof("Falling back to session store check...")
 	var authenticatedPubkeys []string
 	sessions.Sessions.Range(func(key, value interface{}) bool {
 		pubkey, ok := key.(string)
@@ -58,7 +57,7 @@ func getAuthenticatedPubkey(data []byte) string {
 
 		if session.Authenticated {
 			authenticatedPubkeys = append(authenticatedPubkeys, pubkey)
-			log.Printf("Found authenticated pubkey in sessions: %s", pubkey)
+			logging.Infof("Found authenticated pubkey in sessions: %s", pubkey)
 		}
 
 		return true // continue
@@ -66,13 +65,13 @@ func getAuthenticatedPubkey(data []byte) string {
 
 	// Log the authenticated pubkeys we found for debugging
 	if len(authenticatedPubkeys) > 0 {
-		log.Printf("Found %d authenticated pubkeys in session store", len(authenticatedPubkeys))
+		logging.Infof("Found %d authenticated pubkeys in session store", len(authenticatedPubkeys))
 
 		// Return the first authenticated pubkey we found
 		// In a real implementation, we would match this to the specific connection
 		return authenticatedPubkeys[0]
 	} else {
-		log.Printf("No authenticated pubkeys found in session store")
+		logging.Infof("No authenticated pubkeys found in session store")
 	}
 
 	// If we can't determine the authenticated pubkey, return empty string
@@ -102,16 +101,16 @@ const (
 
 // addLogging adds detailed logging for debugging
 func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
-	log.Printf(ColorBlue+"Authenticated pubkey for filter request: %s"+ColorReset, connPubkey)
+	logging.Infof(ColorBlue+"Authenticated pubkey for filter request: %s"+ColorReset, connPubkey)
 
 	// Log the kinds being requested
 	for i, filter := range reqEnvelope.Filters {
-		log.Printf(ColorCyan+"Filter #%d requests kinds: %v"+ColorReset, i+1, filter.Kinds)
+		logging.Infof(ColorCyan+"Filter #%d requests kinds: %v"+ColorReset, i+1, filter.Kinds)
 
 		// Log any 'p' tags that might be filtering by pubkey
 		for tagName, tagValues := range filter.Tags {
 			if tagName == "p" {
-				log.Printf(ColorCyan+"Filter #%d requests events for pubkeys: %v"+ColorReset, i+1, tagValues)
+				logging.Infof(ColorCyan+"Filter #%d requests events for pubkeys: %v"+ColorReset, i+1, tagValues)
 			}
 		}
 	}
@@ -125,7 +124,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		data, err := read()
 		if err != nil {
-			log.Println("Error reading from stream:", err)
+			logging.Infof("Error reading from stream:%s", err)
 			write("NOTICE", "Error reading from stream.")
 			return
 		}
@@ -137,12 +136,12 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			Request *nostr.ReqEnvelope `json:"request"`
 		}
 		if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Request != nil {
-			log.Println("Successfully extracted request from wrapper structure")
+			logging.Info("Successfully extracted request from wrapper structure")
 			request = *wrapper.Request
 		} else {
 			// Fall back to direct unmarshal (for backward compatibility)
 			if err := json.Unmarshal(data, &request); err != nil {
-				log.Println("Error unmarshaling request:", err)
+				logging.Infof("Error unmarshaling request:%s", err)
 				write("NOTICE", "Error unmarshaling request.")
 				return
 			}
@@ -169,7 +168,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Use the global subscription manager instead of creating a new one
 			subManager = subscription.GetGlobalManager()
 			if subManager == nil {
-				log.Printf("Warning: Global subscription manager not available for kind 11888 event processing")
+				logging.Infof("Warning: Global subscription manager not available for kind 11888 event processing")
 			}
 		}
 
@@ -184,7 +183,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		for _, filter := range request.Filters {
 			events, err := store.QueryEvents(filter)
 			if err != nil {
-				log.Printf("Error querying events for filter: %v", err)
+				logging.Infof("Error querying events for filter: %v", err)
 				continue
 			}
 
@@ -199,7 +198,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				for _, requestedID := range filter.IDs {
 					if !foundIDs[requestedID] {
 						missingEventIDs = append(missingEventIDs, requestedID)
-						log.Printf(ColorYellow+"[MISSING NOTE] Event ID %s not found locally, will attempt DHT retrieval"+ColorReset, requestedID)
+						logging.Infof(ColorYellow+"[MISSING NOTE] Event ID %s not found locally, will attempt DHT retrieval"+ColorReset, requestedID)
 					}
 				}
 			}
@@ -211,17 +210,17 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// Attempt to retrieve missing events via DHT (with timeout protection)
 		if len(missingEventIDs) > 0 && relayStore != nil {
-			log.Printf(ColorCyan+"[MISSING NOTE] Attempting to retrieve %d missing events via DHT"+ColorReset, len(missingEventIDs))
+			logging.Infof(ColorCyan+"[MISSING NOTE] Attempting to retrieve %d missing events via DHT"+ColorReset, len(missingEventIDs))
 
 			// Limit the number of missing events we try to retrieve to prevent excessive delays
 			maxMissingEvents := 5
 			if len(missingEventIDs) > maxMissingEvents {
-				log.Printf(ColorYellow+"[MISSING NOTE] Limiting DHT retrieval to %d events (requested %d)"+ColorReset, maxMissingEvents, len(missingEventIDs))
+				logging.Infof(ColorYellow+"[MISSING NOTE] Limiting DHT retrieval to %d events (requested %d)"+ColorReset, maxMissingEvents, len(missingEventIDs))
 				missingEventIDs = missingEventIDs[:maxMissingEvents]
 			}
 
 			for _, eventID := range missingEventIDs {
-				log.Printf(ColorCyan+"[MISSING NOTE] Searching for event %s via DHT"+ColorReset, eventID)
+				logging.Infof(ColorCyan+"[MISSING NOTE] Searching for event %s via DHT"+ColorReset, eventID)
 
 				// Strategy 1: If we have author filters in any filter, use those for DHT lookup
 				var potentialAuthors []string
@@ -241,12 +240,12 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 					response, err := sync.RetrieveMissingNote(eventID, authorPubkey, relayStore, store)
 					if err != nil {
-						log.Printf(ColorRed+"[MISSING NOTE] Error retrieving event %s for author %s: %v"+ColorReset, eventID, authorPubkey, err)
+						logging.Infof(ColorRed+"[MISSING NOTE] Error retrieving event %s for author %s: %v"+ColorReset, eventID, authorPubkey, err)
 						continue
 					}
 
 					if response.Found && response.Event != nil {
-						log.Printf(ColorGreen+"[MISSING NOTE] Successfully retrieved event %s from %s"+ColorReset, eventID, response.RelayURL)
+						logging.Infof(ColorGreen+"[MISSING NOTE] Successfully retrieved event %s from %s"+ColorReset, eventID, response.RelayURL)
 						foundEvent = response.Event
 						break
 					}
@@ -254,18 +253,18 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 				// Strategy 2: If no authors specified or no event found, try a broader DHT search
 				if foundEvent == nil {
-					log.Printf(ColorYellow+"[MISSING NOTE] Event %s not found via author-specific search, trying broader DHT search"+ColorReset, eventID)
+					logging.Infof(ColorYellow+"[MISSING NOTE] Event %s not found via author-specific search, trying broader DHT search"+ColorReset, eventID)
 
 					// Try to find the event by querying multiple known relay lists
 					// This could be enhanced to iterate through all DHT entries
 					// For now, we'll just log that we tried
-					log.Printf(ColorYellow+"[MISSING NOTE] Broader DHT search for event %s not yet implemented"+ColorReset, eventID)
+					logging.Infof(ColorYellow+"[MISSING NOTE] Broader DHT search for event %s not yet implemented"+ColorReset, eventID)
 				}
 
 				// If we found the event, add it to combined events
 				if foundEvent != nil {
 					combinedEvents = append(combinedEvents, foundEvent)
-					log.Printf(ColorGreen+"[MISSING NOTE] Added retrieved event %s to response"+ColorReset, eventID)
+					logging.Infof(ColorGreen+"[MISSING NOTE] Added retrieved event %s to response"+ColorReset, eventID)
 				}
 			}
 		}
@@ -299,14 +298,14 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// First check if event is blocked (blocked events are always filtered out)
 			isBlocked, err := store.IsEventBlocked(event.ID)
 			if err != nil {
-				log.Printf("Error checking if event %s is blocked: %v", event.ID, err)
+				logging.Infof("Error checking if event %s is blocked: %v", event.ID, err)
 				// If there's an error, assume not blocked
 				filteredEvents = append(filteredEvents, event)
 				continue
 			}
 
 			if isBlocked {
-				log.Printf(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
+				logging.Infof(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
 					event.ID, event.Kind, event.PubKey)
 				blockedCount++
 				// Skip this event - it's blocked for moderation reasons
@@ -316,7 +315,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Then check if event is pending moderation
 			isPending, err := store.IsPendingModeration(event.ID)
 			if err != nil {
-				log.Printf("Error checking if event %s is pending moderation: %v", event.ID, err)
+				logging.Infof("Error checking if event %s is pending moderation: %v", event.ID, err)
 				// If there's an error, assume not pending
 				filteredEvents = append(filteredEvents, event)
 				continue
@@ -328,18 +327,18 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				// Handle based on moderation mode
 				if !isStrict {
 					// Passive mode: include all pending events
-					log.Printf(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
+					logging.Infof(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
 					filteredEvents = append(filteredEvents, event)
 					pendingAllowedCount++
 				} else if connPubkey != "" && connPubkey == event.PubKey {
 					// Strict mode: only include if requester is author
-					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
+					logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
 						event.ID, connPubkey)
 					filteredEvents = append(filteredEvents, event)
 					pendingAllowedCount++
 				} else {
 					// Strict mode: exclude if requester is not author
-					log.Printf(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
+					logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
 					// Skip this event in strict mode if requester is not the author
 					continue
 				}
@@ -351,7 +350,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// Replace uniqueEvents with the filtered set
 		if blockedCount > 0 || pendingCount > 0 {
-			log.Printf(ColorRedBold+"[MODERATION] Filtered out %d blocked events, %d/%d pending events allowed"+ColorReset,
+			logging.Infof(ColorRedBold+"[MODERATION] Filtered out %d blocked events, %d/%d pending events allowed"+ColorReset,
 				blockedCount, pendingAllowedCount, pendingCount)
 			uniqueEvents = filteredEvents
 		}
@@ -369,7 +368,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		if accessControl != nil {
 			// Only check access if we have a valid pubkey
 			if connPubkey == "" {
-				log.Printf(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
+				logging.Infof(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
 				write("NOTICE", "Read access denied: Authentication required")
 				return
 			}
@@ -377,12 +376,12 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Check if user has read access
 			err := accessControl.CanRead(connPubkey)
 			if err != nil {
-				log.Printf(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
+				logging.Infof(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
 				write("NOTICE", "Read access denied: User not in allowed list")
 				return
 			}
 
-			log.Printf(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
+			logging.Infof(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
 		}
 
 		// Apply mute word filtering if the user is authenticated
@@ -399,13 +398,13 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				for _, e := range uniqueEvents {
 					if e.PubKey == connPubkey {
 						nonFilterableEvents = append(nonFilterableEvents, e)
-						log.Printf(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (authored by requester)"+ColorReset,
+						logging.Infof(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (authored by requester)"+ColorReset,
 							e.ID, e.Kind, e.PubKey)
 					} else if e.Kind == 1 { // Only filter kind 1 (text notes)
 						filterableEvents = append(filterableEvents, e)
 					} else {
 						nonFilterableEvents = append(nonFilterableEvents, e)
-						log.Printf(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)"+ColorReset,
+						logging.Infof(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)"+ColorReset,
 							e.ID, e.Kind, e.PubKey)
 					}
 				}
@@ -414,15 +413,15 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				originalCount := len(filterableEvents)
 
 				// Log event details before filtering for diagnostics
-				log.Printf(ColorCyanBold+"[CONTENT FILTER] PROCESSING: %d filterable events for user %s"+ColorReset, originalCount, connPubkey)
+				logging.Infof(ColorCyanBold+"[CONTENT FILTER] PROCESSING: %d filterable events for user %s"+ColorReset, originalCount, connPubkey)
 				for _, e := range filterableEvents {
-					log.Printf(ColorCyan+"[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s"+ColorReset,
+					logging.Infof(ColorCyan+"[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s"+ColorReset,
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
 				// Apply mute word filtering if mute words are present
 				if len(pref.MuteWords) > 0 {
-					log.Printf(ColorCyanBold+"[CONTENT FILTER] APPLYING MUTE WORD FILTER FOR USER: %s"+ColorReset, connPubkey)
+					logging.Infof(ColorCyanBold+"[CONTENT FILTER] APPLYING MUTE WORD FILTER FOR USER: %s"+ColorReset, connPubkey)
 
 					// Create a filtered list that excludes events with muted words
 					var muteFilteredEvents []*nostr.Event
@@ -433,7 +432,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						// Check if event content contains any muted word
 						for _, muteWord := range pref.MuteWords {
 							if muteWord != "" && strings.Contains(strings.ToLower(e.Content), strings.ToLower(muteWord)) {
-								log.Printf(ColorRedBold+"[CONTENT FILTER] MUTED WORD: '%s' found in event ID=%s"+ColorReset,
+								logging.Infof(ColorRedBold+"[CONTENT FILTER] MUTED WORD: '%s' found in event ID=%s"+ColorReset,
 									muteWord, e.ID)
 								containsMutedWord = true
 								break
@@ -449,16 +448,16 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 					// Replace the filterable events with the mute-filtered list
 					filterableEvents = muteFilteredEvents
 
-					log.Printf(ColorYellowBold+"[CONTENT FILTER] MUTE FILTER: %d/%d events passed mute word filtering"+ColorReset,
+					logging.Infof(ColorYellowBold+"[CONTENT FILTER] MUTE FILTER: %d/%d events passed mute word filtering"+ColorReset,
 						len(filterableEvents), originalCount)
 				}
 
 				// Combine filtered events with non-filterable events
 				uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-				log.Printf(ColorYellowBold+"[CONTENT FILTER] MUTE-ONLY FILTER: %d events passed mute filtering, %d exempt events"+ColorReset,
+				logging.Infof(ColorYellowBold+"[CONTENT FILTER] MUTE-ONLY FILTER: %d events passed mute filtering, %d exempt events"+ColorReset,
 					len(filterableEvents), len(nonFilterableEvents))
 			} else {
-				log.Printf(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)
+				logging.Infof(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)
 			}
 		}
 
@@ -474,7 +473,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				// If the authenticated user doesn't match the author
 				if connPubkey != "" && connPubkey != eventPubkey {
 					// Skip this event - user is not authorized to see filter preferences for other users
-					log.Printf("DENIED: Skipping kind 10010 event for pubkey %s - requested by different pubkey %s",
+					logging.Infof("DENIED: Skipping kind 10010 event for pubkey %s - requested by different pubkey %s",
 						eventPubkey, connPubkey)
 					continue
 				}
@@ -482,30 +481,30 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 			// Special handling for kind 11888 events
 			if event.Kind == 11888 {
-				log.Printf("Processing kind 11888 event with ID: %s", event.ID)
+				logging.Infof("Processing kind 11888 event with ID: %s", event.ID)
 
 				// Extract the pubkey the event is about (from the p tag)
 				eventPubkey := ""
 				for _, tag := range event.Tags {
 					if tag[0] == "p" && len(tag) > 1 {
 						eventPubkey = tag[1]
-						log.Printf("Kind 11888 event is about pubkey: %s", eventPubkey)
+						logging.Infof("Kind 11888 event is about pubkey: %s", eventPubkey)
 						break
 					}
 				}
 
 				// Log the auth and authorization check
-				log.Printf("Auth check for kind 11888: event pubkey=%s, connection pubkey=%s",
+				logging.Infof("Auth check for kind 11888: event pubkey=%s, connection pubkey=%s",
 					eventPubkey, connPubkey)
 
 				// If the pubkey in the event is not empty and doesn't match the authenticated user
 				if eventPubkey != "" && connPubkey != "" && eventPubkey != connPubkey {
 					// Skip this event - user is not authorized to see subscription details for other users
-					log.Printf("DENIED: Skipping kind 11888 event for pubkey %s - requested by different pubkey %s",
+					logging.Infof("DENIED: Skipping kind 11888 event for pubkey %s - requested by different pubkey %s",
 						eventPubkey, connPubkey)
 					continue
 				} else {
-					log.Printf("ALLOWED: Showing kind 11888 event for pubkey %s to connection with pubkey %s",
+					logging.Infof("ALLOWED: Showing kind 11888 event for pubkey %s to connection with pubkey %s",
 						eventPubkey, connPubkey)
 				}
 
@@ -513,14 +512,14 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				// Run update asynchronously to avoid blocking event processing
 				if subManager != nil {
 					go func(eventCopy *nostr.Event, manager *subscription.SubscriptionManager) {
-						log.Printf("Checking if kind 11888 event needs update...")
+						logging.Infof("Checking if kind 11888 event needs update...")
 						updatedEvent, err := manager.CheckAndUpdateSubscriptionEvent(eventCopy)
 						if err != nil {
-							log.Printf("Error updating kind 11888 event: %v", err)
+							logging.Infof("Error updating kind 11888 event: %v", err)
 						} else if updatedEvent != eventCopy {
-							log.Printf("Event was updated with new information")
+							logging.Infof("Event was updated with new information")
 						} else {
-							log.Printf("Event did not need updating")
+							logging.Infof("Event did not need updating")
 						}
 					}(event, subManager)
 				}
@@ -540,29 +539,29 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 				// Only allow the referenced user to see these events
 				if userPubkey != "" && connPubkey != "" && connPubkey != userPubkey {
-					log.Printf(ColorRedBold+"[MODERATION] DENIED: Skipping kind %d event - requested by %s but references user %s"+ColorReset,
+					logging.Infof(ColorRedBold+"[MODERATION] DENIED: Skipping kind %d event - requested by %s but references user %s"+ColorReset,
 						event.Kind, connPubkey, userPubkey)
 					continue
 				} else {
-					log.Printf(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind %d event for user %s"+ColorReset,
+					logging.Infof(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind %d event for user %s"+ColorReset,
 						event.Kind, userPubkey)
 				}
 			} else if event.Kind == 19842 {
 				// Disputes are created by users
 				// Only allow the author to see their own disputes
 				if connPubkey != "" && connPubkey != event.PubKey {
-					log.Printf(ColorRedBold+"[MODERATION] DENIED: Skipping kind 19842 dispute event - requested by %s but created by %s"+ColorReset,
+					logging.Infof(ColorRedBold+"[MODERATION] DENIED: Skipping kind 19842 dispute event - requested by %s but created by %s"+ColorReset,
 						connPubkey, event.PubKey)
 					continue
 				} else {
-					log.Printf(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind 19842 dispute event created by %s"+ColorReset,
+					logging.Infof(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind 19842 dispute event created by %s"+ColorReset,
 						event.PubKey)
 				}
 			}
 
 			eventJSON, err := json.Marshal(event)
 			if err != nil {
-				log.Printf("Error marshaling event: %v", err)
+				logging.Infof("Error marshaling event: %v", err)
 				continue
 			}
 			write("EVENT", request.SubscriptionID, string(eventJSON))

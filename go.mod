@@ -6,7 +6,6 @@ require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.3
 	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250703232705-f3817d7d33e2
 	github.com/anacrolix/dht/v2 v2.21.1
-	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/fxamacker/cbor/v2 v2.6.0
 	github.com/gabriel-vasile/mimetype v1.4.6
@@ -32,6 +31,7 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/anacrolix/chansync v0.3.0 // indirect
 	github.com/anacrolix/generics v0.0.0-20221221005542-ac1d5b02b8a3 // indirect
+	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.1 // indirect

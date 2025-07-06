@@ -1,10 +1,9 @@
 package kind30008
 
 import (
-	"log"
-
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -39,7 +38,7 @@ func BuildKind30008Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Perform validation specific to Profile Badges events.
 		isValid, errMsg := validateProfileBadgesEvent(env.Event)
 		if !isValid {
-			log.Println(errMsg)
+			logging.Info(errMsg)
 			write("OK", env.Event.ID, false, errMsg)
 			return
 		}
@@ -80,6 +79,6 @@ func validateProfileBadgesEvent(event nostr.Event) (bool, string) {
 		return false, "Profile Badges event contains invalid 'a' and 'e' tag pairs"
 	}
 
-	log.Println("Profile Badges event is valid.")
+	logging.Info("Profile Badges event is valid.")
 	return true, ""
 }

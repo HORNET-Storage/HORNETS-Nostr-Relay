@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm"
 	jsoniter "github.com/json-iterator/go"
@@ -13,7 +14,7 @@ import (
 
 // GenerateEventKinds creates event kind statistics data
 func (g *DemoDataGenerator) GenerateEventKinds(store statistics.StatisticsStore) error {
-	fmt.Println("Generating event kind statistics month by month...")
+	logging.Infof("Generating event kind statistics month by month...")
 
 	// Calculate kinds per day for each month
 	kindsPerDay := g.InitialNotesPerDay
@@ -23,7 +24,7 @@ func (g *DemoDataGenerator) GenerateEventKinds(store statistics.StatisticsStore)
 	// Generate data for each month in the range
 	currentMonth := g.StartMonth
 	for !currentMonth.After(g.EndMonth) {
-		fmt.Printf("Generating kind statistics for %s...\n", currentMonth.Format("Jan 2006"))
+		logging.Infof("Generating kind statistics for %s...\n", currentMonth.Format("Jan 2006"))
 
 		// Calculate days in this month
 		daysInMonthCount := daysInMonth(currentMonth)
@@ -83,7 +84,7 @@ func (g *DemoDataGenerator) GenerateEventKinds(store statistics.StatisticsStore)
 		currentMonth = addMonth(currentMonth)
 	}
 
-	fmt.Println("Event kind statistics generation complete!")
+	logging.Infof("Event kind statistics generation complete!")
 	return nil
 }
 
@@ -140,9 +141,9 @@ func (g *DemoDataGenerator) saveKind(store statistics.StatisticsStore, kind *lib
 	// Attempt to save using the standard method
 	err := store.SaveEventKind(event)
 	if err != nil {
-		fmt.Printf("Standard save of event kind %d failed: %v\n", kind.KindNumber, err)
+		logging.Infof("Standard save of event kind %d failed: %v\n", kind.KindNumber, err)
 	} else {
-		fmt.Printf("Successfully saved event kind %d using standard method\n", kind.KindNumber)
+		logging.Infof("Successfully saved event kind %d using standard method\n", kind.KindNumber)
 	}
 
 	// Approach 2: Direct SQL insertion using reflection to access the DB
@@ -159,13 +160,13 @@ func (g *DemoDataGenerator) saveKind(store statistics.StatisticsStore, kind *lib
 
 		result := gormStore.DB.Create(&dbKind)
 		if result.Error != nil {
-			fmt.Printf("Direct insert of event kind %d failed: %v\n", kind.KindNumber, result.Error)
+			logging.Infof("Direct insert of event kind %d failed: %v\n", kind.KindNumber, result.Error)
 		} else {
-			fmt.Printf("Successfully saved event kind %d using direct insert\n", kind.KindNumber)
+			logging.Infof("Successfully saved event kind %d using direct insert\n", kind.KindNumber)
 			return nil // Success with direct insert
 		}
 	} else {
-		fmt.Println("Could not convert to GormStatisticsStore for direct insert")
+		logging.Infof("Could not convert to GormStatisticsStore for direct insert")
 	}
 
 	return nil // Continue even if both methods failed

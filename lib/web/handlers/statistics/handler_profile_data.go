@@ -1,17 +1,17 @@
 package statistics
 
 import (
-	"log"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // Refactored getProfilesTimeSeriesData function
 func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Time series request received")
+	logging.Info("Time series request received")
 
 	// Calculate the date range for the last 6 months, making sure to include full current month
 	now := time.Now()
@@ -21,7 +21,7 @@ func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 	// Start date is 6 months before current month
 	startDate := time.Date(now.Year(), now.Month()-5, 1, 0, 0, 0, 0, now.Location())
 
-	log.Printf("Start date: %s, End date: %s",
+	logging.Infof("Start date: %s, End date: %s",
 		startDate.Format("2006-01-02"),
 		endDate.Format("2006-01-02"))
 
@@ -30,7 +30,7 @@ func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 		startDate.Format("2006-01-02"),
 		endDate.Format("2006-01-02"))
 	if err != nil {
-		log.Println("Error fetching time series data:", err)
+		logging.Infof("Error fetching time series data:%s", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
@@ -47,7 +47,7 @@ func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 		completeData[5-i] = types.TimeSeriesData{Month: formattedMonth}
 	}
 
-	log.Printf("Complete list of months: %+v", completeData)
+	logging.Infof("Complete list of months: %+v", completeData)
 
 	// Merge queried data with the complete list
 	dataMap := make(map[string]types.TimeSeriesData)
@@ -61,6 +61,6 @@ func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	log.Printf("Fetched data for the last 6 months: %+v", completeData)
+	logging.Infof("Fetched data for the last 6 months: %+v", completeData)
 	return c.JSON(completeData)
 }

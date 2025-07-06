@@ -2,10 +2,10 @@ package kind5
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -42,24 +42,24 @@ func BuildKind5Handler(store stores.Store) func(read lib_nostr.KindReader, write
 				// Retrieve the public key of the event to be deleted
 				pubKey, err := extractPubKeyFromEventID(store, eventID)
 				if err != nil {
-					log.Printf("Failed to extract public key for event %s: %v", eventID, err)
+					logging.Infof("Failed to extract public key for event %s: %v", eventID, err)
 					// Decide how to handle this error; continue to next tag, respond with an error, etc.
 					write("NOTICE", fmt.Sprintf("Failed to extract public key for event %s: %v, the event doesn't exist", eventID, err))
 					continue
 				}
 
-				log.Println("Found Public key:", pubKey)
+				logging.Infof("Found Public key:%s", pubKey)
 
 				// Validate that the deletion request and the event have the same public key
 				if pubKey == env.Event.PubKey {
 					if err := store.DeleteEvent(eventID); err != nil {
-						log.Printf("Error deleting event %s: %v", eventID, err)
+						logging.Infof("Error deleting event %s: %v", eventID, err)
 						// Optionally, handle individual delete failures
 					} else {
 						write("OK", env.Event.ID, true, "Deletion processed")
 					}
 				} else {
-					log.Printf("Public key mismatch for event %s, deletion request ignored", eventID)
+					logging.Infof("Public key mismatch for event %s, deletion request ignored", eventID)
 					write("NOTICE", fmt.Sprintf("Public key mismatch for event %s, deletion request ignored", eventID))
 				}
 			}

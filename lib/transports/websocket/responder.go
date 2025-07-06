@@ -2,8 +2,8 @@ package websocket
 
 import (
 	"encoding/json"
-	"log"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/gofiber/contrib/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -13,11 +13,11 @@ func sendWebSocketMessage(ws *websocket.Conn, msg interface{}) error {
 	// msg is any of nostr.ClosedEnvelope, nostr.EOSEEnvelope, nostr.OKEnvelope, nostr.EventEnvelope, nostr.NoticeEnvelope
 	marshalledMsg, err := jsoniter.MarshalToString(msg)
 	if err != nil {
-		log.Println()
+		logging.Infof("Couldn't ummarshall websocket message: %s", err)
 	}
-	log.Println("Websocket message: ", marshalledMsg)
+	logging.Infof("Websocket message: %s", marshalledMsg)
 	if err := ws.WriteJSON(msg); err != nil {
-		log.Printf("Error sending message over WebSocket: %v", err)
+		logging.Infof("Error sending message over WebSocket: %v", err)
 		return err
 	}
 	return nil
@@ -30,25 +30,25 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 	var messageSlice []interface{}
 	err := jsoniter.ConfigCompatibleWithStandardLibrary.Unmarshal(jsonMessage, &messageSlice)
 	if err != nil {
-		log.Printf("Error unmarshaling incoming message: %s", err)
+		logging.Infof("Error unmarshaling incoming message: %s", err)
 		return
 	}
 
 	// Ensure the message has at least 2 elements (type and subID)
 	if len(messageSlice) < 2 {
-		log.Println("Incoming message does not have the expected format or number of elements.")
+		logging.Info("Incoming message does not have the expected format or number of elements.")
 		return
 	}
 
 	// Extract the message type and subscription ID
 	messageType, ok := messageSlice[0].(string)
 	if !ok {
-		log.Println("First element of the message is not a string indicating the type.")
+		logging.Info("First element of the message is not a string indicating the type.")
 		return
 	}
 	subID, ok := messageSlice[1].(string)
 	if !ok {
-		log.Println("Second element of the message is not a string indicating the subscription ID.")
+		logging.Info("Second element of the message is not a string indicating the subscription ID.")
 		return
 	}
 
@@ -60,48 +60,48 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 	case "EVENT":
 		// For "EVENT", assuming direct JSON structure for the event details as the third element
 		if len(messageSlice) < 3 {
-			log.Println("Expected data for 'EVENT' message type is missing.")
+			logging.Info("Expected data for 'EVENT' message type is missing.")
 			return
 		}
 		eventDataJSON, ok := messageSlice[2].(string) // Assuming eventData is provided as a JSON string
 		if !ok {
-			log.Println("Expected data for 'EVENT' message type is not a string.")
+			logging.Info("Expected data for 'EVENT' message type is not a string.")
 			return
 		}
 		var eventData nostr.Event
 		if err := json.Unmarshal([]byte(eventDataJSON), &eventData); err != nil {
-			log.Printf("Error unmarshalling 'event' data: %s", err)
+			logging.Infof("Error unmarshalling 'event' data: %s", err)
 			return
 		}
 		sendWebSocketMessage(ws, nostr.EventEnvelope{SubscriptionID: &subID, Event: eventData})
 	case "NOTICE":
 		// Assuming "NOTICE" message contains a string as the third element
 		if len(messageSlice) < 2 {
-			log.Println("Expected data for 'NOTICE' message type is missing.")
+			logging.Info("Expected data for 'NOTICE' message type is missing.")
 			return
 		}
 		noticeMsg, ok := messageSlice[1].(string)
 		if !ok {
-			log.Println("Expected data for 'NOTICE' message type is not a string.")
+			logging.Info("Expected data for 'NOTICE' message type is not a string.")
 			return
 		}
 		sendWebSocketMessage(ws, nostr.NoticeEnvelope(noticeMsg))
 	case "OK":
 		// Assuming the OK message includes the event ID as the second element and a boolean as the third.
 		if len(messageSlice) < 3 {
-			log.Println("Expected data for 'OK' message type is missing.")
+			logging.Info("Expected data for 'OK' message type is missing.")
 			return
 		}
 		eventID, ok := messageSlice[1].(string) // Correctly extracting the event ID
 		if !ok {
-			log.Println("Expected event ID for 'OK' message type is not a string.")
+			logging.Info("Expected event ID for 'OK' message type is not a string.")
 			return
 		}
 
 		// Correctly assuming the third element is a boolean indicating success.
 		success, ok := messageSlice[2].(bool)
 		if !ok {
-			log.Println("Expected success indicator for 'OK' message type is not a boolean.")
+			logging.Info("Expected success indicator for 'OK' message type is not a boolean.")
 			return
 		}
 
@@ -133,35 +133,35 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		}
 		// Assuming the COUNT message includes the subscription ID as the second element
 		if len(messageSlice) < 2 {
-			log.Println("Expected data for 'COUNT' message type is missing.")
+			logging.Info("Expected data for 'COUNT' message type is missing.")
 			return
 		}
 		countMsg, ok := messageSlice[2].(string)
 		if !ok {
-			log.Println("Expected data for 'COUNT' message type is not a string.")
+			logging.Info("Expected data for 'COUNT' message type is not a string.")
 			return
 		}
 		var count CountStruct
 		err := json.Unmarshal([]byte(countMsg), &count)
 		if err != nil {
-			log.Println("Error:", err)
+			logging.Infof("Error:%s", err)
 			return
 		}
 		if err := sendWebSocketMessage(ws, messageSlice); err != nil {
-			log.Printf("Error sending 'COUNT' envelope over WebSocket: %v", err)
+			logging.Infof("Error sending 'COUNT' envelope over WebSocket: %v", err)
 		}
 
 	case "AUTH":
 		if len(messageSlice) < 2 {
-			log.Println("Expected data for 'AUTH' message type is missing.")
+			logging.Info("Expected data for 'AUTH' message type is missing.")
 			return
 		}
 		challengeString, ok := messageSlice[1].(string)
 		if !ok {
-			log.Println("Expected challenge string for 'AUTH' message type is not a string.")
+			logging.Info("Expected challenge string for 'AUTH' message type is not a string.")
 			return
 		}
-		log.Println("Dealing with auth message message")
+		logging.Info("Dealing with auth message message")
 		// Send the AUTH message with the signed event
 		authEnvelope := nostr.AuthEnvelope{
 			Challenge: &challengeString,
@@ -170,6 +170,6 @@ func handleIncomingMessage(ws *websocket.Conn, jsonMessage []byte) {
 		sendWebSocketMessage(ws, authEnvelope)
 
 	default:
-		log.Printf("Unhandled message type: %s", messageType)
+		logging.Infof("Unhandled message type: %s", messageType)
 	}
 }

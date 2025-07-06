@@ -1,13 +1,13 @@
 package kind10010
 
 import (
-	"log"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -52,7 +52,7 @@ func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// The content is now directly the instructions
 
 		// Log the content for debugging
-		log.Printf("Filter instructions: %s", env.Event.Content)
+		logging.Infof("Filter instructions: %s", env.Event.Content)
 
 		// Check for enabled tag and mute words tag
 		for _, tag := range env.Event.Tags {
@@ -60,18 +60,18 @@ func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, w
 				// Check for enabled tag
 				if tag[0] == "enabled" {
 					enabled := tag[1] == "true"
-					log.Printf("Found enabled tag: %v", enabled)
+					logging.Infof("Found enabled tag: %v", enabled)
 				} else if tag[0] == "mute" && len(tag) >= 2 { // Check for mute words tag
 					// Parse comma-separated mute words
 					muteWords := strings.Split(tag[1], ",")
-					log.Printf("Found mute words: %v", muteWords)
+					logging.Infof("Found mute words: %v", muteWords)
 				}
 			}
 		}
 
 		// Verify and store the event
 		if err := store.StoreEvent(&env.Event); err != nil {
-			log.Printf("Error storing filter preference event: %v", err)
+			logging.Infof("Error storing filter preference event: %v", err)
 			write("OK", env.Event.ID, false, "Failed to store filter preference")
 			return
 		}
@@ -88,13 +88,13 @@ func BuildKind10010Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			for _, oldEvent := range filters {
 				if oldEvent.ID != env.Event.ID {
 					if err := store.DeleteEvent(oldEvent.ID); err != nil {
-						log.Printf("Warning: could not delete old filter preference: %v", err)
+						logging.Infof("Warning: could not delete old filter preference: %v", err)
 					}
 				}
 			}
 		}
 
-		log.Printf("Stored filter preference for user %s", env.Event.PubKey)
+		logging.Infof("Stored filter preference for user %s", env.Event.PubKey)
 		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 

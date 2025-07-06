@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"log"
 	"strconv"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
@@ -12,7 +12,7 @@ import (
 
 // GetReportNotifications retrieves all report notifications with pagination
 func GetReportNotifications(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Report notification request made.")
+	logging.Info("Report notification request made.")
 	// Parse pagination parameters
 	page, err := strconv.Atoi(c.Query("page", "1"))
 	if err != nil || page < 1 {
@@ -53,7 +53,7 @@ func GetReportNotifications(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	log.Println("Report Notifications: ", notifications)
+	logging.Infof("Report Notifications: %+v", notifications)
 
 	return c.JSON(fiber.Map{
 		"notifications": notifications,
@@ -74,7 +74,7 @@ func MarkReportNotificationAsRead(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	log.Printf("Report notification %v has been read.", req.ID)
+	logging.Infof("Report notification %v has been read.", req.ID)
 
 	if req.ID == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -193,7 +193,7 @@ func DeleteReportedEvent(c *fiber.Ctx, store stores.Store) error {
 	// Also delete any report notifications for this event
 	if err := store.GetStatsStore().DeleteReportNotificationByEventID(eventID); err != nil {
 		// Log but don't fail - the main deletion was successful
-		log.Printf("Failed to delete report notification: %v", err)
+		logging.Infof("Failed to delete report notification: %v", err)
 	}
 
 	// Return success response

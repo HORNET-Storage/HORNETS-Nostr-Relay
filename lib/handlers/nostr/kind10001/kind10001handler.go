@@ -2,10 +2,10 @@ package kind10001
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -44,7 +44,7 @@ func BuildKind10001Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
-			log.Printf("Error querying existing kind 10001 events: %v", err)
+			logging.Infof("Error querying existing kind 10001 events: %v", err)
 			write("NOTICE", fmt.Sprintf("Error querying existing events: %v", err))
 			return
 		}
@@ -60,7 +60,7 @@ func BuildKind10001Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Delete existing kind 10001 events if any
 		for _, oldEvent := range existingEvents {
 			if err := store.DeleteEvent(oldEvent.ID); err != nil {
-				log.Printf("Error deleting old kind 10001 event %s: %v", oldEvent.ID, err)
+				logging.Infof("Error deleting old kind 10001 event %s: %v", oldEvent.ID, err)
 			}
 		}
 
@@ -90,7 +90,7 @@ func validatePinnedNotesTags(tags nostr.Tags) error {
 	}
 
 	if !foundValidTag {
-		log.Println("No expected tags found in pinned notes event")
+		logging.Info("No expected tags found in pinned notes event")
 		return fmt.Errorf("pinned notes event must contain at least one of the expected tags (e)")
 	}
 

@@ -2,10 +2,10 @@ package badgerhold
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/timshannon/badgerhold/v4"
 )
@@ -44,7 +44,7 @@ func (store *BadgerholdStore) BlockPubkey(pubkey string, reason string) error {
 	}
 
 	// Terminate any active sessions for this pubkey
-	log.Printf("Terminating session for blocked pubkey: %s", pubkey)
+	logging.Infof("Terminating session for blocked pubkey: %s", pubkey)
 	sessions.DeleteSession(pubkey)
 
 	return nil

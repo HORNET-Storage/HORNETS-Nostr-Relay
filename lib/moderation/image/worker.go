@@ -1,7 +1,6 @@
 package image
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
@@ -83,7 +83,7 @@ func (w *Worker) Start() {
 	semaphore := make(chan struct{}, w.Concurrency)
 
 	go func() {
-		log.Printf("Starting image moderation worker with check interval %s", w.CheckInterval)
+		logging.Infof("Starting image moderation worker with check interval %s", w.CheckInterval)
 		defer eventTicker.Stop()
 		defer disputeTicker.Stop()
 		defer tempCleanupTicker.Stop()
@@ -96,12 +96,12 @@ func (w *Worker) Start() {
 				// Get and remove pending moderation events atomically
 				pendingEvents, err := w.Store.GetAndRemovePendingModeration(10) // Process up to 10 events at a time
 				if err != nil {
-					log.Printf("Error getting pending moderation events: %v", err)
+					logging.Infof("Error getting pending moderation events: %v", err)
 					continue
 				}
 
 				if len(pendingEvents) > 0 {
-					log.Printf("Processing %d events pending image moderation", len(pendingEvents))
+					logging.Infof("Processing %d events pending image moderation", len(pendingEvents))
 				}
 
 				// Process each pending event
@@ -109,11 +109,11 @@ func (w *Worker) Start() {
 					// Check if event is already blocked - if so, skip processing
 					isBlocked, err := w.Store.IsEventBlocked(event.EventID)
 					if err != nil {
-						log.Printf("Error checking if event %s is blocked: %v", event.EventID, err)
+						logging.Infof("Error checking if event %s is blocked: %v", event.EventID, err)
 					}
 
 					if isBlocked {
-						log.Printf("Skipping event %s which is already blocked", event.EventID)
+						logging.Infof("Skipping event %s which is already blocked", event.EventID)
 						continue
 					}
 
@@ -131,12 +131,12 @@ func (w *Worker) Start() {
 				// Get and remove pending dispute moderation events atomically
 				pendingDisputes, err := w.Store.GetAndRemovePendingDisputeModeration(5) // Process up to 5 disputes at a time
 				if err != nil {
-					log.Printf("Error getting pending dispute moderation events: %v", err)
+					logging.Infof("Error getting pending dispute moderation events: %v", err)
 					continue
 				}
 
 				if len(pendingDisputes) > 0 {
-					log.Printf("Processing %d disputes pending moderation", len(pendingDisputes))
+					logging.Infof("Processing %d disputes pending moderation", len(pendingDisputes))
 				}
 
 				// Process each pending dispute
@@ -166,7 +166,7 @@ func (w *Worker) Start() {
 				go w.cleanupResolutionEvents()
 
 			case <-w.StopChan:
-				log.Println("Stopping image moderation worker")
+				logging.Info("Stopping image moderation worker")
 				return
 			}
 		}
@@ -175,7 +175,7 @@ func (w *Worker) Start() {
 
 // cleanupBlockedEvents deletes blocked events older than 48 hours
 func (w *Worker) cleanupBlockedEvents() {
-	log.Println("Running blocked events cleanup...")
+	logging.Info("Running blocked events cleanup...")
 
 	// Calculate 48 hours in seconds
 	age := int64(48 * 60 * 60)
@@ -183,18 +183,18 @@ func (w *Worker) cleanupBlockedEvents() {
 	// Delete blocked events older than the age
 	count, err := w.Store.DeleteBlockedEventsOlderThan(age)
 	if err != nil {
-		log.Printf("Error cleaning up blocked events: %v", err)
+		logging.Infof("Error cleaning up blocked events: %v", err)
 		return
 	}
 
 	if count > 0 {
-		log.Printf("Deleted %d blocked events older than 48 hours", count)
+		logging.Infof("Deleted %d blocked events older than 48 hours", count)
 	}
 }
 
 // cleanupResolutionEvents deletes resolution events (kind 19843) older than 7 days
 func (w *Worker) cleanupResolutionEvents() {
-	log.Println("Running resolution events cleanup...")
+	logging.Info("Running resolution events cleanup...")
 
 	// Calculate 7 days in seconds
 	age := int64(7 * 24 * 60 * 60)
@@ -202,12 +202,12 @@ func (w *Worker) cleanupResolutionEvents() {
 	// Delete resolution events older than the age
 	count, err := w.Store.DeleteResolutionEventsOlderThan(age)
 	if err != nil {
-		log.Printf("Error cleaning up resolution events: %v", err)
+		logging.Infof("Error cleaning up resolution events: %v", err)
 		return
 	}
 
 	if count > 0 {
-		log.Printf("Deleted %d resolution events older than 7 days", count)
+		logging.Infof("Deleted %d resolution events older than 7 days", count)
 	}
 }
 
@@ -219,14 +219,14 @@ func (w *Worker) cleanupStaleFiles() {
 
 	// Protection against deleting critical directories
 	if w.TempDir == "/" || w.TempDir == "/tmp" || w.TempDir == "/var/tmp" {
-		log.Println("Refusing to clean potentially system directory:", w.TempDir)
+		logging.Infof("Refusing to clean potentially system directory:%s", w.TempDir)
 		return
 	}
 
 	// Get list of files in the temp directory
 	files, err := os.ReadDir(w.TempDir)
 	if err != nil {
-		log.Printf("Error reading temp directory %s: %v", w.TempDir, err)
+		logging.Infof("Error reading temp directory %s: %v", w.TempDir, err)
 		return
 	}
 
@@ -248,14 +248,14 @@ func (w *Worker) cleanupStaleFiles() {
 		// Get file info to check modification time
 		info, err := os.Stat(path)
 		if err != nil {
-			log.Printf("Error getting file info for %s: %v", path, err)
+			logging.Infof("Error getting file info for %s: %v", path, err)
 			continue
 		}
 
 		// Delete files older than staleThreshold
 		if now.Sub(info.ModTime()) > staleThreshold {
 			if err := os.Remove(path); err != nil {
-				log.Printf("Error removing stale temp file %s: %v", path, err)
+				logging.Infof("Error removing stale temp file %s: %v", path, err)
 			} else {
 				deletedCount++
 			}
@@ -263,7 +263,7 @@ func (w *Worker) cleanupStaleFiles() {
 	}
 
 	if deletedCount > 0 {
-		log.Printf("Periodic cleanup: removed %d stale temporary files from %s", deletedCount, w.TempDir)
+		logging.Infof("Periodic cleanup: removed %d stale temporary files from %s", deletedCount, w.TempDir)
 	}
 }
 
@@ -279,7 +279,7 @@ func (w *Worker) Stop() {
 
 // processEvent processes a single event with media (images and videos) for moderation
 func (w *Worker) processEvent(eventID string, mediaURLs []string) {
-	log.Printf("Processing event %s with %d media URLs", eventID, len(mediaURLs))
+	logging.Infof("Processing event %s with %d media URLs", eventID, len(mediaURLs))
 
 	var shouldBlock bool
 	var blockReason string
@@ -293,13 +293,13 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 		IDs: []string{eventID},
 	})
 	if err != nil {
-		log.Printf("Error retrieving event %s: %v", eventID, err)
+		logging.Infof("Error retrieving event %s: %v", eventID, err)
 		return
 	}
 
 	// Check if we found the event
 	if len(events) == 0 {
-		log.Printf("Event %s not found", eventID)
+		logging.Infof("Event %s not found", eventID)
 		return
 	}
 
@@ -319,12 +319,12 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 
 		response, err := w.ModerationService.ModerateURL(mediaURL)
 		if err != nil {
-			log.Printf("Error moderating %s %s: %v", mediaType, mediaURL, err)
+			logging.Infof("Error moderating %s %s: %v", mediaType, mediaURL, err)
 			continue
 		}
 
 		// Log the moderation result using proper Unicode-aware title casing
-		log.Printf("%s %s moderation result: level=%d decision=%s confidence=%.2f",
+		logging.Infof("%s %s moderation result: level=%d decision=%s confidence=%.2f",
 			titleCaser.String(mediaType), mediaURL, response.ContentLevel, response.Decision, response.Confidence)
 
 		if response.ShouldBlock() {
@@ -333,7 +333,7 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 			blockedMediaURL = mediaURL
 			contentType = mediaType
 			lastResponse = response // Store the response that triggered the block
-			log.Printf("Event %s will be blocked due to %s %s (reason: %s)",
+			logging.Infof("Event %s will be blocked due to %s %s (reason: %s)",
 				eventID, mediaType, mediaURL, response.Explanation)
 			break // No need to check other media
 		}
@@ -353,9 +353,9 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 
 		err := w.Store.MarkEventBlockedWithDetails(eventID, timestamp, blockReason, contentLevel, blockedMediaURL)
 		if err != nil {
-			log.Printf("Error marking event %s as blocked: %v", eventID, err)
+			logging.Infof("Error marking event %s as blocked: %v", eventID, err)
 		} else {
-			log.Printf("Event %s marked as blocked - will be deleted after 48 hours", eventID)
+			logging.Infof("Event %s marked as blocked - will be deleted after 48 hours", eventID)
 		}
 
 		// Create a moderation notification
@@ -373,15 +373,15 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 		if statsStore != nil {
 			err = statsStore.CreateModerationNotification(notification)
 			if err != nil {
-				log.Printf("Error creating moderation notification: %v", err)
+				logging.Infof("Error creating moderation notification: %v", err)
 			} else {
-				log.Printf("Created moderation notification for event %s", eventID)
+				logging.Infof("Created moderation notification for event %s", eventID)
 			}
 		} else {
-			log.Printf("Stats store not available, can't create notification for event %s", eventID)
+			logging.Infof("Stats store not available, can't create notification for event %s", eventID)
 		}
 	} else {
-		log.Printf("Event %s passed moderation, available for queries", eventID)
+		logging.Infof("Event %s passed moderation, available for queries", eventID)
 	}
 
 	// Remove from pending moderation queue regardless of result
@@ -391,7 +391,7 @@ func (w *Worker) processEvent(eventID string, mediaURLs []string) {
 	if err != nil {
 		// Only log the error if it's not a "not found" error
 		if !strings.Contains(err.Error(), "No data found for this key") {
-			log.Printf("Error removing event %s from pending moderation: %v", eventID, err)
+			logging.Infof("Error removing event %s from pending moderation: %v", eventID, err)
 		}
 	}
 }
@@ -547,17 +547,17 @@ func extractMediaURLsFromEvent(event *nostr.Event) []string {
 
 // processDispute processes a single dispute for re-evaluation
 func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
-	log.Printf("Processing dispute %s for event %s", dispute.DisputeID, dispute.EventID)
+	logging.Infof("Processing dispute %s for event %s", dispute.DisputeID, dispute.EventID)
 
 	// Check if the event is still blocked
 	isBlocked, err := w.Store.IsEventBlocked(dispute.EventID)
 	if err != nil {
-		log.Printf("Error checking if event %s is blocked: %v", dispute.EventID, err)
+		logging.Infof("Error checking if event %s is blocked: %v", dispute.EventID, err)
 		return
 	}
 
 	if !isBlocked {
-		log.Printf("Skipping dispute for event %s which is no longer blocked", dispute.EventID)
+		logging.Infof("Skipping dispute for event %s which is no longer blocked", dispute.EventID)
 		return
 	}
 
@@ -567,7 +567,7 @@ func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 	}
 	events, err := w.Store.QueryEvents(filter)
 	if err != nil || len(events) == 0 {
-		log.Printf("Error retrieving original event %s: %v", dispute.EventID, err)
+		logging.Infof("Error retrieving original event %s: %v", dispute.EventID, err)
 		return
 	}
 
@@ -578,11 +578,11 @@ func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 	mediaURLs := extractMediaURLsFromEvent(originalEvent)
 
 	if len(mediaURLs) == 0 {
-		log.Printf("No media URLs found in original event %s", dispute.EventID)
+		logging.Infof("No media URLs found in original event %s", dispute.EventID)
 		return
 	}
 
-	log.Printf("Found %d media URLs in original event %s", len(mediaURLs), dispute.EventID)
+	logging.Infof("Found %d media URLs in original event %s", len(mediaURLs), dispute.EventID)
 
 	// Track if any media passes moderation
 	var anyMediaPassed bool
@@ -592,12 +592,12 @@ func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 	for _, mediaURL := range mediaURLs {
 		response, err := w.ModerationService.ModerateDisputeURL(mediaURL, dispute.DisputeReason)
 		if err != nil {
-			log.Printf("Error re-evaluating media %s: %v", mediaURL, err)
+			logging.Infof("Error re-evaluating media %s: %v", mediaURL, err)
 			continue
 		}
 
 		// Log the re-evaluation result
-		log.Printf("Dispute re-evaluation result for %s: level=%d decision=%s confidence=%.2f",
+		logging.Infof("Dispute re-evaluation result for %s: level=%d decision=%s confidence=%.2f",
 			mediaURL, response.ContentLevel, response.Decision, response.Confidence)
 
 		// Store the last response for use in the resolution
@@ -637,9 +637,9 @@ func (w *Worker) processDispute(dispute lib.PendingDisputeModeration) {
 	)
 
 	if err != nil {
-		log.Printf("Error creating resolution event: %v", err)
+		logging.Infof("Error creating resolution event: %v", err)
 		return
 	}
 
-	log.Printf("Created resolution event for dispute %s (approved: %v)", dispute.DisputeID, approved)
+	logging.Infof("Created resolution event for dispute %s (approved: %v)", dispute.DisputeID, approved)
 }

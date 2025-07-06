@@ -3,7 +3,6 @@ package settings
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10411"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
@@ -20,73 +20,73 @@ import (
 
 // GetSettings returns the entire configuration
 func GetSettings(c *fiber.Ctx) error {
-	log.Println("Get settings request received")
+	logging.Info("Get settings request received")
 
 	// Return the entire config as JSON
 	settings := viper.AllSettings()
 
 	// Log the complete settings structure being sent to frontend
-	log.Printf("=== SETTINGS RESPONSE START ===")
-	log.Printf("Settings structure being sent to frontend:")
+	logging.Infof("=== SETTINGS RESPONSE START ===")
+	logging.Infof("Settings structure being sent to frontend:")
 
 	// Log each major section
 	if subscriptions, ok := settings["subscriptions"]; ok {
-		log.Printf("subscriptions: %+v", subscriptions)
+		logging.Infof("subscriptions: %+v", subscriptions)
 	} else {
-		log.Printf("subscriptions: NOT FOUND")
+		logging.Infof("subscriptions: NOT FOUND")
 	}
 
 	if allowedUsers, ok := settings["allowed_users"]; ok {
-		log.Printf("allowed_users: %+v", allowedUsers)
+		logging.Infof("allowed_users: %+v", allowedUsers)
 	} else {
-		log.Printf("allowed_users: NOT FOUND")
+		logging.Infof("allowed_users: NOT FOUND")
 	}
 
 	if eventFiltering, ok := settings["event_filtering"]; ok {
-		log.Printf("event_filtering: %+v", eventFiltering)
+		logging.Infof("event_filtering: %+v", eventFiltering)
 	} else {
-		log.Printf("event_filtering: NOT FOUND")
+		logging.Infof("event_filtering: NOT FOUND")
 	}
 
 	if contentFiltering, ok := settings["content_filtering"]; ok {
-		log.Printf("content_filtering: %+v", contentFiltering)
+		logging.Infof("content_filtering: %+v", contentFiltering)
 	} else {
-		log.Printf("content_filtering: NOT FOUND")
+		logging.Infof("content_filtering: NOT FOUND")
 	}
 
 	if relay, ok := settings["relay"]; ok {
-		log.Printf("relay: %+v", relay)
+		logging.Infof("relay: %+v", relay)
 	} else {
-		log.Printf("relay: NOT FOUND")
+		logging.Infof("relay: NOT FOUND")
 	}
 
 	if server, ok := settings["server"]; ok {
-		log.Printf("server: %+v", server)
+		logging.Infof("server: %+v", server)
 	} else {
-		log.Printf("server: NOT FOUND")
+		logging.Infof("server: NOT FOUND")
 	}
 
 	if externalServices, ok := settings["external_services"]; ok {
-		log.Printf("external_services: %+v", externalServices)
+		logging.Infof("external_services: %+v", externalServices)
 	} else {
-		log.Printf("external_services: NOT FOUND")
+		logging.Infof("external_services: NOT FOUND")
 	}
 
-	if logging, ok := settings["logging"]; ok {
-		log.Printf("logging: %+v", logging)
+	if logger, ok := settings["logging"]; ok {
+		logging.Infof("logging: %+v", logger)
 	} else {
-		log.Printf("logging: NOT FOUND")
+		logging.Info("logging: NOT FOUND")
 	}
 
-	log.Printf("Total settings keys: %d", len(settings))
-	log.Printf("All top-level keys: %v", getKeys(settings))
-	log.Printf("=== SETTINGS RESPONSE END ===")
+	logging.Infof("Total settings keys: %d", len(settings))
+	logging.Infof("All top-level keys: %v", getKeys(settings))
+	logging.Infof("=== SETTINGS RESPONSE END ===")
 
 	response := fiber.Map{
 		"settings": settings,
 	}
 
-	log.Printf("Final response structure: %+v", response)
+	logging.Infof("Final response structure: %+v", response)
 
 	return c.JSON(response)
 }
@@ -115,9 +115,9 @@ func normalizeDataTypes(settings map[string]interface{}) {
 						// Convert string to int
 						if nipInt, err := strconv.Atoi(nipValue); err == nil {
 							normalizedNips = append(normalizedNips, nipInt)
-							log.Printf("Converted NIP string '%s' to int %d", nipValue, nipInt)
+							logging.Infof("Converted NIP string '%s' to int %d", nipValue, nipInt)
 						} else {
-							log.Printf("Warning: Could not convert NIP '%s' to integer: %v", nipValue, err)
+							logging.Infof("Warning: Could not convert NIP '%s' to integer: %v", nipValue, err)
 						}
 					case float64:
 						// JSON numbers come as float64
@@ -125,7 +125,7 @@ func normalizeDataTypes(settings map[string]interface{}) {
 					case int:
 						normalizedNips = append(normalizedNips, nipValue)
 					default:
-						log.Printf("Warning: Unexpected NIP type %T: %v", nipValue, nipValue)
+						logging.Infof("Warning: Unexpected NIP type %T: %v", nipValue, nipValue)
 					}
 				}
 			case []string:
@@ -133,9 +133,9 @@ func normalizeDataTypes(settings map[string]interface{}) {
 				for _, nipStr := range v {
 					if nipInt, err := strconv.Atoi(nipStr); err == nil {
 						normalizedNips = append(normalizedNips, nipInt)
-						log.Printf("Converted NIP string '%s' to int %d", nipStr, nipInt)
+						logging.Infof("Converted NIP string '%s' to int %d", nipStr, nipInt)
 					} else {
-						log.Printf("Warning: Could not convert NIP '%s' to integer: %v", nipStr, err)
+						logging.Infof("Warning: Could not convert NIP '%s' to integer: %v", nipStr, err)
 					}
 				}
 			case []int:
@@ -144,7 +144,7 @@ func normalizeDataTypes(settings map[string]interface{}) {
 
 			if len(normalizedNips) > 0 {
 				relay["supported_nips"] = normalizedNips
-				log.Printf("Normalized supported_nips to integers: %v", normalizedNips)
+				logging.Infof("Normalized supported_nips to integers: %v", normalizedNips)
 			}
 		}
 	}
@@ -154,7 +154,7 @@ func normalizeDataTypes(settings map[string]interface{}) {
 func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings, store stores.Store) error {
 	// Check if switching TO subscription mode from another mode
 	if newSettings.Mode == "subscription" && currentSettings.Mode != "subscription" {
-		log.Printf("Mode switch detected: %s -> subscription. Checking Bitcoin address availability...", currentSettings.Mode)
+		logging.Infof("Mode switch detected: %s -> subscription. Checking Bitcoin address availability...", currentSettings.Mode)
 
 		// First, check if wallet service is reachable
 		walletHealthy, err := subscription.CheckWalletServiceHealth()
@@ -185,7 +185,7 @@ func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings
 
 		if addressCount < requiredAddresses {
 			addressesNeeded := requiredAddresses - addressCount
-			log.Printf("Insufficient Bitcoin addresses (%d needed + %d buffer = %d total required, but only %d available). Requesting %d more addresses...",
+			logging.Infof("Insufficient Bitcoin addresses (%d needed + %d buffer = %d total required, but only %d available). Requesting %d more addresses...",
 				usersWithoutAddresses, bufferSize, requiredAddresses, addressCount, addressesNeeded)
 
 			// Request additional addresses from wallet service asynchronously
@@ -193,18 +193,18 @@ func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings
 				subManager := subscription.GetGlobalManager()
 				if subManager != nil {
 					if err := subManager.RequestNewAddresses(addressesNeeded); err != nil {
-						log.Printf("Warning: Failed to request additional Bitcoin addresses: %v", err)
+						logging.Infof("Warning: Failed to request additional Bitcoin addresses: %v", err)
 					} else {
-						log.Printf("Successfully requested %d additional Bitcoin addresses from wallet service", addressesNeeded)
+						logging.Infof("Successfully requested %d additional Bitcoin addresses from wallet service", addressesNeeded)
 					}
 				}
 			}()
 
 			// Allow the mode switch to proceed - addresses will be generated in background
-			log.Printf("Mode switch proceeding - requested %d additional addresses, they will be available shortly", addressesNeeded)
+			logging.Infof("Mode switch proceeding - requested %d additional addresses, they will be available shortly", addressesNeeded)
 		}
 
-		log.Printf("Mode switch validation passed: %d addresses available for %d users (with %d buffer)",
+		logging.Infof("Mode switch validation passed: %d addresses available for %d users (with %d buffer)",
 			addressCount, usersWithoutAddresses, bufferSize)
 	}
 
@@ -213,30 +213,30 @@ func validateModeSwitch(currentSettings, newSettings *types.AllowedUsersSettings
 
 // UpdateSettings updates configuration values
 func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Update settings request received")
+	logging.Info("Update settings request received")
 
 	var data map[string]interface{}
 	if err := c.BodyParser(&data); err != nil {
-		log.Printf("Error parsing request body: %v", err)
+		logging.Infof("Error parsing request body: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
 	}
 
-	log.Printf("=== UPDATE SETTINGS REQUEST START ===")
-	log.Printf("Raw request data: %+v", data)
+	logging.Infof("=== UPDATE SETTINGS REQUEST START ===")
+	logging.Infof("Raw request data: %+v", data)
 
 	// Extract settings from the request
 	settings, ok := data["settings"].(map[string]interface{})
 	if !ok {
-		log.Printf("ERROR: Settings data not found in request. Available keys: %v", getKeys(data))
+		logging.Infof("ERROR: Settings data not found in request. Available keys: %v", getKeys(data))
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Settings data expected",
 		})
 	}
 
-	log.Printf("Extracted settings from request: %+v", settings)
-	log.Printf("Settings keys being updated: %v", getKeys(settings))
+	logging.Infof("Extracted settings from request: %+v", settings)
+	logging.Infof("Settings keys being updated: %v", getKeys(settings))
 
 	// NORMALIZATION: Ensure proper data types before saving
 	normalizeDataTypes(settings)
@@ -251,7 +251,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 			// Get current config to compare mode changes
 			currentConfig, err := config.GetConfig()
 			if err != nil {
-				log.Printf("Error getting current config for validation: %v", err)
+				logging.Infof("Error getting current config for validation: %v", err)
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "Failed to get current configuration for validation",
 				})
@@ -263,14 +263,14 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 			// Marshal to JSON and back to properly convert types
 			jsonData, err := json.Marshal(allowedUsersInterface)
 			if err != nil {
-				log.Printf("Error marshaling allowed_users settings: %v", err)
+				logging.Infof("Error marshaling allowed_users settings: %v", err)
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 					"error": "Invalid allowed_users settings format",
 				})
 			}
 
 			if err := json.Unmarshal(jsonData, &newAllowedUsersSettings); err != nil {
-				log.Printf("Error unmarshaling allowed_users settings: %v", err)
+				logging.Infof("Error unmarshaling allowed_users settings: %v", err)
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 					"error": "Invalid allowed_users settings structure",
 				})
@@ -278,7 +278,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 
 			// Validate the mode switch
 			if err := validateModeSwitch(&currentConfig.AllowedUsersSettings, &newAllowedUsersSettings, store); err != nil {
-				log.Printf("Mode switch validation failed: %v", err)
+				logging.Infof("Mode switch validation failed: %v", err)
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 					"error": fmt.Sprintf("Mode switch validation failed: %v", err),
 				})
@@ -295,20 +295,20 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	relaySettingsUpdated := false
 	if _, exists := settings["relay"]; exists {
 		relaySettingsUpdated = true
-		log.Println("Relay settings updated, will regenerate kind 10411 event...")
+		logging.Info("Relay settings updated, will regenerate kind 10411 event...")
 	}
 
 	// Update each setting
 	for key, value := range settings {
-		log.Printf("Setting %s = %v (type: %T)", key, value, value)
+		logging.Infof("Setting %s = %v (type: %T)", key, value, value)
 		viper.Set(key, value)
 	}
 
-	log.Printf("=== UPDATE SETTINGS REQUEST END ===")
+	logging.Infof("=== UPDATE SETTINGS REQUEST END ===")
 
 	// Save the configuration
 	if err := viper.WriteConfig(); err != nil {
-		log.Printf("Error writing config: %v", err)
+		logging.Infof("Error writing config: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save settings",
 		})
@@ -316,7 +316,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 
 	// If allowed_users settings were updated, trigger event regeneration
 	if allowedUsersUpdated {
-		log.Println("Allowed users settings updated, triggering event regeneration...")
+		logging.Info("Allowed users settings updated, triggering event regeneration...")
 
 		// Schedule batch update of kind 11888 events after a short delay
 		// This allows for multiple rapid setting changes to be batched together
@@ -337,35 +337,35 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 					reason = "relay settings changes"
 				}
 
-				log.Printf("Regenerating kind 10411 event due to %s...", reason)
+				logging.Infof("Regenerating kind 10411 event due to %s...", reason)
 
 				// Get the private and public keys from viper (same way as main.go does)
 				serializedPrivateKey := viper.GetString("relay.private_key")
 				if len(serializedPrivateKey) <= 0 {
-					log.Printf("Error: No private key found in configuration")
+					logging.Infof("Error: No private key found in configuration")
 					return
 				}
 
 				privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
 				if err != nil {
-					log.Printf("Error deserializing private key: %v", err)
+					logging.Infof("Error deserializing private key: %v", err)
 					return
 				}
 
 				// Use the existing store instance passed from the web server
 				// This avoids the database lock issue
 				if err := kind10411.CreateKind10411Event(privateKey, publicKey, store); err != nil {
-					log.Printf("Error regenerating kind 10411 event: %v", err)
+					logging.Infof("Error regenerating kind 10411 event: %v", err)
 				} else {
-					log.Printf("Successfully regenerated kind 10411 event")
+					logging.Infof("Successfully regenerated kind 10411 event")
 				}
 			}()
 		} else {
-			log.Printf("Warning: Store not available, skipping kind 10411 regeneration")
+			logging.Infof("Warning: Store not available, skipping kind 10411 regeneration")
 		}
 	}
 
-	log.Println("Settings updated successfully")
+	logging.Info("Settings updated successfully")
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Settings updated successfully",
@@ -416,7 +416,7 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 
 	// Save the configuration
 	if err := viper.WriteConfig(); err != nil {
-		log.Printf("Error writing config: %v", err)
+		logging.Infof("Error writing config: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save setting",
 		})

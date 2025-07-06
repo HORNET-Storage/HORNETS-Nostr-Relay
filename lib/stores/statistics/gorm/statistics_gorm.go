@@ -3,7 +3,6 @@ package gorm
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 	"sort"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	jsoniter "github.com/json-iterator/go"
@@ -151,7 +151,7 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 		})
 
 		if err == nil {
-			log.Printf("Successfully allocated address for npub %s after %d attempts", npub, attempt+1)
+			logging.Infof("Successfully allocated address for npub %s after %d attempts", npub, attempt+1)
 			return addressToReturn, nil
 		}
 
@@ -160,7 +160,7 @@ func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Ad
 			strings.Contains(err.Error(), "busy") ||
 			strings.Contains(err.Error(), "tx read conflict") {
 			backoffTime := time.Duration(1000*(1<<attempt)) * time.Millisecond // Base of 1 second for address allocation
-			log.Printf("Database lock detected when allocating address, retrying in %v: %v", backoffTime, err)
+			logging.Infof("Database lock detected when allocating address, retrying in %v: %v", backoffTime, err)
 			time.Sleep(backoffTime)
 			continue
 		}
@@ -193,7 +193,7 @@ func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 	result := store.DB.Order("timestamp_hornets desc").First(&latestBitcoinRate)
 
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		log.Printf("Error querying bitcoin rate: %v", result.Error)
+		logging.Infof("Error querying bitcoin rate: %v", result.Error)
 		return result.Error
 	}
 
@@ -202,7 +202,7 @@ func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 
 	// If the rate is the same as the latest entry, no update needed
 	if result.Error == nil && latestBitcoinRate.Rate == rateStr {
-		log.Println("Rate is the same as the latest entry, no update needed")
+		logging.Info("Rate is the same as the latest entry, no update needed")
 		return nil
 	}
 
@@ -212,11 +212,11 @@ func (store *GormStatisticsStore) SaveBitcoinRate(rate float64) error {
 		TimestampHornets: time.Now(),
 	}
 	if err := store.DB.Create(&newRate).Error; err != nil {
-		log.Printf("Error saving new rate: %v", err)
+		logging.Infof("Error saving new rate: %v", err)
 		return err
 	}
 
-	log.Println("Bitcoin rate updated successfully")
+	logging.Info("Bitcoin rate updated successfully")
 	return nil
 }
 
@@ -229,7 +229,7 @@ func (store *GormStatisticsStore) GetBitcoinRates(days int) ([]types.BitcoinRate
 	result := store.DB.Where("timestamp_hornets >= ?", timePassed).Order("timestamp_hornets asc").Find(&bitcoinRates)
 
 	if result.Error != nil {
-		log.Printf("Error querying Bitcoin rates: %v", result.Error)
+		logging.Infof("Error querying Bitcoin rates: %v", result.Error)
 		return nil, result.Error
 	}
 
@@ -279,7 +279,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 			if event.Kind == 0 {
 				var contentData map[string]interface{}
 				if err := jsoniter.Unmarshal([]byte(event.Content), &contentData); err != nil {
-					log.Println("No lightningAddr or dhtKey keys in event content, proceeding with default values.")
+					logging.Info("No lightningAddr or dhtKey keys in event content, proceeding with default values.")
 					contentData = map[string]interface{}{}
 				}
 
@@ -297,7 +297,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 
 				// Use the same transaction for profile update
 				if err := store.upsertUserProfileTx(tx, npubKey, lightningAddr, dhtKey, time.Unix(int64(event.CreatedAt), 0)); err != nil {
-					log.Printf("Error upserting user profile: %v", err)
+					logging.Infof("Error upserting user profile: %v", err)
 					return err
 				}
 			}
@@ -312,7 +312,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 
 				if count > 0 {
 					// Event already exists, skip insertion
-					log.Printf("Event %s already exists in the database, skipping", event.ID)
+					logging.Infof("Event %s already exists in the database, skipping", event.ID)
 					return nil
 				}
 
@@ -339,10 +339,10 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 					if subManager != nil {
 						// Convert PubKey from hex to npub format for subscription manager
 						if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
-							log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pubKey, err)
+							logging.Infof("Warning: Failed to update storage usage for pubkey %s: %v", pubKey, err)
 						}
 					} else {
-						log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pubKey)
+						logging.Infof("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pubKey)
 					}
 				}(event.PubKey, int64(sizeBytes))
 			}
@@ -360,7 +360,7 @@ func (store *GormStatisticsStore) SaveEventKind(event *nostr.Event) error {
 			strings.Contains(err.Error(), "busy") ||
 			strings.Contains(err.Error(), "tx read conflict") {
 			backoffTime := time.Duration(100*(1<<attempt)) * time.Millisecond
-			log.Printf("Database lock detected when saving event kind, retrying in %v: %v", backoffTime, err)
+			logging.Infof("Database lock detected when saving event kind, retrying in %v: %v", backoffTime, err)
 			time.Sleep(backoffTime)
 			continue
 		}
@@ -462,7 +462,7 @@ func (store *GormStatisticsStore) QueryFiles(criteria map[string]interface{}) ([
 
 	err := query.Find(&files).Error
 	if err != nil {
-		log.Printf("Error querying files: %v", err)
+		logging.Infof("Error querying files: %v", err)
 		return nil, err
 	}
 
@@ -502,7 +502,7 @@ func (store *GormStatisticsStore) QueryTags(tags map[string]string) ([]string, e
 	var roots []string
 	err := query.Distinct("root").Pluck("root", &roots).Error
 	if err != nil {
-		log.Printf("Error querying file tags: %v", err)
+		logging.Infof("Error querying file tags: %v", err)
 		return nil, err
 	}
 
@@ -521,11 +521,11 @@ func (store *GormStatisticsStore) DeleteEventByID(eventID string) error {
 func (store *GormStatisticsStore) FetchKindData() ([]types.AggregatedKindData, error) {
 	var kinds []types.Kind
 	if err := store.DB.Find(&kinds).Error; err != nil {
-		log.Println("Error fetching kinds:", err)
+		logging.Infof("Error fetching kinds: %v", err)
 		return nil, err
 	}
 
-	log.Println("Stats DB kinds: ", kinds)
+	logging.Infof("Stats DB kinds: %+v", kinds)
 
 	aggregatedData := make(map[int]types.AggregatedKindData)
 
@@ -568,12 +568,12 @@ func (store *GormStatisticsStore) FetchKindTrendData(kindNumber int) ([]types.Mo
 	`
 	err := store.DB.Raw(query, kindNumber).Scan(&data).Error
 	if err != nil {
-		log.Println("Error fetching kind data:", err)
+		logging.Infof("Error fetching kind data:%s", err)
 		return nil, err
 	}
 
 	if len(data) == 0 {
-		log.Println("No data found for the specified kind number and time range")
+		logging.Info("No data found for the specified kind number and time range")
 		return nil, nil
 	}
 
@@ -602,7 +602,7 @@ func (store *GormStatisticsStore) FetchKindTrendData(kindNumber int) ([]types.Mo
 func (store *GormStatisticsStore) FindUserByNpub(npub string) (*types.AdminUser, error) {
 	var user types.AdminUser
 	if err := store.DB.Where("npub = ?", npub).First(&user).Error; err != nil {
-		log.Printf("User not found: %v", err)
+		logging.Infof("User not found: %v", err)
 		return nil, err
 	}
 	return &user, nil
@@ -620,7 +620,7 @@ func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserCha
 	if err := store.DB.Model(&types.UserChallenge{}).
 		Where("challenge = ? AND expired = false", userChallenge.Challenge).
 		Count(&count).Error; err != nil {
-		log.Printf("Failed to check existing challenge: %v", err)
+		logging.Infof("Failed to check existing challenge: %v", err)
 		return err
 	}
 
@@ -630,7 +630,7 @@ func (store *GormStatisticsStore) SaveUserChallenge(userChallenge *types.UserCha
 
 	// Save the new challenge
 	if err := store.DB.Create(userChallenge).Error; err != nil {
-		log.Printf("Failed to save user challenge: %v", err)
+		logging.Infof("Failed to save user challenge: %v", err)
 		return err
 	}
 
@@ -648,9 +648,9 @@ func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
 			}
 
 			if result.RowsAffected == 0 {
-				log.Printf("No tokens found for user %d", userID)
+				logging.Infof("No tokens found for user %d", userID)
 			} else {
-				log.Printf("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
+				logging.Infof("Successfully deleted %d tokens for user %d", result.RowsAffected, userID)
 			}
 
 			return nil
@@ -667,7 +667,7 @@ func (store *GormStatisticsStore) DeleteActiveToken(userID uint) error {
 
 		// If this was the last retry, return the error
 		if i == maxRetries-1 {
-			log.Printf("Failed to delete tokens after %d retries: %v", maxRetries, err)
+			logging.Infof("Failed to delete tokens after %d retries: %v", maxRetries, err)
 			return err
 		}
 
@@ -822,7 +822,7 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 		Both      int    `gorm:"column:both"`
 	}
 
-	log.Printf("FetchProfilesTimeSeriesData: startDate=%s, endDate=%s", startDate, endDate)
+	logging.Infof("FetchProfilesTimeSeriesData: startDate=%s, endDate=%s", startDate, endDate)
 
 	// First, let's make sure we include all months in our range, even if there's no data for a month
 	// Then calculate the cumulative totals for each month
@@ -885,7 +885,7 @@ func (store *GormStatisticsStore) FetchWalletAddresses() ([]types.WalletAddress,
 
 	// Query the wallet addresses from the database
 	if err := store.DB.Find(&walletAddresses).Error; err != nil {
-		log.Printf("Error fetching wallet addresses: %v", err)
+		logging.Infof("Error fetching wallet addresses: %v", err)
 		return nil, err
 	}
 
@@ -954,18 +954,18 @@ func (store *GormStatisticsStore) ReplaceTransaction(replaceRequest types.Replac
 	var originalPendingTransaction types.PendingTransaction
 	if err := store.DB.Where("tx_id = ?", replaceRequest.OriginalTxID).First(&originalPendingTransaction).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			log.Printf("No pending transaction found with TxID %s", replaceRequest.OriginalTxID)
+			logging.Infof("No pending transaction found with TxID %s", replaceRequest.OriginalTxID)
 			return gorm.ErrRecordNotFound
 		}
-		log.Printf("Error querying original transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
+		logging.Infof("Error querying original transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
 		return err
 	}
 
 	if err := store.DB.Delete(&originalPendingTransaction).Error; err != nil {
-		log.Printf("Error deleting pending transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
+		logging.Infof("Error deleting pending transaction with TxID %s: %v", replaceRequest.OriginalTxID, err)
 		return err
 	}
-	log.Printf("Deleted original pending transaction with TxID %s", replaceRequest.OriginalTxID)
+	logging.Infof("Deleted original pending transaction with TxID %s", replaceRequest.OriginalTxID)
 
 	// Save the new pending transaction
 	newPendingTransaction := types.PendingTransaction{
@@ -977,7 +977,7 @@ func (store *GormStatisticsStore) ReplaceTransaction(replaceRequest types.Replac
 	}
 
 	if err := store.DB.Create(&newPendingTransaction).Error; err != nil {
-		log.Printf("Error saving new pending transaction: %v", err)
+		logging.Infof("Error saving new pending transaction: %v", err)
 		return err
 	}
 
@@ -991,7 +991,7 @@ func (store *GormStatisticsStore) SaveUnconfirmedTransaction(pendingTransaction 
 
 	// Save the pending transaction to the database
 	if err := store.DB.Create(pendingTransaction).Error; err != nil {
-		log.Printf("Error saving pending transaction: %v", err)
+		logging.Infof("Error saving pending transaction: %v", err)
 		return err
 	}
 
@@ -1003,7 +1003,7 @@ func (store *GormStatisticsStore) SignUpUser(npub string, password string) error
 	// Check if npub already exists
 	var count int64
 	if err := store.DB.Model(&types.AdminUser{}).Where("npub = ?", npub).Count(&count).Error; err != nil {
-		log.Printf("Failed to check existing user: %v", err)
+		logging.Infof("Failed to check existing user: %v", err)
 		return err
 	}
 	if count > 0 {
@@ -1013,7 +1013,7 @@ func (store *GormStatisticsStore) SignUpUser(npub string, password string) error
 	// Hash the password before saving it
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("Failed to hash password: %v", err)
+		logging.Infof("Failed to hash password: %v", err)
 		return err
 	}
 
@@ -1025,7 +1025,7 @@ func (store *GormStatisticsStore) SignUpUser(npub string, password string) error
 
 	// Save the user in the database
 	if err := store.DB.Create(&user).Error; err != nil {
-		log.Printf("Failed to create user: %v", err)
+		logging.Infof("Failed to create user: %v", err)
 		return err
 	}
 
@@ -1039,7 +1039,7 @@ func (store *GormStatisticsStore) GetPendingTransactions() ([]types.PendingTrans
 	// Query all pending transactions ordered by timestamp (descending)
 	result := store.DB.Order("timestamp_hornets desc").Find(&pendingTransactions)
 	if result.Error != nil {
-		log.Printf("Error querying pending transactions: %v", result.Error)
+		logging.Infof("Error querying pending transactions: %v", result.Error)
 		return nil, result.Error
 	}
 
@@ -1052,7 +1052,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 	store.bitcoinRateMutex.Lock()
 	defer store.bitcoinRateMutex.Unlock()
 
-	log.Printf("Updating Bitcoin rate to %.8f", rate)
+	logging.Infof("Updating Bitcoin rate to %.8f", rate)
 
 	// Maximum retries for database operations
 	const maxRetries = 6 // Increased from 3 to handle persistent locks
@@ -1073,13 +1073,13 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 			result := tx.Order("timestamp_hornets desc").First(&latestBitcoinRate)
 
 			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-				log.Printf("Error querying bitcoin rate: %v", result.Error)
+				logging.Infof("Error querying bitcoin rate: %v", result.Error)
 				return result.Error
 			}
 
 			if result.Error == nil && latestBitcoinRate.Rate == rateStr {
 				// If the rate is the same as the latest entry, no update needed
-				log.Println("Rate is the same as the latest entry, no update needed")
+				logging.Info("Rate is the same as the latest entry, no update needed")
 				return nil
 			}
 
@@ -1090,7 +1090,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 			}
 
 			if err := tx.Create(&newRate).Error; err != nil {
-				log.Printf("Error saving new rate: %v", err)
+				logging.Infof("Error saving new rate: %v", err)
 				return err
 			}
 
@@ -1098,7 +1098,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 		})
 
 		if err == nil {
-			log.Println("Bitcoin rate updated successfully")
+			logging.Info("Bitcoin rate updated successfully")
 			return nil
 		}
 
@@ -1108,7 +1108,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 			strings.Contains(err.Error(), "tx read conflict") {
 			// Longer exponential backoff with base of 500ms instead of 100ms
 			backoffTime := time.Duration(500*(1<<attempt)) * time.Millisecond
-			log.Printf("Database lock detected when updating Bitcoin rate, retrying in %v: %v", backoffTime, err)
+			logging.Infof("Database lock detected when updating Bitcoin rate, retrying in %v: %v", backoffTime, err)
 			time.Sleep(backoffTime)
 			continue
 		}
@@ -1118,7 +1118,7 @@ func (store *GormStatisticsStore) UpdateBitcoinRate(rate float64) error {
 	}
 
 	if err != nil {
-		log.Printf("Failed to update Bitcoin rate after %d attempts: %v", maxRetries, err)
+		logging.Infof("Failed to update Bitcoin rate after %d attempts: %v", maxRetries, err)
 	}
 
 	return err
@@ -1130,7 +1130,7 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 	store.walletBalanceMutex.Lock()
 	defer store.walletBalanceMutex.Unlock()
 
-	log.Printf("Updating wallet balance for %s to %s", walletName, balance)
+	logging.Infof("Updating wallet balance for %s to %s", walletName, balance)
 
 	// Maximum retries for database operations
 	const maxRetries = 6 // Increased from 3 to handle persistent locks
@@ -1148,13 +1148,13 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 			result := tx.Order("timestamp_hornets desc").First(&latestBalance)
 
 			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-				log.Printf("Error querying latest balance: %v", result.Error)
+				logging.Infof("Error querying latest balance: %v", result.Error)
 				return result.Error
 			}
 
 			// If the balance is the same as the latest entry, no update needed
 			if result.Error == nil && latestBalance.Balance == balance {
-				log.Println("Balance is the same as the latest entry, no update needed")
+				logging.Info("Balance is the same as the latest entry, no update needed")
 				return nil
 			}
 
@@ -1165,7 +1165,7 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 			}
 
 			if err := tx.Create(&newBalance).Error; err != nil {
-				log.Printf("Error saving new balance: %v", err)
+				logging.Infof("Error saving new balance: %v", err)
 				return err
 			}
 
@@ -1173,7 +1173,7 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 		})
 
 		if err == nil {
-			log.Println("Wallet balance updated successfully")
+			logging.Info("Wallet balance updated successfully")
 			return nil
 		}
 
@@ -1183,7 +1183,7 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 			strings.Contains(err.Error(), "tx read conflict") {
 			// Longer exponential backoff with base of 500ms instead of 100ms
 			backoffTime := time.Duration(500*(1<<attempt)) * time.Millisecond
-			log.Printf("Database lock detected when updating wallet balance, retrying in %v: %v", backoffTime, err)
+			logging.Infof("Database lock detected when updating wallet balance, retrying in %v: %v", backoffTime, err)
 			time.Sleep(backoffTime)
 			continue
 		}
@@ -1193,7 +1193,7 @@ func (store *GormStatisticsStore) UpdateWalletBalance(walletName, balance string
 	}
 
 	if err != nil {
-		log.Printf("Failed to update wallet balance after %d attempts: %v", maxRetries, err)
+		logging.Infof("Failed to update wallet balance after %d attempts: %v", maxRetries, err)
 		return err
 	}
 
@@ -1224,12 +1224,12 @@ func (store *GormStatisticsStore) SaveWalletTransaction(tx types.WalletTransacti
 			return nil
 		}
 
-		log.Printf("Attempt %d: Error saving wallet transaction: %v", attempt+1, err)
+		logging.Infof("Attempt %d: Error saving wallet transaction: %v", attempt+1, err)
 
 		// Enhanced exponential backoff
 		if attempt < maxRetries-1 {
 			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
-			log.Printf("Retrying in %v...", backoffDuration)
+			logging.Infof("Retrying in %v...", backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 	}
@@ -1262,11 +1262,11 @@ func (store *GormStatisticsStore) DeletePendingTransaction(txID string) error {
 			}
 
 			if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-				log.Printf("Error querying pending transaction with TxID %s: %v", txID, result.Error)
+				logging.Infof("Error querying pending transaction with TxID %s: %v", txID, result.Error)
 				return result.Error
 			}
 
-			log.Printf("No pending transaction found with TxID %s", txID)
+			logging.Infof("No pending transaction found with TxID %s", txID)
 			return nil
 		})
 
@@ -1274,12 +1274,12 @@ func (store *GormStatisticsStore) DeletePendingTransaction(txID string) error {
 			return nil
 		}
 
-		log.Printf("Attempt %d: Error deleting pending transaction: %v", attempt+1, err)
+		logging.Infof("Attempt %d: Error deleting pending transaction: %v", attempt+1, err)
 
 		// Enhanced exponential backoff
 		if attempt < maxRetries-1 {
 			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
-			log.Printf("Retrying in %v...", backoffDuration)
+			logging.Infof("Retrying in %v...", backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 	}
@@ -1320,12 +1320,12 @@ func (store *GormStatisticsStore) TransactionExists(address string, date time.Ti
 		// If there's another error, we'll retry
 		if result.Error != nil {
 			err = result.Error
-			log.Printf("Attempt %d: Error checking transaction existence: %v", attempt+1, err)
+			logging.Infof("Attempt %d: Error checking transaction existence: %v", attempt+1, err)
 
 			// Enhanced exponential backoff
 			if attempt < maxRetries-1 {
 				backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
-				log.Printf("Retrying in %v...", backoffDuration)
+				logging.Infof("Retrying in %v...", backoffDuration)
 				time.Sleep(backoffDuration)
 				continue
 			}
@@ -1431,7 +1431,7 @@ func (store *GormStatisticsStore) SaveAddressBatch(addresses []*types.WalletAddr
 			}
 
 			if retry == maxRetries-1 {
-				log.Printf("Failed to save batch after %d retries: %v", maxRetries, err)
+				logging.Infof("Failed to save batch after %d retries: %v", maxRetries, err)
 				return err
 			}
 
@@ -1477,7 +1477,7 @@ func (store *GormStatisticsStore) SaveSubscriberAddressBatch(addresses []*types.
 			}
 
 			if retry == maxRetries-1 {
-				log.Printf("Failed to save subscriber batch after %d retries: %v", maxRetries, err)
+				logging.Infof("Failed to save subscriber batch after %d retries: %v", maxRetries, err)
 				return err
 			}
 
@@ -1555,7 +1555,7 @@ func (store *GormStatisticsStore) GetUserByID(userID uint) (types.AdminUser, err
 func (store *GormStatisticsStore) StoreActiveToken(activeToken *types.ActiveToken) error {
 	// First try to delete any existing tokens for this user
 	if err := store.DeleteActiveToken(activeToken.UserID); err != nil {
-		log.Printf("Warning: failed to delete existing tokens: %v", err)
+		logging.Infof("Warning: failed to delete existing tokens: %v", err)
 		// Continue anyway as we still want to try creating the new token
 	}
 
@@ -1631,12 +1631,12 @@ func (store *GormStatisticsStore) GetSubscriberByAddress(address string) (*types
 			return nil, fmt.Errorf("no subscriber found for address: %s", address)
 		}
 
-		log.Printf("Attempt %d: Error querying subscriber by address: %v", attempt+1, err)
+		logging.Infof("Attempt %d: Error querying subscriber by address: %v", attempt+1, err)
 
 		// Exponential backoff for retries
 		if attempt < maxRetries-1 {
 			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt)) // Base increased to 500ms
-			log.Printf("Retrying in %v...", backoffDuration)
+			logging.Infof("Retrying in %v...", backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 	}
@@ -1671,12 +1671,12 @@ func (store *GormStatisticsStore) GetSubscriberByNpub(npub string) (*types.Subsc
 			return nil, fmt.Errorf("no subscriber found for npub: %s", npub)
 		}
 
-		log.Printf("Attempt %d: Error querying subscriber by npub: %v", attempt+1, err)
+		logging.Infof("Attempt %d: Error querying subscriber by npub: %v", attempt+1, err)
 
 		// Exponential backoff for retries
 		if attempt < maxRetries-1 {
 			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt))
-			log.Printf("Retrying in %v...", backoffDuration)
+			logging.Infof("Retrying in %v...", backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 	}
@@ -1713,16 +1713,16 @@ func (store *GormStatisticsStore) UpdateSubscriberCredit(npub string, creditSats
 			Update("credit_sats", creditSats).Error
 
 		if err == nil {
-			log.Printf("Updated credit for npub %s to %d sats", npub, creditSats)
+			logging.Infof("Updated credit for npub %s to %d sats", npub, creditSats)
 			return nil
 		}
 
-		log.Printf("Attempt %d: Error updating subscriber credit: %v", attempt+1, err)
+		logging.Infof("Attempt %d: Error updating subscriber credit: %v", attempt+1, err)
 
 		// Exponential backoff for retries
 		if attempt < maxRetries-1 {
 			backoffDuration := time.Millisecond * time.Duration(500*(1<<attempt))
-			log.Printf("Retrying in %v...", backoffDuration)
+			logging.Infof("Retrying in %v...", backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 	}
@@ -1741,7 +1741,7 @@ func (store *GormStatisticsStore) GetPaidSubscribers() ([]types.PaidSubscriber, 
 
 	// Query all paid subscribers
 	if err := store.DB.Find(&subscribers).Error; err != nil {
-		log.Printf("Error fetching paid subscribers: %v", err)
+		logging.Infof("Error fetching paid subscribers: %v", err)
 		return nil, err
 	}
 

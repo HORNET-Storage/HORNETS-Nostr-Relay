@@ -5,12 +5,13 @@ import (
 	"strconv"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 )
 
 // GenerateWalletBalance creates wallet balance history data
 func (g *DemoDataGenerator) GenerateWalletBalance(store statistics.StatisticsStore) error {
-	fmt.Println("Generating wallet balance history...")
+	logging.Infof("Generating wallet balance history...")
 
 	// Start with initial balance (e.g., 1,000,000 satoshis)
 	initialBalance := int64(1000000)
@@ -47,13 +48,13 @@ func (g *DemoDataGenerator) GenerateWalletBalance(store statistics.StatisticsSto
 		}
 	}
 
-	fmt.Println("Wallet balance history generation complete!")
+	logging.Infof("Wallet balance history generation complete!")
 	return nil
 }
 
 // GenerateWalletTransactions creates transaction history data
 func (g *DemoDataGenerator) GenerateWalletTransactions(store statistics.StatisticsStore, count int) error {
-	fmt.Printf("Generating %d wallet transactions...\n", count)
+	logging.Infof("Generating %d wallet transactions...\n", count)
 
 	// Define transaction types
 	types := []string{"deposit", "withdrawal", "payment"}
@@ -69,7 +70,7 @@ func (g *DemoDataGenerator) GenerateWalletTransactions(store statistics.Statisti
 			currentBatchSize = count - i
 		}
 
-		fmt.Printf("Generating transactions %d to %d...\n", i+1, i+currentBatchSize)
+		logging.Infof("Generating transactions %d to %d...\n", i+1, i+currentBatchSize)
 
 		for j := 0; j < currentBatchSize; j++ {
 			// Select random month
@@ -110,13 +111,13 @@ func (g *DemoDataGenerator) GenerateWalletTransactions(store statistics.Statisti
 		}
 	}
 
-	fmt.Println("Wallet transaction generation complete!")
+	logging.Infof("Wallet transaction generation complete!")
 	return nil
 }
 
 // GenerateWalletAddresses creates wallet address data
 func (g *DemoDataGenerator) GenerateWalletAddresses(store statistics.StatisticsStore, count int) error {
-	fmt.Printf("Generating %d wallet addresses...\n", count)
+	logging.Infof("Generating %d wallet addresses...\n", count)
 
 	// Generate addresses
 	for i := 0; i < count; i++ {
@@ -138,6 +139,6 @@ func (g *DemoDataGenerator) GenerateWalletAddresses(store statistics.StatisticsS
 		}
 	}
 
-	fmt.Println("Wallet address generation complete!")
+	logging.Infof("Wallet address generation complete!")
 	return nil
 }

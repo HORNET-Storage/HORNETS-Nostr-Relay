@@ -37,7 +37,7 @@ external_services:
 # ==================================================
 logging:
   level: "info"
-  output: "both"
+  output: "file"  # Options: "stdout", "file", "both"
   path: "/logs"
 
 # ==================================================

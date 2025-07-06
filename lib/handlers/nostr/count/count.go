@@ -1,8 +1,7 @@
 package count
 
 import (
-	"log"
-
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -16,21 +15,21 @@ func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		data, err := read()
 		if err != nil {
-			log.Println("Error reading from stream:", err)
+			logging.Infof("Error reading from stream:%s", err)
 			write("NOTICE", "Error reading from stream.")
 			return
 		}
 
 		var request nostr.CountEnvelope
 		if err := json.Unmarshal(data, &request); err != nil {
-			log.Println("Error unmarshaling count request:", err)
+			logging.Infof("Error unmarshaling count request:%s", err)
 			write("NOTICE", "Error unmarshaling count request.")
 			return
 		}
 
 		// Check if the request is for counting restricted content
 		if isRestrictedCountRequest(request.Filters) {
-			log.Printf("Refusing to count restricted content for subscription ID: %s\n", request.SubscriptionID)
+			logging.Infof("Refusing to count restricted content for subscription ID: %s\n", request.SubscriptionID)
 			write("CLOSED", request.SubscriptionID, "auth-required: cannot count other people's DMs")
 			return
 		}
@@ -39,14 +38,14 @@ func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		for _, filter := range request.Filters {
 			count, err := store.QueryEvents(filter) //CountEvents(filter) // Assume QueryEvents now returns both events and counts or adjust accordingly
 			if err != nil {
-				log.Printf("Error counting events for filter: %v", err)
+				logging.Infof("Error counting events for filter: %v", err)
 				continue
 			}
 			totalCount += len(count)
 		}
 
-		log.Printf("Total count: %d", totalCount)
-		log.Println("Testing to see request.SubscriptionID:", request.SubscriptionID)
+		logging.Infof("Total count: %d", totalCount)
+		logging.Infof("Testing to see request.SubscriptionID:%s", request.SubscriptionID)
 		responseJSON, _ := json.Marshal(map[string]int{"count": totalCount})
 		write("COUNT", request.SubscriptionID, string(responseJSON))
 	}

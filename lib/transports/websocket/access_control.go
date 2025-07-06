@@ -1,10 +1,10 @@
 package websocket
 
 import (
-	"log"
 	"sync"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/access"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	types "github.com/HORNET-Storage/hornet-storage/lib/types"
 	"github.com/spf13/viper"
@@ -24,7 +24,7 @@ func InitializeAccessControl(statsStore statistics.StatisticsStore) error {
 	var allowedUsersSettings types.AllowedUsersSettings
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
 		// If no settings found, use default free mode
-		log.Printf("No allowed users settings found, using default free mode: %v", err)
+		logging.Infof("No allowed users settings found, using default free mode: %v", err)
 		allowedUsersSettings = types.AllowedUsersSettings{
 			Mode:  "only-me",
 			Read:  "only-me",
@@ -35,7 +35,7 @@ func InitializeAccessControl(statsStore statistics.StatisticsStore) error {
 	// Create the access control instance
 	globalAccessControl = access.NewAccessControl(statsStore, &allowedUsersSettings)
 
-	log.Printf("Access control initialized in %s mode", allowedUsersSettings.Mode)
+	logging.Infof("Access control initialized in %s mode", allowedUsersSettings.Mode)
 	return nil
 }
 
@@ -63,6 +63,6 @@ func UpdateAccessControlSettings(settings *types.AllowedUsersSettings) error {
 	// Update settings
 	globalAccessControl.UpdateSettings(settings)
 
-	log.Printf("Access control settings updated to %s mode", settings.Mode)
+	logging.Infof("Access control settings updated to %s mode", settings.Mode)
 	return nil
 }

@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -128,7 +128,7 @@ func InitSyncDB() (*gorm.DB, error) {
 	if _, err := os.Stat(statisticsPath); os.IsNotExist(err) {
 		err := os.Mkdir(statisticsPath, os.ModePerm)
 		if err != nil {
-			log.Fatal(err)
+			logging.Fatalf("Couldn't create directory for stats: %v", err)
 		}
 	}
 

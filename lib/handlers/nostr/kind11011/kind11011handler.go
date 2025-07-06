@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
-	"github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/bencode"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -21,7 +21,7 @@ import (
 // BuildKind11011Handler constructs and returns a handler function for kind 10000 (Mute List) events.
 func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
-		log.Printf("Handling kind 11011")
+		logging.Infof("Handling kind 11011")
 		var j = jsoniter.ConfigCompatibleWithStandardLibrary
 
 		// Read data from the stream.
@@ -41,7 +41,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Check relay settings for allowed events whilst also verifying signatures and kind number
 		success := lib_nostr.ValidateEvent(write, env, 11011)
 		if !success {
-			log.Printf("Could not validate event")
+			logging.Infof("Could not validate event")
 			return
 		}
 
@@ -54,7 +54,7 @@ func BuildKind11011Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Store the event
 		if err := store.StoreEvent(&env.Event); err != nil {
-			log.Printf("failed to store event: %v", err)
+			logging.Infof("failed to store event: %v", err)
 			write("NOTICE", "Failed to store the event")
 			return
 		}
@@ -79,7 +79,7 @@ func getDHTPayloadPubkeySig(event *nostr.Event) (string, string, string, bool) {
 
 	payload = event.Content
 
-	log.Printf("received relay list from client -- payload: %s, pubkey: %s, signature: %s", payload, pubKey, signature)
+	logging.Infof("received relay list from client -- payload: %s, pubkey: %s, signature: %s", payload, pubKey, signature)
 	return payload, pubKey, signature, true
 }
 
@@ -96,17 +96,17 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 
 	err = decoder.Decode(&decoded)
 	if err != nil {
-		log.Println("Error decoding:", err)
+		logging.Infof("Error decoding:%s", err)
 		return nil, err
 	}
 
 	if decoded["salt"] != nil {
-		log.Printf("salt: %x\n", decoded["salt"])
+		logging.Infof("salt: %x\n", decoded["salt"])
 	} else {
-		log.Printf("salt not provided by client")
+		logging.Infof("salt not provided by client")
 	}
-	log.Printf("seq: %d\n", decoded["seq"])
-	log.Printf("v: %s\n", decoded["v"])
+	logging.Infof("seq: %d\n", decoded["seq"])
+	logging.Infof("v: %s\n", decoded["v"])
 
 	// Decode the hex string into a byte slice
 	pubKeyBytes, err := hex.DecodeString(pubKey)
@@ -124,9 +124,9 @@ func getURLs(payload string, signature string, pubKey string) ([]string, error) 
 
 	// Verify the signature
 	if ed25519.Verify(key, payloadBytes, sigBytes) {
-		log.Println("Signature is valid!")
+		logging.Info("Signature is valid!")
 	} else {
-		log.Println("Signature is invalid!")
+		logging.Info("Signature is invalid!")
 		return nil, errors.New("signature is invalid")
 	}
 
@@ -180,19 +180,19 @@ func UrlStringToMultiaddr(urlStr string) (string, error) {
 func HandleRelayList(event nostr.Event) error {
 	payload, pubkey, sig, success := getDHTPayloadPubkeySig(&event)
 	if !success {
-		log.Println("NOTICE", "Error parsing tags for event.")
+		logging.Info("NOTICE Error parsing tags for event.")
 		return errors.New("error parsing tags for event")
 	}
 
 	relayURLs, err := getURLs(payload, sig, pubkey)
 	if err != nil {
-		log.Printf("Error parsing relay URLs: %v", err)
+		logging.Infof("Error parsing relay URLs: %v", err)
 		return errors.New("error parsing relay URLs")
 	}
 
 	relayStore := sync.GetRelayStore()
 	if relayStore == nil {
-		log.Println("relay store has not been initialized")
+		logging.Info("relay store has not been initialized")
 		return errors.New("relay store has not been initialized")
 	}
 
@@ -206,7 +206,7 @@ func HandleRelayList(event nostr.Event) error {
 
 	err = relayStore.AddUploadable(payload, pubkey, sig, true)
 	if err != nil {
-		log.Printf("Error adding uploadable to sync store: %v", err)
+		logging.Infof("Error adding uploadable to sync store: %v", err)
 		return errors.New("error adding upload to sync store")
 	}
 

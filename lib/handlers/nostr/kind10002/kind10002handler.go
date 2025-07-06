@@ -2,9 +2,9 @@ package kind10002
 
 import (
 	"fmt"
-	"log"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -48,7 +48,7 @@ func BuildKind10002Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
-			log.Printf("Error querying existing kind 10002 events: %v", err)
+			logging.Infof("Error querying existing kind 10002 events: %v", err)
 			write("NOTICE", fmt.Sprintf("Error querying existing events: %v", err))
 			return
 		}
@@ -56,22 +56,22 @@ func BuildKind10002Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Delete existing kind 10002 events if any
 		for _, oldEvent := range existingEvents {
 			if err := store.DeleteEvent(oldEvent.ID); err != nil {
-				log.Printf("Error deleting old kind 10002 event %s: %v", oldEvent.ID, err)
+				logging.Infof("Error deleting old kind 10002 event %s: %v", oldEvent.ID, err)
 			}
 		}
 
 		// Store the new event
 		if err := store.StoreEvent(&env.Event); err != nil {
-			log.Printf("Error storing kind 10002 event: %v", err)
+			logging.Infof("Error storing kind 10002 event: %v", err)
 			write("NOTICE", "Failed to store the event")
 			return
 		}
 
-		log.Printf("Successfully stored kind 10002 event %s", env.Event.ID)
+		logging.Infof("Successfully stored kind 10002 event %s", env.Event.ID)
 
 		// Successfully processed event
 		write("OK", env.Event.ID, true, "Event stored successfully")
-		log.Printf("Sent OK response for kind 10002 event %s", env.Event.ID)
+		logging.Infof("Sent OK response for kind 10002 event %s", env.Event.ID)
 	}
 
 	return handler
@@ -107,7 +107,7 @@ func validateRelayListTags(tags nostr.Tags) error {
 			if !isStandardMarker && !isClassicMarker {
 				// Allow any non-empty marker for maximum compatibility
 				// Just log unrecognized markers but don't reject
-				log.Printf("Warning: unrecognized relay marker '%s' in kind 10002 event", marker)
+				logging.Infof("Warning: unrecognized relay marker '%s' in kind 10002 event", marker)
 			}
 		}
 	}

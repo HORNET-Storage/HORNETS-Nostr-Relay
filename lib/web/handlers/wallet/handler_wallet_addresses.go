@@ -3,12 +3,12 @@ package wallet
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"sync"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/gofiber/fiber/v2"
@@ -24,12 +24,12 @@ const (
 
 // saveWalletAddresses processes incoming Bitcoin addresses and stores them for future allocation.
 func SaveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Addresses request received")
+	logging.Info("Addresses request received")
 
 	// First try to unmarshal as array of maps (as sent by the wallet)
 	var rawAddresses []map[string]interface{}
 	if err := json.Unmarshal(c.Body(), &rawAddresses); err != nil {
-		log.Printf("Error unmarshaling JSON: %v", err)
+		logging.Infof("Error unmarshaling JSON: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
 	}
 
@@ -52,7 +52,7 @@ func SaveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 
 	statsStore := store.GetStatsStore()
 	if statsStore == nil {
-		log.Println("Error: StatsStore or SubscriberStore is nil or not initialized")
+		logging.Info("Error: StatsStore or SubscriberStore is nil or not initialized")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Stores not available"})
 	}
 
@@ -90,7 +90,7 @@ func SaveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 	var processedCount, errorCount int
 	for err := range results {
 		if err != nil {
-			log.Printf("Error processing address: %v", err)
+			logging.Infof("Error processing address: %v", err)
 			errorCount++
 		} else {
 			processedCount++
@@ -106,7 +106,7 @@ func SaveWalletAddresses(c *fiber.Ctx, store stores.Store) error {
 // processAddress handles individual address processing, ensuring atomicity and reducing contention.
 func ProcessWalletAddress(addr types.Address, expectedWalletName string, statsStore statistics.StatisticsStore) error {
 	if addr.WalletName != expectedWalletName {
-		log.Printf("Skipping address from unknown wallet: %s", addr.WalletName)
+		logging.Infof("Skipping address from unknown wallet: %s", addr.WalletName)
 		return nil
 	}
 
@@ -122,10 +122,10 @@ func ProcessWalletAddress(addr types.Address, expectedWalletName string, statsSt
 			Address:      addr.Address,
 		}
 		if err := statsStore.SaveAddress(&newStatsAddress); err != nil {
-			log.Printf("Error saving new address to StatsStore: %v", err)
+			logging.Infof("Error saving new address to StatsStore: %v", err)
 			return err
 		}
-		log.Printf("Address saved to StatsStore: %v", newStatsAddress)
+		logging.Infof("Address saved to StatsStore: %v", newStatsAddress)
 	}
 
 	// Check and save address to SubscriberStore
@@ -143,10 +143,10 @@ func ProcessWalletAddress(addr types.Address, expectedWalletName string, statsSt
 			Npub:         nil,
 		}
 		if err := statsStore.SaveSubscriberAddress(subscriptionAddress); err != nil {
-			log.Printf("Error saving SubscriberAddress to SubscriberStore: %v", err)
+			logging.Infof("Error saving SubscriberAddress to SubscriberStore: %v", err)
 			return err
 		}
-		log.Printf("SubscriberAddress saved to SubscriberStore: %v", subscriptionAddress)
+		logging.Infof("SubscriberAddress saved to SubscriberStore: %v", subscriptionAddress)
 	}
 
 	return nil
@@ -154,12 +154,12 @@ func ProcessWalletAddress(addr types.Address, expectedWalletName string, statsSt
 
 // Refactored pullWalletAddresses function
 func PullWalletAddresses(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Get addresses request received")
+	logging.Info("Get addresses request received")
 
 	// Fetch wallet addresses using the statistics store
 	walletAddresses, err := store.GetStatsStore().FetchWalletAddresses()
 	if err != nil {
-		log.Printf("Error fetching addresses: %v", err)
+		logging.Infof("Error fetching addresses: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 

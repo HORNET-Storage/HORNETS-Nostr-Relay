@@ -2,10 +2,10 @@ package kind9372
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -50,7 +50,7 @@ func BuildKind9372Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 		repostedEvents, err := store.QueryEvents(filter)
 		if err != nil || len(repostedEvents) == 0 {
 			errMsg := fmt.Sprintf("Reposted event %s not found", repostedEventID)
-			log.Println(errMsg)
+			logging.Info(errMsg)
 			write("OK", env.Event.ID, false, errMsg)
 			return
 		}

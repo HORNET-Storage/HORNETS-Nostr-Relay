@@ -1,10 +1,10 @@
 package kind0
 
 import (
-	"log"
 	"strings"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/btcsuite/btcd/btcec/v2"
 	jsoniter "github.com/json-iterator/go"
@@ -60,7 +60,7 @@ func ValidateNIP24Tags(event *nostr.Event) bool {
 		if len(tag) >= 2 && tag[0] == "t" {
 			// Hashtag must be lowercase
 			if tag[1] != strings.ToLower(tag[1]) {
-				log.Printf("Warning: Hashtag '%s' is not lowercase as required by NIP-24", tag[1])
+				logging.Infof("Warning: Hashtag '%s' is not lowercase as required by NIP-24", tag[1])
 				return false
 			}
 		}
@@ -112,12 +112,12 @@ func BuildKind0Handler(store stores.Store, relayPrivKey *btcec.PrivateKey) func(
 		if hasNIP24Tags {
 			// Validate NIP-24 tags if present (but still process the event even if tags are invalid)
 			if !ValidateNIP24Tags(&env.Event) {
-				log.Printf("Warning: Event %s contains invalid NIP-24 tags, but will still be processed", env.Event.ID)
+				logging.Infof("Warning: Event %s contains invalid NIP-24 tags, but will still be processed", env.Event.ID)
 			}
 
 			// Extract and log NIP-24 tags for debugging
 			nip24Tags := ExtractNIP24Tags(&env.Event)
-			log.Printf("NIP-24 tags for event %s: URLs=%v, ExternalIDs=%v, Titles=%v, Hashtags=%v",
+			logging.Infof("NIP-24 tags for event %s: URLs=%v, ExternalIDs=%v, Titles=%v, Hashtags=%v",
 				env.Event.ID, nip24Tags.ReferenceURLs, nip24Tags.ExternalIDs,
 				nip24Tags.Titles, nip24Tags.Hashtags)
 		}
@@ -129,7 +129,7 @@ func BuildKind0Handler(store stores.Store, relayPrivKey *btcec.PrivateKey) func(
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
-			log.Printf("Error querying existing kind 0 events: %v", err)
+			logging.Infof("Error querying existing kind 0 events: %v", err)
 			write("NOTICE", "Error querying existing events")
 			return
 		}
@@ -138,7 +138,7 @@ func BuildKind0Handler(store stores.Store, relayPrivKey *btcec.PrivateKey) func(
 		if len(existingEvents) > 0 {
 			for _, oldEvent := range existingEvents {
 				if err := store.DeleteEvent(oldEvent.ID); err != nil {
-					log.Printf("Error deleting old kind 0 event %s: %v", oldEvent.ID, err)
+					logging.Infof("Error deleting old kind 0 event %s: %v", oldEvent.ID, err)
 					write("NOTICE", "Error deleting old kind 0 event %s: %v", oldEvent.ID, err)
 				}
 			}

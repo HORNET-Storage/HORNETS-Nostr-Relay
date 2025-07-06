@@ -10,12 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/dht/v2"
@@ -84,25 +84,25 @@ func GetRelayStore() *RelayStore {
 
 // AddRelay adds a given relay to the relay db
 func (rs *RelayStore) AddRelay(relay *ws.NIP11RelayInfo) {
-	log.Printf("Adding relay to relay store: %+v", relay)
+	logging.Infof("Adding relay to relay store: %+v", relay)
 	err := PutSyncRelay(rs.db, relay.Pubkey, relay)
 	if err != nil {
-		log.Printf("Error adding relay to relay store: %v", err)
+		logging.Infof("Error adding relay to relay store: %v", err)
 	}
 }
 
 // AddAuthor adds a pubkey to the relay db
 func (rs *RelayStore) AddAuthor(authorPubkey string) {
-	log.Printf("Adding author to relay store: %s", authorPubkey)
+	logging.Infof("Adding author to relay store: %s", authorPubkey)
 	err := PutSyncAuthor(rs.db, authorPubkey)
 	if err != nil {
-		log.Printf("Error adding relay to relay store: %v", err)
+		logging.Infof("Error adding relay to relay store: %v", err)
 	}
 }
 
 // AddUploadable saves an DHTUploadable to the relay db
 func (rs *RelayStore) AddUploadable(payload string, pubkey string, signature string, uploadNow bool) error {
-	log.Printf("Adding uploadable to sync store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
+	logging.Infof("Adding uploadable to sync store -- payload %s pubkey %s signature %s uploading now: %v", payload, pubkey, signature, uploadNow)
 
 	payloadBytes, err := hex.DecodeString(payload)
 	if err != nil {
@@ -132,7 +132,7 @@ func (rs *RelayStore) periodicSync() {
 		case <-rs.syncTicker.C:
 			syncAuthors, err := GetSyncAuthors(rs.db)
 			if err != nil {
-				log.Printf("Error getting relay authors: %v", err)
+				logging.Infof("Error getting relay authors: %v", err)
 				continue
 			}
 			var authorNpubs []string
@@ -142,16 +142,16 @@ func (rs *RelayStore) periodicSync() {
 
 			relays, err := GetSyncRelays(rs.db)
 			if err != nil {
-				log.Printf("Error getting relays: %v", err)
+				logging.Infof("Error getting relays: %v", err)
 				continue
 			}
 
-			log.Printf("Attempting sync with %d relays for %d authors", len(relays), len(syncAuthors))
+			logging.Infof("Attempting sync with %d relays for %d authors", len(relays), len(syncAuthors))
 			for _, relay := range relays {
 				var relayInfo ws.NIP11RelayInfo
 				err := json.Unmarshal([]byte(relay.RelayInfo), &relayInfo)
 				if err != nil {
-					log.Printf("Error unmarshaling relay info: %v", err)
+					logging.Infof("Error unmarshaling relay info: %v", err)
 					continue
 				}
 
@@ -172,16 +172,16 @@ func (rs *RelayStore) periodicUpload() {
 		case <-rs.uploadTicker.C:
 			uploadables, err := GetDHTUploadables(rs.db)
 			if err != nil {
-				log.Printf("Error getting uploadables from DHT: %v", err)
+				logging.Infof("Error getting uploadables from DHT: %v", err)
 				continue
 			}
-			log.Printf("Uploading %d user relay lists to dht", len(uploadables))
+			logging.Infof("Uploading %d user relay lists to dht", len(uploadables))
 			for _, uploadable := range uploadables {
 				target, err := rs.DoPut(uploadable)
 				if err != nil {
-					log.Printf("Error uploading %v: %v", uploadable.Payload, err)
+					logging.Infof("Error uploading %v: %v", uploadable.Payload, err)
 				} else {
-					log.Printf("Successfully uploaded %v to dht at target: %x", uploadable.Payload, target)
+					logging.Infof("Successfully uploaded %v to dht at target: %x", uploadable.Payload, target)
 				}
 			}
 		case <-rs.stopChan:
@@ -220,7 +220,7 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 	defer cancel()
 
 	if relay.HornetExtension == nil {
-		log.Printf("Cannot sync with non-hornet relays, skipping sync")
+		logging.Infof("Cannot sync with non-hornet relays, skipping sync")
 		return
 	}
 
@@ -230,29 +230,29 @@ func (rs *RelayStore) SyncWithRelay(relay *ws.NIP11RelayInfo, filter nostr.Filte
 		if err == nil {
 			addrs = append(addrs, multiAddr)
 		} else {
-			log.Printf("Error creating multiaddr from %v: %v", addr, err)
+			logging.Infof("Error creating multiaddr from %v: %v", addr, err)
 		}
 	}
 
 	target := peer.AddrInfo{ID: peer.ID(relay.HornetExtension.LibP2PID), Addrs: addrs}
 	if err := rs.libp2pHost.Connect(ctx, target); err != nil {
-		log.Printf("Error connecting to %+v: %v", target, err)
+		logging.Infof("Error connecting to %+v: %v", target, err)
 	}
 
 	// Open a stream to the peer
 	stream, err := rs.libp2pHost.NewStream(ctx, target.ID, NegentropyProtocol)
 	if err != nil {
-		log.Printf("Error creating stream to %+v: %v", target, err)
+		logging.Infof("Error creating stream to %+v: %v", target, err)
 	}
 
 	err = InitiateEventSync(stream, filter, target.ID.String(), rs.eventStore)
 	if err != nil {
-		log.Printf("Error syncing events with %+v: %v", target, err)
+		logging.Infof("Error syncing events with %+v: %v", target, err)
 	}
 
 	err = stream.Close()
 	if err != nil {
-		log.Printf("Failed to close stream: %v", err)
+		logging.Infof("Failed to close stream: %v", err)
 		return
 	}
 }
@@ -301,7 +301,7 @@ func createSignatureInput(put *bep44.Put) ([]byte, error) {
 		return nil, fmt.Errorf("failed to encode value: %w", err)
 	}
 
-	log.Println(buf.String())
+	logging.Info(buf.String())
 	return buf.Bytes(), nil
 }
 
@@ -317,7 +317,7 @@ func (rs *RelayStore) DoPut(uploadable DHTUploadable) (krpc.ID, error) {
 	var target krpc.ID
 	emptySalt := []byte{}
 	target = CreateMutableTarget(uploadable.Pubkey, emptySalt)
-	log.Printf("Derived mutable target %x from pubkey %x", target, uploadable.Pubkey)
+	logging.Infof("Derived mutable target %x from pubkey %x", target, uploadable.Pubkey)
 
 	sigBytes := [64]byte{}
 	copy(sigBytes[:], uploadable.Signature)
@@ -329,22 +329,22 @@ func (rs *RelayStore) DoPut(uploadable DHTUploadable) (krpc.ID, error) {
 			Sig: sigBytes,
 		}
 
-		log.Printf("Put created %+v", put)
+		logging.Infof("Put created %+v", put)
 
 		return put
 	})
 
-	log.Printf("DHT put stats %+v", stats)
+	logging.Infof("DHT put stats %+v", stats)
 
 	if err != nil {
-		log.Printf("Put operation failed: %v", err)
+		logging.Infof("Put operation failed: %v", err)
 		return target, errors.New("put operation failed")
 	} else {
-		log.Printf("Put operation successful")
+		logging.Infof("Put operation successful")
 	}
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		log.Printf("Put operation timed out")
+		logging.Infof("Put operation timed out")
 		return target, errors.New("put operation timed out")
 	}
 
@@ -357,18 +357,18 @@ func DoGet(server *dht.Server, target bep44.Target, salt []byte) ([]byte, error)
 	defer cancel()
 
 	result, stats, err := getput.Get(ctx, target, server, nil, salt)
-	log.Printf("Get stats: %+v", stats)
+	logging.Infof("Get stats: %+v", stats)
 
 	if err != nil {
-		log.Printf("Get operation failed: %v", err)
+		logging.Infof("Get operation failed: %v", err)
 		return nil, err
 	}
-	log.Printf("Get operation successful: %+v", result)
+	logging.Infof("Get operation successful: %+v", result)
 
 	var decodedValue []byte
 	err = bencode.Unmarshal(result.V, &decodedValue)
 	if err != nil {
-		log.Printf("failed to unmarshal result: %v", err)
+		logging.Infof("failed to unmarshal result: %v", err)
 		return nil, err
 	}
 
@@ -379,7 +379,7 @@ func ParseURLs(input []byte) []string {
 	var urlStrings []string
 	err := json.Unmarshal(input, &urlStrings)
 	if err != nil {
-		log.Println("Error parsing JSON:", err)
+		logging.Infof("Error parsing JSON:%s", err)
 		return []string{}
 	}
 
@@ -403,7 +403,7 @@ func PerformNIP11Request(url string) *ws.NIP11RelayInfo {
 	// Create a new request
 	req, err := http.NewRequest("GET", httpURL, nil)
 	if err != nil {
-		log.Printf("Error creating request: %v", err)
+		logging.Infof("Error creating request: %v", err)
 		return nil
 	}
 
@@ -418,21 +418,21 @@ func PerformNIP11Request(url string) *ws.NIP11RelayInfo {
 	// Perform the request
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Error performing NIP11 request: %v", err)
+		logging.Infof("Error performing NIP11 request: %v", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	// Check if the status code is 200 OK
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Error performing request, status: %d", resp.StatusCode)
+		logging.Infof("Error performing request, status: %d", resp.StatusCode)
 		return nil
 	}
 
 	// Read the response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Error reading response body: %v", err)
+		logging.Infof("Error reading response body: %v", err)
 		return nil
 	}
 
@@ -440,7 +440,7 @@ func PerformNIP11Request(url string) *ws.NIP11RelayInfo {
 	var relayInfo ws.NIP11RelayInfo
 	err = json.Unmarshal(body, &relayInfo)
 	if err != nil {
-		log.Printf("Error unmarshaling relay info: %v", err)
+		logging.Infof("Error unmarshaling relay info: %v", err)
 		return nil
 	}
 

@@ -2,12 +2,12 @@ package query
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
@@ -41,7 +41,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 			return
 		}
 
-		fmt.Printf("Query Found %d hashes\n", len(hashes))
+		logging.Infof("Query Found %d hashes\n", len(hashes))
 
 		response := types.QueryResponse{
 			Hashes: hashes,

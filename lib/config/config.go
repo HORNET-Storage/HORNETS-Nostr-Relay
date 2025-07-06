@@ -72,7 +72,7 @@ func setDefaults() {
 
 	// Logging defaults
 	viper.SetDefault("logging.level", "info")
-	viper.SetDefault("logging.output", "both")
+	viper.SetDefault("logging.output", "file")
 
 	// Relay defaults
 	viper.SetDefault("relay.name", "HORNETS")

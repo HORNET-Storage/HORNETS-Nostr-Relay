@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -22,6 +21,7 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
@@ -78,7 +78,7 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 
 	store.Database, err = badgerhold.Open(options)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to open main database: %v", err)
 	}
 
 	options.Dir = "temp"
@@ -86,7 +86,7 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 
 	store.TempDatabase, err = badgerhold.Open(options)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to open temp database: %v", err)
 	}
 
 	store.StatsDatabase, err = statistics_gorm_sqlite.InitStore()
@@ -139,9 +139,9 @@ func (store *BadgerholdStore) RetrieveLeafContent(contentHash []byte, temp bool)
 func (store *BadgerholdStore) QueryDag(filter lib_types.QueryFilter, temp bool) ([]string, error) {
 	var results []types.WrappedLeaf
 
-	fmt.Println("Searching for dags with filter: ")
+	logging.Infof("Searching for dags with filter: ")
 	bytes, _ := json.Marshal(filter)
-	fmt.Println(string(bytes))
+	logging.Infof(string(bytes))
 
 	// Start query with a dummy condition
 	query := badgerhold.Where("Hash").Ne("") // Ensures chaining works
@@ -196,7 +196,7 @@ func (store *BadgerholdStore) QueryDag(filter lib_types.QueryFilter, temp bool) 
 	}
 
 	for _, entry := range entries {
-		fmt.Println("Entry: " + entry.Key + " | " + entry.Value)
+		logging.Infof("Entry: " + entry.Key + " | " + entry.Value)
 	}
 
 	// If we have tag filters, run a secondary query to filter based on tags
@@ -204,7 +204,7 @@ func (store *BadgerholdStore) QueryDag(filter lib_types.QueryFilter, temp bool) 
 		for tagKey, tagValue := range filter.Tags {
 			var tagEntries []types.AdditionalDataEntry
 
-			fmt.Printf("searching for tags: ")
+			logging.Infof("searching for tags: ")
 
 			err := store.GetDatabase(temp).Find(&tagEntries, badgerhold.Where("Key").Eq(tagKey).And("Value").Eq(tagValue))
 			if err != nil && err != badgerhold.ErrNotFound {
@@ -264,13 +264,13 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 		return err
 	}
 
-	fmt.Println("Storing Leaf")
+	logging.Infof("Storing Leaf")
 	if len(leafData.Leaf.AdditionalData) > 0 {
-		fmt.Println("WITH DATA")
+		logging.Infof("WITH DATA")
 	}
 
 	for key, value := range leafData.Leaf.AdditionalData {
-		fmt.Println(key + " | " + value)
+		logging.Infof(key + " | " + value)
 		entry := types.AdditionalDataEntry{
 			Hash:  leafData.Leaf.Hash,
 			Key:   key,
@@ -298,14 +298,14 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 		)
 		if err != nil {
 			// Log the error but don't fail the operation
-			fmt.Printf("Failed to record leaf file statistics: %v\n", err)
+			logging.Infof("Failed to record leaf file statistics: %v\n", err)
 		}
 
 		// Save tags for the file if any exist
 		if len(leafData.Leaf.AdditionalData) > 0 {
 			err = store.StatsDatabase.SaveTags(root, &leafData.Leaf)
 			if err != nil {
-				fmt.Printf("Failed to record leaf tags: %v\n", err)
+				logging.Infof("Failed to record leaf tags: %v\n", err)
 			}
 		}
 	}
@@ -349,9 +349,9 @@ func (store *BadgerholdStore) StoreDag(dag *types.DagData, temp bool) error {
 func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
 	var results []types.NostrEvent
 
-	fmt.Println("\n\nSearching for events with filter")
+	logging.Infof("\n\nSearching for events with filter")
 	jd, _ := json.Marshal(filter)
-	fmt.Println(string(jd))
+	logging.Infof(string(jd))
 
 	query := badgerhold.Where("ID").Ne("")
 	first := true
@@ -360,7 +360,7 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		kindsAsInterface := make([]interface{}, len(filter.Kinds))
 		for i, kind := range filter.Kinds {
 			kindsAsInterface[i] = strconv.Itoa(kind)
-			fmt.Println("Searching for kinds: " + strconv.Itoa(kind))
+			logging.Infof("Searching for kinds: " + strconv.Itoa(kind))
 		}
 
 		if first {
@@ -375,7 +375,7 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		authorsAsInterface := make([]interface{}, len(filter.Authors))
 		for i, author := range filter.Authors {
 			authorsAsInterface[i] = author
-			fmt.Println("Searching for authors: " + author)
+			logging.Infof("Searching for authors: " + author)
 		}
 
 		if first {
@@ -403,18 +403,18 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 
 			//tagValues = append(tagValues, "c25aedfd38f9fed72b383f6eefaea9f21dd58ec2c9989e0cc275cb5296adec17:nestr")
 
-			fmt.Printf("Searching for tag with values: " + tagName + "\n")
+			logging.Infof("Searching for tag with values: " + tagName + "\n")
 			for _, v := range tagValues {
-				fmt.Println(v)
+				logging.Infof(v)
 			}
-			fmt.Println("")
+			logging.Infof("")
 
 			err := store.Database.Find(&tagEntries, badgerhold.Where("TagName").Eq(strings.ReplaceAll(tagName, "#", "")).And("TagValue").In(toInterfaceSlice(tagValues)...))
 			if err != nil && err != badgerhold.ErrNotFound {
 				return nil, fmt.Errorf("failed to query tag entries for %s: %w", tagName, err)
 			}
 
-			fmt.Printf("Found %d tag entries from tags\n", len(tagEntries))
+			logging.Infof("Found %d tag entries from tags\n", len(tagEntries))
 
 			tempEventIDs := make(map[string]struct{})
 			for _, entry := range tagEntries {
@@ -439,11 +439,11 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		}
 
 		if len(eventIDs) == 0 {
-			fmt.Println("No matching events from tags")
+			logging.Infof("No matching events from tags")
 			return []*nostr.Event{}, nil
 		}
 
-		fmt.Printf("Found %d events from tags\n", len(eventIDs))
+		logging.Infof("Found %d events from tags\n", len(eventIDs))
 
 		if first {
 			query = badgerhold.Where("ID").In(toInterfaceSlice(eventIDs)...)
@@ -463,9 +463,9 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		events = append(events, UnwrapEvent(&event))
 	}
 
-	// fmt.Println("First check")
+	// logging.Infof("First check")
 	// for _, ev := range events {
-	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	// 	logging.Infof("Found event of kind: %d\n", ev.Kind)
 	// }
 
 	// Step 8: Apply additional filters (search term, etc.)
@@ -479,9 +479,9 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		filteredEvents = filteredEvents[:filter.Limit]
 	}
 
-	// fmt.Println("Last check")
+	// logging.Infof("Last check")
 	// for _, ev := range events {
-	// 	fmt.Printf("Found event of kind: %d\n", ev.Kind)
+	// 	logging.Infof("Found event of kind: %d\n", ev.Kind)
 	// }
 
 	return filteredEvents, nil
@@ -703,7 +703,7 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		err = store.StatsDatabase.SaveEventKind(ev)
 		if err != nil {
 			// Log the error but don't fail the operation
-			fmt.Printf("Failed to record event statistics: %v\n", err)
+			logging.Infof("Failed to record event statistics: %v\n", err)
 		}
 	}
 
@@ -714,22 +714,22 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		// Check if we should bypass moderation for exclusive mode
 		if ac := websocket.GetAccessControl(); ac != nil {
 			if settings := ac.GetSettings(); settings != nil && strings.ToLower(settings.Mode) == "exclusive" {
-				log.Printf("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
+				logging.Infof("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
 				// Skip moderation entirely for exclusive mode
 			} else {
 				// Continue with moderation for free and paid modes
-				log.Printf("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
+				logging.Infof("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
 				err = store.AddToPendingModeration(ev.ID, imageURLs)
 				if err != nil {
-					log.Printf("Failed to add event %s to pending moderation: %v", ev.ID, err)
+					logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
 				}
 			}
 		} else {
 			// Fallback to current behavior if access control not available
-			log.Printf("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
+			logging.Infof("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
 			err = store.AddToPendingModeration(ev.ID, imageURLs)
 			if err != nil {
-				log.Printf("Failed to add event %s to pending moderation: %v", ev.ID, err)
+				logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
 			}
 		}
 	}
@@ -748,7 +748,7 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 		err = store.StatsDatabase.DeleteEventByID(eventID)
 		if err != nil {
 			// Log the error but don't fail the operation
-			fmt.Printf("Failed to delete event from statistics: %v\n", err)
+			logging.Infof("Failed to delete event from statistics: %v\n", err)
 		}
 	}
 
@@ -784,7 +784,7 @@ func (store *BadgerholdStore) StoreBlob(data []byte, hash []byte, publicKey stri
 		)
 		if err != nil {
 			// Log the error but don't fail the operation
-			fmt.Printf("Failed to record blob statistics: %v\n", err)
+			logging.Infof("Failed to record blob statistics: %v\n", err)
 		}
 	}
 
@@ -1087,7 +1087,7 @@ func WrapEvent(event *nostr.Event) *types.NostrEvent {
 func UnwrapEvent(event *types.NostrEvent) *nostr.Event {
 	kind, err := strconv.Atoi(event.Kind)
 	if err != nil {
-		fmt.Println("This just means it's failing but this never actually gets printed")
+		logging.Infof("This just means it's failing but this never actually gets printed")
 	}
 
 	return &nostr.Event{

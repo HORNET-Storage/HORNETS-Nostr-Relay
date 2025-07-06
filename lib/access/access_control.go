@@ -2,11 +2,11 @@ package access
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	"github.com/spf13/viper"
@@ -68,7 +68,7 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 		paidSubscriber, err := ac.statsStore.GetPaidSubscriberByNpub(*hex)
 		if err != nil {
 			// Database error - log it but deny access
-			log.Printf("Error checking paid subscriber status: %v", err)
+			logging.Infof("Error checking paid subscriber status: %v", err)
 			return fmt.Errorf("user does not have permission")
 		}
 
@@ -151,7 +151,7 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 	read := strings.ToLower(settings.Read)
 	write := strings.ToLower(settings.Write)
 
-	log.Println("Write setting", write)
+	logging.Infof("Write setting %s", write)
 	// This ensures the correct options are selected for each mode and sets defaults when incorrect values are set
 	// Not all read/write values are valid for each mode so this ensures that the read/write values are in line with the selected mode
 	// mode: 		only-me, invite_only, public, subscription

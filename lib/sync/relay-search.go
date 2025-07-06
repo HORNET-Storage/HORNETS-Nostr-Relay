@@ -6,11 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/dht/v2"
 )
@@ -87,7 +87,7 @@ func MarshalRelay(nr ws.NIP11RelayInfo) ([]byte, error) {
 // enumeration of possible salts "nostr:relay:%d"
 // NOTE: this is not currently used outside of tests
 func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) ([]ws.NIP11RelayInfo, []int) {
-	log.Printf("Searching for relays from %d to %d", minIndex, maxIndex)
+	logging.Infof("Searching for relays from %d to %d", minIndex, maxIndex)
 	type result struct {
 		index int
 		relay ws.NIP11RelayInfo
@@ -108,7 +108,7 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 			// Create salt
 			salt := []byte(fmt.Sprintf("nostr:relay:%d", i))
 			target := CreateMutableTarget(HardcodedKey.PubKey, salt)
-			fmt.Printf("get target %d: %x salt: %x\n", i, target, salt)
+			logging.Infof("get target %d: %x salt: %x\n", i, target, salt)
 
 			// Perform DHT get operation
 			data, err := DoGet(d, target, salt)
@@ -120,14 +120,14 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 			foundRelay := ws.NIP11RelayInfo{}
 			err = json.Unmarshal(data, &foundRelay)
 			if err != nil {
-				fmt.Printf("Could not unmarshall into NostrRelay %x : %v\n", data, err)
+				logging.Infof("Could not unmarshall into NostrRelay %x : %v\n", data, err)
 				ch <- result{index: i, found: false}
 				return
 			}
 
 			err = CheckSig(&foundRelay)
 			if err != nil {
-				fmt.Printf("Signature verification failed %+v : %v\n", foundRelay, err)
+				logging.Infof("Signature verification failed %+v : %v\n", foundRelay, err)
 				ch <- result{index: i, found: false}
 				return
 			}
@@ -139,15 +139,15 @@ func SearchForRelays(d *dht.Server, maxRelays int, minIndex int, maxIndex int) (
 	// Collect results
 	foundCount := 0
 	for i := 0; i < maxIndex-minIndex; i++ {
-		//fmt.Printf("waiting for %d\n", i)
+		//logging.Infof("waiting for %d\n", i)
 		select {
 		case res := <-ch:
 			if res.found { // Check if a relay was found
-				//fmt.Printf("found %d\n", i)
+				//logging.Infof("found %d\n", i)
 				relays = append(relays, res.relay)
 				foundCount++
 			} else {
-				//fmt.Printf("not found %d\n", i)
+				//logging.Infof("not found %d\n", i)
 				unoccupiedSlots = append(unoccupiedSlots, res.index)
 			}
 			if foundCount >= maxRelays && len(unoccupiedSlots) > 0 {

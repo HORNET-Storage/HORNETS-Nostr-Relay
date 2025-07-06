@@ -4,7 +4,6 @@ package subscription
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -25,9 +25,9 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 	// Cancel any existing scheduled update
 	if scheduledUpdateTimer != nil {
 		scheduledUpdateTimer.Stop()
-		log.Printf("Rescheduling batch update of kind 11888 events (settings changed again)")
+		logging.Infof("Rescheduling batch update of kind 11888 events (settings changed again)")
 	} else {
-		log.Printf("Scheduling batch update of kind 11888 events in %v", delay)
+		logging.Infof("Scheduling batch update of kind 11888 events in %v", delay)
 	}
 
 	// Schedule new update
@@ -36,17 +36,17 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 		scheduledUpdateTimer = nil
 		scheduledUpdateMutex.Unlock()
 
-		log.Printf("Starting batch update of kind 11888 events after %v cooldown", delay)
+		logging.Infof("Starting batch update of kind 11888 events after %v cooldown", delay)
 		manager := GetGlobalManager()
 		if manager != nil {
-			log.Printf("DEBUG: BatchUpdateAllSubscriptionEvents called via scheduled update")
+			logging.Infof("DEBUG: BatchUpdateAllSubscriptionEvents called via scheduled update")
 			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
-				log.Printf("Error in batch update: %v", err)
+				logging.Infof("Error in batch update: %v", err)
 			} else {
-				log.Printf("Successfully completed batch update of kind 11888 events")
+				logging.Infof("Successfully completed batch update of kind 11888 events")
 			}
 		} else {
-			log.Printf("ERROR: Global subscription manager is nil, cannot run batch update")
+			logging.Infof("ERROR: Global subscription manager is nil, cannot run batch update")
 		}
 	})
 }
@@ -54,7 +54,7 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 // BatchUpdateAllSubscriptionEvents processes all kind 11888 events in batches
 // to update storage allocations after allowed users settings have changed
 func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
-	log.Printf("Starting batch update of all kind 11888 subscription events")
+	logging.Infof("Starting batch update of all kind 11888 subscription events")
 
 	// Get the current allowed users settings
 	var allowedUsersSettings types.AllowedUsersSettings
@@ -88,14 +88,14 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 		// Process each event in the batch
 		for _, event := range events {
 			if err := m.processSingleSubscriptionEvent(event); err != nil {
-				log.Printf("Error processing event %s: %v", event.ID, err)
+				logging.Infof("Error processing event %s: %v", event.ID, err)
 				// Continue with next event even if this one fails
 			}
 
 			processed++
 		}
 
-		log.Printf("Processed %d kind 11888 events so far", processed)
+		logging.Infof("Processed %d kind 11888 events so far", processed)
 
 		// If we received fewer events than requested, we've reached the end of available events
 		if len(events) < batchSize {
@@ -103,18 +103,18 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 		}
 	}
 
-	log.Printf("Completed batch update, processed %d kind 11888 events", processed)
+	logging.Infof("Completed batch update, processed %d kind 11888 events", processed)
 
 	// Only allocate Bitcoin addresses in subscription (paid) mode
 	// Never allocate addresses in free modes
 	if currentMode == "subscription" {
-		log.Printf("Relay is in subscription mode, allocating Bitcoin addresses for users without them")
+		logging.Infof("Relay is in subscription mode, allocating Bitcoin addresses for users without them")
 		if err := m.AllocateBitcoinAddressesForExistingUsers(); err != nil {
-			log.Printf("Error allocating Bitcoin addresses: %v", err)
+			logging.Infof("Error allocating Bitcoin addresses: %v", err)
 			return fmt.Errorf("failed to allocate Bitcoin addresses: %v", err)
 		}
 	} else {
-		log.Printf("Relay is in %s mode, skipping Bitcoin address allocation", currentMode)
+		logging.Infof("Relay is in %s mode, skipping Bitcoin address allocation", currentMode)
 	}
 
 	return nil
@@ -158,7 +158,7 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 	needsUpdate := false
 
 	if isTransition {
-		log.Printf("Mode transition detected for %s: %s -> %s", pubkey, currentRelayMode, expectedRelayMode)
+		logging.Infof("Mode transition detected for %s: %s -> %s", pubkey, currentRelayMode, expectedRelayMode)
 		needsUpdate = true
 
 		// Apply transition-specific rules
@@ -182,20 +182,20 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		}
 	}
 
-	log.Printf("DEBUG processSingleSubscriptionEvent: pubkey=%s, currentRelayMode=%s, expectedRelayMode=%s, activeTier=%s, isTransition=%v",
+	logging.Infof("DEBUG processSingleSubscriptionEvent: pubkey=%s, currentRelayMode=%s, expectedRelayMode=%s, activeTier=%s, isTransition=%v",
 		pubkey, currentRelayMode, expectedRelayMode, activeTier, isTransition)
 
 	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, &allowedUsersSettings)
 
 	if expectedTier != nil {
-		log.Printf("DEBUG: Expected tier for %s: Name=%s, Bytes=%d", pubkey, expectedTier.Name, expectedTier.MonthlyLimitBytes)
+		logging.Infof("DEBUG: Expected tier for %s: Name=%s, Bytes=%d", pubkey, expectedTier.Name, expectedTier.MonthlyLimitBytes)
 	} else {
-		log.Printf("DEBUG: No expected tier found for %s", pubkey)
+		logging.Infof("DEBUG: No expected tier found for %s", pubkey)
 	}
 
 	// Check if relay mode needs update (if not already handled by transition)
 	if !isTransition && currentRelayMode != expectedRelayMode {
-		log.Printf("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
+		logging.Infof("Updating relay_mode for %s from '%s' to '%s'", pubkey, currentRelayMode, expectedRelayMode)
 		needsUpdate = true
 	}
 
@@ -206,32 +206,32 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		// Special handling for free-to-paid transitions
 		if isTransition && isFreeMode(currentRelayMode) && !isFreeMode(expectedRelayMode) {
 			// Keep current allocation until cycle ends
-			log.Printf("Free-to-paid transition for %s: keeping current allocation until cycle ends", pubkey)
+			logging.Infof("Free-to-paid transition for %s: keeping current allocation until cycle ends", pubkey)
 			expectedBytes = storageInfo.TotalBytes
 		} else if storageInfo.TotalBytes != expectedBytes {
 			// For all other cases, update immediately
-			log.Printf("Updating storage limit for %s from %d to %d bytes", pubkey, storageInfo.TotalBytes, expectedBytes)
+			logging.Infof("Updating storage limit for %s from %d to %d bytes", pubkey, storageInfo.TotalBytes, expectedBytes)
 			storageInfo.TotalBytes = expectedBytes
 			needsUpdate = true
 		}
 
 		// Update tier if it changed
 		if activeTier != expectedTier.Name {
-			log.Printf("Updating tier for %s from '%s' to '%s'", pubkey, activeTier, expectedTier.Name)
+			logging.Infof("Updating tier for %s from '%s' to '%s'", pubkey, activeTier, expectedTier.Name)
 			activeTier = expectedTier.Name
 			needsUpdate = true
 		}
 
 		// Update status if needed
 		if status == "inactive" && expectedBytes > 0 {
-			log.Printf("Activating subscription for %s", pubkey)
+			logging.Infof("Activating subscription for %s", pubkey)
 			needsUpdate = true
 		}
 	}
 
 	// If nothing needs update, skip
 	if !needsUpdate {
-		log.Printf("Event for %s already up to date (no changes needed)", pubkey)
+		logging.Infof("Event for %s already up to date (no changes needed)", pubkey)
 		return nil
 	}
 
@@ -244,7 +244,7 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 
 // AllocateBitcoinAddressesForExistingUsers allocates Bitcoin addresses for users who don't have them
 func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
-	log.Printf("Starting batch Bitcoin address allocation for existing users")
+	logging.Infof("Starting batch Bitcoin address allocation for existing users")
 
 	// Query all kind 11888 events first
 	allEvents, err := m.store.QueryEvents(nostr.Filter{
@@ -255,7 +255,7 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 		return fmt.Errorf("failed to query events: %v", err)
 	}
 
-	log.Printf("Found %d total kind 11888 events, checking for empty Bitcoin addresses", len(allEvents))
+	logging.Infof("Found %d total kind 11888 events, checking for empty Bitcoin addresses", len(allEvents))
 
 	// Filter events that have empty Bitcoin addresses
 	var eventsNeedingAddresses []*nostr.Event
@@ -264,15 +264,15 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 		if bitcoinAddress == "" {
 			eventsNeedingAddresses = append(eventsNeedingAddresses, event)
 			pubkey := getTagValue(event.Tags, "p")
-			log.Printf("User %s needs Bitcoin address allocation", pubkey)
+			logging.Infof("User %s needs Bitcoin address allocation", pubkey)
 		}
 	}
 
 	usersNeedingAddresses := len(eventsNeedingAddresses)
-	log.Printf("Found %d users without Bitcoin addresses", usersNeedingAddresses)
+	logging.Infof("Found %d users without Bitcoin addresses", usersNeedingAddresses)
 
 	if usersNeedingAddresses == 0 {
-		log.Printf("No users need Bitcoin addresses, batch allocation complete")
+		logging.Infof("No users need Bitcoin addresses, batch allocation complete")
 		return nil
 	}
 
@@ -286,28 +286,28 @@ func (m *SubscriptionManager) AllocateBitcoinAddressesForExistingUsers() error {
 		// Extract user pubkey
 		pubkey := getTagValue(event.Tags, "p")
 		if pubkey == "" {
-			log.Printf("Skipping event %s: no pubkey found", event.ID)
+			logging.Infof("Skipping event %s: no pubkey found", event.ID)
 			continue
 		}
 
 		// Allocate Bitcoin address
 		addressObj, err := m.store.GetStatsStore().AllocateBitcoinAddress(pubkey)
 		if err != nil {
-			log.Printf("Failed to allocate address for %s: %v", pubkey, err)
+			logging.Infof("Failed to allocate address for %s: %v", pubkey, err)
 			continue
 		}
 
 		// Update the kind 11888 event with the new address
 		if err := m.updateEventWithBitcoinAddress(event, addressObj.Address); err != nil {
-			log.Printf("Failed to update kind 11888 event for %s: %v", pubkey, err)
+			logging.Infof("Failed to update kind 11888 event for %s: %v", pubkey, err)
 			continue
 		}
 
 		successCount++
-		log.Printf("Allocated address %s for user %s", addressObj.Address, pubkey)
+		logging.Infof("Allocated address %s for user %s", addressObj.Address, pubkey)
 	}
 
-	log.Printf("Batch allocation complete: %d/%d successful", successCount, len(eventsNeedingAddresses))
+	logging.Infof("Batch allocation complete: %d/%d successful", successCount, len(eventsNeedingAddresses))
 	return nil
 }
 
@@ -371,28 +371,28 @@ func (m *SubscriptionManager) ensureSufficientAddresses(usersNeedingAddresses in
 			return fmt.Errorf("failed to check available address count: %v", err)
 		}
 
-		log.Printf("Address check: %d available, %d required (%d users + %d buffer)",
+		logging.Infof("Address check: %d available, %d required (%d users + %d buffer)",
 			availableCount, requiredAddresses, usersNeedingAddresses, bufferSize)
 
 		if availableCount >= requiredAddresses {
-			log.Printf("Sufficient addresses available (%d >= %d), proceeding with batch allocation",
+			logging.Infof("Sufficient addresses available (%d >= %d), proceeding with batch allocation",
 				availableCount, requiredAddresses)
 			return nil
 		}
 
 		// Calculate how many more addresses we need
 		addressesNeeded := requiredAddresses - availableCount
-		log.Printf("Insufficient addresses, requesting %d more from wallet service...", addressesNeeded)
+		logging.Infof("Insufficient addresses, requesting %d more from wallet service...", addressesNeeded)
 
 		// Request additional addresses
 		if err := m.RequestNewAddresses(addressesNeeded); err != nil {
-			log.Printf("Warning: Failed to request addresses: %v", err)
+			logging.Infof("Warning: Failed to request addresses: %v", err)
 		} else {
-			log.Printf("Successfully requested %d additional addresses from wallet", addressesNeeded)
+			logging.Infof("Successfully requested %d additional addresses from wallet", addressesNeeded)
 		}
 
 		// Wait 10 seconds before checking again
-		log.Printf("Waiting 10 seconds for wallet to generate addresses... (attempt %d/%d)", retryCount+1, maxRetries)
+		logging.Infof("Waiting 10 seconds for wallet to generate addresses... (attempt %d/%d)", retryCount+1, maxRetries)
 		time.Sleep(10 * time.Second)
 		retryCount++
 	}
@@ -423,19 +423,19 @@ func (m *SubscriptionManager) applyModeTransitionRules(
 		if statsStore != nil {
 			owner, err := statsStore.GetRelayOwner()
 			if err != nil || owner == nil {
-				log.Printf("WARNING: Transitioning to only-me mode but no relay owner is set in database! Use /admin/owner API to set owner.")
+				logging.Infof("WARNING: Transitioning to only-me mode but no relay owner is set in database! Use /admin/owner API to set owner.")
 			}
 		}
 
 		if m.isRelayOwner(pubkey) {
 			// Owner gets unlimited storage
-			log.Printf("Setting unlimited storage for relay owner %s in only-me mode", pubkey)
+			logging.Infof("Setting unlimited storage for relay owner %s in only-me mode", pubkey)
 			storageInfo.IsUnlimited = true
 			storageInfo.TotalBytes = 0 // 0 indicates unlimited when IsUnlimited is true
 			needsUpdate = true
 		} else {
 			// Non-owners lose access
-			log.Printf("Removing access for non-owner %s in only-me mode", pubkey)
+			logging.Infof("Removing access for non-owner %s in only-me mode", pubkey)
 			storageInfo.TotalBytes = 0
 			storageInfo.IsUnlimited = false
 			*activeTier = ""
@@ -456,7 +456,7 @@ func (m *SubscriptionManager) applyModeTransitionRules(
 	// Handle free-to-free transitions
 	if isFreeMode(oldMode) && isFreeMode(newMode) {
 		// Storage caps update immediately for free-to-free transitions
-		log.Printf("Free-to-free transition: updating storage caps immediately")
+		logging.Infof("Free-to-free transition: updating storage caps immediately")
 		// Force tier reassignment to pick up new tier configuration
 		*activeTier = ""
 		needsUpdate = true
@@ -465,14 +465,14 @@ func (m *SubscriptionManager) applyModeTransitionRules(
 	// Handle free-to-paid transitions
 	if isFreeMode(oldMode) && !isFreeMode(newMode) {
 		// Keep current allocation until cycle ends
-		log.Printf("Free-to-paid transition: preserving current allocation until cycle ends")
+		logging.Infof("Free-to-paid transition: preserving current allocation until cycle ends")
 		// Storage update will be handled in the main function
 	}
 
 	// Handle paid-to-free transitions
 	if !isFreeMode(oldMode) && isFreeMode(newMode) {
 		// Update storage caps immediately
-		log.Printf("Paid-to-free transition: updating storage caps immediately")
+		logging.Infof("Paid-to-free transition: updating storage caps immediately")
 		needsUpdate = true
 	}
 
@@ -484,14 +484,14 @@ func (m *SubscriptionManager) isRelayOwner(pubkey string) bool {
 	// Normalize user key first
 	userHex, _, err := normalizePubkey(pubkey)
 	if err != nil {
-		log.Printf("Error normalizing user key: %v", err)
+		logging.Infof("Error normalizing user key: %v", err)
 		return false
 	}
 
 	// Check database for relay owner
 	statsStore := m.store.GetStatsStore()
 	if statsStore == nil {
-		log.Printf("WARNING: Statistics store not available, cannot check relay owner")
+		logging.Infof("WARNING: Statistics store not available, cannot check relay owner")
 		return false
 	}
 
@@ -509,7 +509,7 @@ func (m *SubscriptionManager) isRelayOwner(pubkey string) bool {
 	// Normalize owner key and compare
 	ownerHex, _, err := normalizePubkey(owner.Npub)
 	if err != nil {
-		log.Printf("Error normalizing owner key from database: %v", err)
+		logging.Infof("Error normalizing owner key from database: %v", err)
 		return false
 	}
 

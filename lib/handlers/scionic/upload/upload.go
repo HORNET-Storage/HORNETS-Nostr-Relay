@@ -15,6 +15,7 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
@@ -107,7 +108,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		fmt.Println("Dag uploading: " + message.Root)
+		logging.Infof("Dag uploading: " + message.Root)
 
 		dag := &merkle_dag.Dag{
 			Root:  message.Root,
@@ -176,7 +177,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			}
 
 			if len(dag.Leafs) >= (dag.Leafs[dag.Root].LeafCount + 1) {
-				fmt.Println("All leaves receieved")
+				logging.Infof("All leaves receieved")
 				break
 			}
 		}
@@ -185,11 +186,11 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 		err = dag.Verify()
 		if err != nil {
 			write(lib_stream.BuildErrorMessage("Failed to verify dag", err))
-			fmt.Println("Failed to verify dag???")
+			logging.Infof("Failed to verify dag???")
 			return
 		}
 
-		fmt.Println("Dag verified")
+		logging.Infof("Dag verified")
 
 		// Check to see if any data in the dag is not allowed to be stored by this relay
 		for _, leaf := range dag.Leafs {
@@ -230,14 +231,14 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			subManager := subscription.GetGlobalManager()
 			if subManager != nil {
 				if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
-					fmt.Printf("Warning: Failed to update storage usage for pubkey %s: %v\n", pubKey, err)
+					logging.Infof("Warning: Failed to update storage usage for pubkey %s: %v\n", pubKey, err)
 				}
 			} else {
-				fmt.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s\n", pubKey)
+				logging.Infof("Warning: Global subscription manager not available, storage not tracked for pubkey %s\n", pubKey)
 			}
 		}(message.PublicKey, totalDagSize)
 
-		fmt.Println("Dag Uploaded: " + message.Root)
+		logging.Infof("Dag Uploaded: " + message.Root)
 
 		handleRecievedDag(&dagData.Dag, &message.PublicKey)
 	}
