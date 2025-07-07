@@ -16,7 +16,6 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/google/uuid"
 	"github.com/nbd-wtf/go-nostr"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
@@ -68,21 +67,21 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.Ctx = context.Background()
 
 	store.DatabasePath = basepath
-	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("%s-%s", "temp", uuid.New()))
+	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("temp"))
 
 	options := badgerhold.DefaultOptions
 	options.Encoder = cborEncode
 	options.Decoder = cborDecode
-	options.Dir = "data"
-	options.ValueDir = "data"
+	options.Dir = store.DatabasePath
+	options.ValueDir = store.DatabasePath
 
 	store.Database, err = badgerhold.Open(options)
 	if err != nil {
 		logging.Fatalf("Failed to open main database: %v", err)
 	}
 
-	options.Dir = "temp"
-	options.ValueDir = "temp"
+	options.Dir = store.TempDatabasePath
+	options.ValueDir = store.TempDatabasePath
 
 	store.TempDatabase, err = badgerhold.Open(options)
 	if err != nil {
