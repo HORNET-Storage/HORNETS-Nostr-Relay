@@ -72,14 +72,15 @@ func setDefaults() {
 
 	// Logging defaults
 	viper.SetDefault("logging.level", "info")
-	viper.SetDefault("logging.output", "both")
+	viper.SetDefault("logging.output", "file")
 
 	// Relay defaults
 	viper.SetDefault("relay.name", "HORNETS")
-	viper.SetDefault("relay.description", "The best relay ever.")
+	viper.SetDefault("relay.description", "HORNETS relay, the home of GitNestr")
 	viper.SetDefault("relay.contact", "support@hornets.net")
-	viper.SetDefault("relay.software", "golang")
-	viper.SetDefault("relay.version", "0.1.0")
+	viper.SetDefault("relay.icon", "")
+	viper.SetDefault("relay.software", "HORNETS")
+	viper.SetDefault("relay.version", "0.0.1")
 	viper.SetDefault("relay.service_tag", "hornet-storage-service")
 	viper.SetDefault("relay.supported_nips", []int{1, 2, 9, 11, 18, 23, 24, 25, 42, 45, 50, 51, 56, 57, 65, 116, 555, 888})
 	viper.SetDefault("relay.secret_key", "hornets-secret-key")

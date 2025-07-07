@@ -1,13 +1,13 @@
 package kind19843
 
 import (
-	"log"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -103,13 +103,13 @@ func CreateResolutionEvent(
 
 	// Sign the resolution event
 	if err := resolutionEvent.Sign(relayPrivKey); err != nil {
-		log.Printf("Error signing resolution event: %v", err)
+		logging.Infof("Error signing resolution event: %v", err)
 		return nil, err
 	}
 
 	// Store the resolution event
 	if err := store.StoreEvent(&resolutionEvent); err != nil {
-		log.Printf("Error storing resolution event: %v", err)
+		logging.Infof("Error storing resolution event: %v", err)
 		return nil, err
 	}
 
@@ -117,18 +117,18 @@ func CreateResolutionEvent(
 	if approved {
 		// Unblock the event
 		if err := store.UnmarkEventBlocked(originalEventID); err != nil {
-			log.Printf("Error unblocking event %s: %v", originalEventID, err)
+			logging.Infof("Error unblocking event %s: %v", originalEventID, err)
 			// Continue anyway as the resolution is still valid
 		} else {
-			log.Printf("Event %s has been unblocked due to approved dispute", originalEventID)
+			logging.Infof("Event %s has been unblocked due to approved dispute", originalEventID)
 		}
 
 		// Delete the ticket event
 		if err := store.DeleteEvent(ticketEventID); err != nil {
-			log.Printf("Error deleting ticket event %s: %v", ticketEventID, err)
+			logging.Infof("Error deleting ticket event %s: %v", ticketEventID, err)
 			// Continue anyway as the resolution is still valid
 		} else {
-			log.Printf("Ticket event %s has been deleted after successful dispute", ticketEventID)
+			logging.Infof("Ticket event %s has been deleted after successful dispute", ticketEventID)
 		}
 	}
 

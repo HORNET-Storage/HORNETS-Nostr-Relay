@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -106,7 +106,7 @@ func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterRe
 
 	// Check cache first
 	if result, found := s.cache.Get(event.ID, instructionsHash); found {
-		log.Printf(ColorCyan+"Cache hit for event %s"+ColorReset, event.ID)
+		logging.Infof(ColorCyan+"Cache hit for event %s"+ColorReset, event.ID)
 		return result, nil
 	}
 
@@ -122,9 +122,9 @@ func (s *Service) FilterEvent(event *nostr.Event, instructions string) (FilterRe
 	// Cache the result
 	s.cache.Set(event.ID, instructionsHash, result)
 	if result.Pass {
-		log.Printf(ColorGreen+"Cached filter result for event %s, pass=%v, reason=%s"+ColorReset, event.ID, result.Pass, result.Reason)
+		logging.Infof(ColorGreen+"Cached filter result for event %s, pass=%v, reason=%s"+ColorReset, event.ID, result.Pass, result.Reason)
 	} else {
-		log.Printf(ColorRed+"Cached filter result for event %s, pass=%v, reason=%s"+ColorReset, event.ID, result.Pass, result.Reason)
+		logging.Infof(ColorRed+"Cached filter result for event %s, pass=%v, reason=%s"+ColorReset, event.ID, result.Pass, result.Reason)
 	}
 
 	return result, nil
@@ -164,7 +164,7 @@ func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, e
 	}
 
 	// Log the raw response with distinctive formatting and color
-	log.Printf(ColorYellowBold+"[CONTENT FILTER] OLLAMA RESPONSE: %s"+ColorReset, ollamaResp.Response)
+	logging.Infof(ColorYellowBold+"[CONTENT FILTER] OLLAMA RESPONSE: %s"+ColorReset, ollamaResp.Response)
 
 	// Process the response to determine true/false
 	responseLower := strings.ToLower(strings.TrimSpace(ollamaResp.Response))
@@ -192,7 +192,7 @@ func (s *Service) callOllama(event *nostr.Event, prompt string) (FilterResult, e
 	}
 
 	// If we couldn't find a clear true/false, default to false (safer)
-	log.Printf(ColorPurpleBold+"[CONTENT FILTER] UNCLEAR RESPONSE: %s"+ColorReset, ollamaResp.Response)
+	logging.Infof(ColorPurpleBold+"[CONTENT FILTER] UNCLEAR RESPONSE: %s"+ColorReset, ollamaResp.Response)
 	return FilterResult{
 		Pass:   false,
 		Reason: fmt.Sprintf("Default filter: Unclear model response for \"%s\"", contentPreview),
@@ -240,7 +240,7 @@ func (s *Service) FilterEvents(events []*nostr.Event, instructions string) ([]*n
 
 			result, err := s.FilterEvent(e, instructions)
 			if err != nil {
-				log.Printf("Error filtering event %s: %v", e.ID, err)
+				logging.Infof("Error filtering event %s: %v", e.ID, err)
 				mutex.Lock()
 				filteredEvents = append(filteredEvents, e)
 				mutex.Unlock()
@@ -252,9 +252,9 @@ func (s *Service) FilterEvents(events []*nostr.Event, instructions string) ([]*n
 				mutex.Lock()
 				filteredEvents = append(filteredEvents, e)
 				mutex.Unlock()
-				log.Printf(ColorGreen+"[CONTENT FILTER] PASSED: Event %s matches user preferences"+ColorReset, e.ID)
+				logging.Infof(ColorGreen+"[CONTENT FILTER] PASSED: Event %s matches user preferences"+ColorReset, e.ID)
 			} else {
-				log.Printf(ColorRedBold+"[CONTENT FILTER] FILTERED: Event %s - %s"+ColorReset, e.ID, result.Reason)
+				logging.Infof(ColorRedBold+"[CONTENT FILTER] FILTERED: Event %s - %s"+ColorReset, e.ID, result.Reason)
 			}
 		}(event)
 	}
@@ -273,7 +273,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 
 	// Split events into batches
 	batches := splitIntoBatches(events, batchSize)
-	log.Printf(ColorCyanBold+"[CONTENT FILTER] BATCH PROCESSING: %d events in %d batches"+ColorReset, len(events), len(batches))
+	logging.Infof(ColorCyanBold+"[CONTENT FILTER] BATCH PROCESSING: %d events in %d batches"+ColorReset, len(events), len(batches))
 
 	var filteredEvents []*nostr.Event
 	var mutex sync.Mutex
@@ -315,7 +315,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 			for _, event := range filteredBatch {
 				eventMap[event.ID] = event
 				if result, found := s.cache.Get(event.ID, instructionsHash); found {
-					log.Printf("Cache hit for event %s in batch %d", event.ID, index)
+					logging.Infof("Cache hit for event %s in batch %d", event.ID, index)
 					cachedResults[event.ID] = result
 				} else {
 					uncachedEvents = append(uncachedEvents, event)
@@ -324,7 +324,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 
 			// Process uncached events individually (no API batch endpoint with direct Ollama integration)
 			if len(uncachedEvents) > 0 {
-				log.Printf("Batch %d: Processing %d uncached events individually", index, len(uncachedEvents))
+				logging.Infof("Batch %d: Processing %d uncached events individually", index, len(uncachedEvents))
 
 				// Create a semaphore to limit concurrent API calls
 				batchSemaphore := make(chan struct{}, 5)
@@ -342,7 +342,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 						// Filter the event
 						result, err := s.FilterEvent(e, instructions)
 						if err != nil {
-							log.Printf("Error filtering event %s in batch %d: %v", e.ID, index, err)
+							logging.Infof("Error filtering event %s in batch %d: %v", e.ID, index, err)
 							// On error, pass the event through
 							mutex.Lock()
 							filteredEvents = append(filteredEvents, e)
@@ -356,7 +356,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 							filteredEvents = append(filteredEvents, e)
 							mutex.Unlock()
 						} else {
-							log.Printf("Filtered out event %s: %s", e.ID, result.Reason)
+							logging.Infof("Filtered out event %s: %s", e.ID, result.Reason)
 						}
 					}(event)
 				}
@@ -371,7 +371,7 @@ func (s *Service) FilterEventsBatch(events []*nostr.Event, instructions string, 
 						mutex.Unlock()
 					}
 				} else {
-					log.Printf("Filtered out event %s (from cache): %s", eventID, result.Reason)
+					logging.Infof("Filtered out event %s (from cache): %s", eventID, result.Reason)
 				}
 			}
 		}(batchIndex, batch)
@@ -410,7 +410,7 @@ func (s *Service) RunPeriodicCacheCleanup(interval time.Duration) {
 	go func() {
 		for range ticker.C {
 			s.cache.Cleanup()
-			log.Printf("Cache cleanup completed, current size: %d", s.cache.Size())
+			logging.Infof("Cache cleanup completed, current size: %d", s.cache.Size())
 		}
 	}()
 }

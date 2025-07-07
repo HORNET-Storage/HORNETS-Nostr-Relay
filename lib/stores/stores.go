@@ -1,12 +1,10 @@
 package stores
 
 import (
-	"fmt"
-	"log"
-
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -84,7 +82,7 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 	addLeavesRecursively = func(builder *merkle_dag.DagBuilder, hash string) error {
 		data, err := store.RetrieveLeaf(root, hash, includeContent, temp)
 		if err != nil {
-			log.Println("Unable to find leaf in the database:", err)
+			logging.Infof("Unable to find leaf in the database:%s", err)
 			return err
 		}
 
@@ -119,7 +117,7 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 
 		for _, childHash := range leaf.Links {
 			if err := addLeavesRecursively(builder, childHash); err != nil {
-				log.Println("Error adding child leaf:", err)
+				logging.Infof("Error adding child leaf:%s", err)
 			}
 		}
 
@@ -127,7 +125,7 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 	}
 
 	if err := addLeavesRecursively(builder, root); err != nil {
-		log.Println("Failed to add leaves from database:", err)
+		logging.Infof("Failed to add leaves from database:%s", err)
 		return nil, err
 	}
 
@@ -135,7 +133,7 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 
 	err := dag.Verify()
 	if err != nil {
-		fmt.Println("Failed to verify full dag")
+		logging.Infof("Failed to verify full dag")
 		return nil, err
 	}
 
@@ -156,7 +154,7 @@ func StoreDag(store Store, dag *types.DagData, temp bool) error {
 			Leaf:      *leaf,
 		}, temp)
 		if err != nil {
-			fmt.Println("Failed to store leaf: " + err.Error())
+			logging.Infof("Failed to store leaf: " + err.Error())
 			return err
 		}
 

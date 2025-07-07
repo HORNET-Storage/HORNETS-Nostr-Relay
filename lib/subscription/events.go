@@ -6,13 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/nbd-wtf/go-nostr"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -32,7 +32,7 @@ func (m *SubscriptionManager) createEvent(
 	// Get current credit for the subscriber
 	creditSats, err := m.store.GetStatsStore().GetSubscriberCredit(subscriber.Npub)
 	if err != nil {
-		log.Printf("Warning: could not get credit for subscriber: %v", err)
+		logging.Infof("Warning: could not get credit for subscriber: %v", err)
 		creditSats = 0
 	}
 
@@ -44,7 +44,7 @@ func (m *SubscriptionManager) createEvent(
 		return fmt.Sprintf("%d", storageInfo.TotalBytes)
 	}()
 
-	log.Printf("[DEBUG] Creating kind 11888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t",
+	logging.Infof("[DEBUG] Creating kind 11888 event for %s: usedBytes=%d, totalBytes=%s, isUnlimited=%t",
 		subscriber.Npub, storageInfo.UsedBytes, totalBytesStr, storageInfo.IsUnlimited)
 
 	// Get relay mode from config
@@ -63,9 +63,9 @@ func (m *SubscriptionManager) createEvent(
 
 	// Log address handling for debugging
 	if subscriber.Address == "" {
-		log.Printf("Creating kind 11888 event without Bitcoin address for user %s", subscriber.Npub)
+		logging.Infof("Creating kind 11888 event without Bitcoin address for user %s", subscriber.Npub)
 	} else {
-		log.Printf("Creating kind 11888 event with Bitcoin address %s for user %s", subscriber.Address, subscriber.Npub)
+		logging.Infof("Creating kind 11888 event with Bitcoin address %s for user %s", subscriber.Address, subscriber.Npub)
 	}
 
 	// Add credit information if there is any
@@ -122,7 +122,7 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 	default:
 		tierName = ""
 	}
-	log.Printf("Creating/updating NIP-88 event for %s with tier %s",
+	logging.Infof("Creating/updating NIP-88 event for %s with tier %s",
 		subscriber.Npub, tierName)
 
 	// Delete ALL existing NIP-88 events for this user (check both npub and hex formats)
@@ -139,10 +139,10 @@ func (m *SubscriptionManager) createOrUpdateNIP88Event(
 		// Remove limit to get all events
 	})
 	if err == nil && len(existingEvents) > 0 {
-		log.Printf("Deleting %d existing NIP-88 events for %s", len(existingEvents), subscriber.Npub)
+		logging.Infof("Deleting %d existing NIP-88 events for %s", len(existingEvents), subscriber.Npub)
 		for _, event := range existingEvents {
 			if err := m.store.DeleteEvent(event.ID); err != nil {
-				log.Printf("Warning: failed to delete existing NIP-88 event %s: %v", event.ID, err)
+				logging.Infof("Warning: failed to delete existing NIP-88 event %s: %v", event.ID, err)
 			}
 		}
 	}
@@ -163,7 +163,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) error {
-	log.Printf("Checking for existing NIP-88 event for subscriber %s", subscriber.Npub)
+	logging.Infof("Checking for existing NIP-88 event for subscriber %s", subscriber.Npub)
 
 	// Check for existing event
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
@@ -174,17 +174,17 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		Limit: 1,
 	})
 	if err != nil {
-		log.Printf("Error querying events: %v", err)
+		logging.Infof("Error querying events: %v", err)
 		return fmt.Errorf("error querying existing NIP-88 events: %v", err)
 	}
 
 	if len(existingEvents) > 0 {
-		log.Printf("NIP-88 event already exists for subscriber %s, skipping creation", subscriber.Npub)
+		logging.Infof("NIP-88 event already exists for subscriber %s, skipping creation", subscriber.Npub)
 		return nil
 	}
 
-	log.Printf("Creating new NIP-88 event for subscriber %s", subscriber.Npub)
-	log.Printf("Subscriber Address: %s", subscriber.Address)
+	logging.Infof("Creating new NIP-88 event for subscriber %s", subscriber.Npub)
+	logging.Infof("Subscriber Address: %s", subscriber.Address)
 
 	// Create new event
 	event, err := m.createEvent(subscriber, activeTier, expirationDate, storageInfo)
@@ -192,7 +192,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		return err
 	}
 
-	log.Println("Subscription Event before storing: ", event.String())
+	logging.Infof("Subscription Event before storing: " + event.String())
 
 	// Store and verify
 	if err := m.store.StoreEvent(event); err != nil {
@@ -208,11 +208,11 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		Limit: 1,
 	})
 	if err != nil {
-		log.Printf("Error verifying stored event: %v", err)
+		logging.Infof("Error verifying stored event: %v", err)
 	} else {
-		log.Printf("Verified stored event. Found %d events", len(storedEvents))
+		logging.Infof("Verified stored event. Found %d events", len(storedEvents))
 		if len(storedEvents) > 0 {
-			log.Printf("Event details: %+v", storedEvents[0])
+			logging.Infof("Event details: %+v", storedEvents[0])
 		}
 	}
 

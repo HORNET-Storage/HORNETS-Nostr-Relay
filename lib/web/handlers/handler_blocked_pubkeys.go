@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
@@ -26,7 +26,7 @@ type BlockedPubkeyResponse struct {
 func GetBlockedPubkeys(c *fiber.Ctx, store stores.Store) error {
 	blockedPubkeys, err := store.ListBlockedPubkeys()
 	if err != nil {
-		log.Printf("Error getting blocked pubkeys: %v", err)
+		logging.Infof("Error getting blocked pubkeys: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("Failed to retrieve blocked pubkeys: %v", err),
 		})
@@ -79,13 +79,13 @@ func BlockPubkey(c *fiber.Ctx, store stores.Store) error {
 	// Block the pubkey
 	err := store.BlockPubkey(request.Pubkey, request.Reason)
 	if err != nil {
-		log.Printf("Error blocking pubkey %s: %v", request.Pubkey, err)
+		logging.Infof("Error blocking pubkey %s: %v", request.Pubkey, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("Failed to block pubkey: %v", err),
 		})
 	}
 
-	log.Printf("Pubkey %s blocked: %s", request.Pubkey, request.Reason)
+	logging.Infof("Pubkey %s blocked: %s", request.Pubkey, request.Reason)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"success": true,
 		"message": fmt.Sprintf("Pubkey %s has been blocked", request.Pubkey),
@@ -114,13 +114,13 @@ func UnblockPubkey(c *fiber.Ctx, store stores.Store) error {
 	// Unblock the pubkey
 	err := store.UnblockPubkey(pubkey)
 	if err != nil {
-		log.Printf("Error unblocking pubkey %s: %v", pubkey, err)
+		logging.Infof("Error unblocking pubkey %s: %v", pubkey, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": fmt.Sprintf("Failed to unblock pubkey: %v", err),
 		})
 	}
 
-	log.Printf("Pubkey %s unblocked", pubkey)
+	logging.Infof("Pubkey %s unblocked", pubkey)
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"success": true,
 		"message": fmt.Sprintf("Pubkey %s has been unblocked", pubkey),

@@ -4,8 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"log"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -14,12 +12,13 @@ import (
 	"github.com/spf13/viper"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Verify login signature: Request received")
+	logging.Info("Verify login signature: Request received")
 
 	// Parse the payload
 	var verifyPayload struct {
@@ -30,7 +29,7 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	if err := c.BodyParser(&verifyPayload); err != nil {
-		log.Printf("Verify login signature: JSON parsing error: %v", err)
+		logging.Infof("Verify login signature: JSON parsing error: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
@@ -38,9 +37,9 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 
 	// Verify the event's signature
 	event := verifyPayload.Event
-	log.Printf("Verify login signature: Event received for pubkey: %s", event.PubKey)
+	logging.Infof("Verify login signature: Event received for pubkey: %s", event.PubKey)
 	if !verifyEvent(&event) {
-		log.Println("Verify login signature: Invalid event signature")
+		logging.Info("Verify login signature: Invalid event signature")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid event signature",
 		})
@@ -49,7 +48,7 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 	// Retrieve the user challenge from the store
 	userChallenge, err := store.GetStatsStore().GetUserChallenge(event.Content)
 	if err != nil {
-		log.Printf("Verify login signature: Challenge not found or expired: %v", err)
+		logging.Infof("Verify login signature: Challenge not found or expired: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid challenge or challenge expired",
 		})
@@ -57,9 +56,9 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 
 	// Check if the challenge has expired
 	if time.Since(userChallenge.CreatedAt) > 3*time.Minute {
-		log.Println("Verify login signature: Challenge expired")
+		logging.Info("Verify login signature: Challenge expired")
 		if err := store.GetStatsStore().MarkChallengeExpired(&userChallenge); err != nil {
-			log.Printf("Verify login signature: Error updating challenge: %v", err)
+			logging.Infof("Verify login signature: Error updating challenge: %v", err)
 		}
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Challenge expired",
@@ -69,14 +68,14 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 	// Retrieve the user based on the challenge
 	user, err := store.GetStatsStore().GetUserByID(userChallenge.UserID)
 	if err != nil {
-		log.Printf("Verify login signature: User not found: %v", err)
+		logging.Infof("Verify login signature: User not found: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "User not found",
 		})
 	}
 
 	// if err := store.GetStatsStore().DeleteActiveToken(user.ID); err != nil {
-	// 	log.Printf("Warning: Failed to delete existing tokens: %v", err)
+	// 	logging.Infof("Warning: Failed to delete existing tokens: %v", err)
 	// 	// Continue anyway as this is not critical
 	// }
 
@@ -93,13 +92,13 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(viper.GetString("jwt_secret")))
 	if err != nil {
-		log.Printf("Verify login signature: Error creating JWT token: %v", err)
+		logging.Infof("Verify login signature: Error creating JWT token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error creating token",
 		})
 	}
 
-	log.Println("Token String: ", tokenString)
+	logging.Infof("Token String: %s", tokenString)
 
 	// Store the active token in the database
 	activeToken := types.ActiveToken{
@@ -108,15 +107,15 @@ func VerifyLoginSignature(c *fiber.Ctx, store stores.Store) error {
 		ExpiresAt: expirationTime.Format(time.RFC3339),
 	}
 
-	log.Println("Active token to be stored: ", activeToken)
+	logging.Infof("Active token to be stored: %+v", activeToken)
 	if err := store.GetStatsStore().StoreActiveToken(&activeToken); err != nil {
-		log.Printf("Verify login signature: Failed to store active token: %v", err)
+		logging.Infof("Verify login signature: Failed to store active token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error storing token",
 		})
 	}
 
-	log.Printf("Verify login signature: Successful verification for user ID: %d", user.ID)
+	logging.Infof("Verify login signature: Successful verification for user ID: %d", user.ID)
 
 	// Respond with the token and user information
 	return c.JSON(fiber.Map{
@@ -140,20 +139,20 @@ func verifyEvent(event *nostr.Event) bool {
 	isValid := cleanSignature.Verify(hash[:], cleanPublicKey)
 
 	if isValid {
-		fmt.Println("Signature is valid from my implementation")
+		logging.Infof("Signature is valid from my implementation")
 	} else {
-		fmt.Println("Signature is invalid from my implementation")
+		logging.Infof("Signature is invalid from my implementation")
 	}
 
 	isValid, err := event.CheckSignature()
 	if err != nil {
-		log.Println("Error checking signature:", err)
+		logging.Infof("Error checking signature:%s", err)
 		return false
 	}
 	if isValid {
-		fmt.Println("Signature is valid")
+		logging.Infof("Signature is valid")
 	} else {
-		fmt.Println("Signature is invalid")
+		logging.Infof("Signature is invalid")
 	}
 
 	if isValid && match {

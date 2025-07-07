@@ -1,11 +1,11 @@
 package moderation
 
 import (
-	"log"
 	"strconv"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
@@ -80,7 +80,7 @@ func MarkNotificationAsRead(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	log.Printf("Notification %v has been read.", req.ID)
+	logging.Infof("Notification %v has been read.", req.ID)
 
 	if req.ID == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -310,7 +310,7 @@ func DeleteModeratedEvent(c *fiber.Ctx, store stores.Store) error {
 
 	if err := store.UnmarkEventBlocked(eventID); err != nil {
 		// Log but don't fail - the main deletion was successful
-		log.Printf("Error removing event %s from blocked list: %v", eventID, err)
+		logging.Infof("Error removing event %s from blocked list: %v", eventID, err)
 	}
 
 	notifications, _, err := store.GetStatsStore().GetAllModerationNotifications(1, 100)
@@ -335,9 +335,9 @@ func DeleteModeratedEvent(c *fiber.Ctx, store stores.Store) error {
 		for _, ticket := range moderationTickets {
 			if err := store.DeleteEvent(ticket.ID); err != nil {
 				// Log but don't fail - the main deletion was successful
-				log.Printf("Error deleting moderation ticket %s for event %s: %v", ticket.ID, eventID, err)
+				logging.Infof("Error deleting moderation ticket %s for event %s: %v", ticket.ID, eventID, err)
 			} else {
-				log.Printf("Successfully deleted moderation ticket %s for event %s", ticket.ID, eventID)
+				logging.Infof("Successfully deleted moderation ticket %s for event %s", ticket.ID, eventID)
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -104,7 +105,7 @@ func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 		if err == nil {
 			return price, (index + 1) % len(apis), nil
 		}
-		fmt.Println("Error fetching price from API", index, ":", err)
+		logging.Infof("Error fetching price from API", index, ":", err)
 	}
 	return 0, apiIndex, fmt.Errorf("all API calls failed")
 }
@@ -114,9 +115,9 @@ func PullBitcoinPrice(store stores.Store) {
 	apiIndex := 0
 	price, newIndex, err := fetchBitcoinPrice(apiIndex)
 	if err != nil {
-		fmt.Println("Error:", err)
+		logging.Infof("Error:", err)
 	} else {
-		fmt.Printf("Initial Bitcoin Price from APIs: $%.2f\n", price)
+		logging.Infof("Initial Bitcoin Price from APIs: $%.2f\n", price)
 		apiIndex = newIndex
 		store.GetStatsStore().SaveBitcoinRate(price)
 	}
@@ -128,9 +129,9 @@ func PullBitcoinPrice(store stores.Store) {
 	for range ticker.C {
 		price, newIndex, err := fetchBitcoinPrice(apiIndex)
 		if err != nil {
-			fmt.Println("Error:", err)
+			logging.Infof("Error:", err)
 		} else {
-			fmt.Printf("Bitcoin Price from APIs: $%.2f\n", price)
+			logging.Infof("Bitcoin Price from APIs: $%.2f\n", price)
 			apiIndex = newIndex
 			store.GetStatsStore().SaveBitcoinRate(price)
 		}

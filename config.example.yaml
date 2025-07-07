@@ -37,7 +37,7 @@ external_services:
 # ==================================================
 logging:
   level: "info"
-  output: "both"
+  output: "file"  # Options: "stdout", "file", "both"
   path: "/logs"
 
 # ==================================================
@@ -47,6 +47,7 @@ relay:
   name: "HORNETS"
   description: "The best relay ever."
   contact: "support@hornets.net"
+  icon: "" # URL to relay icon/logo (can be uploaded via Blossom server)
   software: "golang"
   version: "0.1.0"
   service_tag: "hornet-storage-service"

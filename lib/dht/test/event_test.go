@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"os"
 	"reflect"
@@ -36,6 +35,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9373"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9735"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
@@ -54,13 +54,13 @@ const ProtocolID = "/testing/1.0.0"
 func GenerateRandomEvent() *nostr.Event {
 	priv, err := signing.GeneratePrivateKey()
 	if err != nil {
-		log.Fatal("No private key provided and unable to make one from scratch. Exiting.")
+		logging.Fatalf("No private key provided and unable to make one from scratch. Exiting: %v", err)
 	}
 	pub := priv.PubKey()
 	serializedPriv := hex.EncodeToString(priv.Serialize())
 	serializedPub, err := signing.SerializePublicKeyBech32(pub)
 	if err != nil {
-		log.Fatal("Unable to serialize public key. Exiting.")
+		logging.Fatalf("Unable to serialize public key. Exiting: %v", err)
 	}
 	event := nostr.Event{
 		PubKey:    *serializedPub,
@@ -72,7 +72,7 @@ func GenerateRandomEvent() *nostr.Event {
 	event.ID = event.GetID()
 	err = event.Sign(serializedPriv)
 	if err != nil {
-		log.Fatal("Unable to sign. Exiting.", err)
+		logging.Fatalf("Unable to sign. Exiting: %v", err)
 	}
 
 	return &event
@@ -82,7 +82,7 @@ func GenerateRandomEvent() *nostr.Event {
 func randomHexString(length int) string {
 	bytes := make([]byte, length/2)
 	if _, err := cryptorand.Read(bytes); err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to generate random bytes: %v", err)
 	}
 	return hex.EncodeToString(bytes)
 }
@@ -130,10 +130,10 @@ func deleteFileIfExists(filename string) error {
 		if err != nil {
 			return fmt.Errorf("failed to delete file: %w", err)
 		}
-		fmt.Printf("File %s has been deleted\n", filename)
+		logging.Infof("File %s has been deleted\n", filename)
 	} else if os.IsNotExist(err) {
 		// File doesn't exist, no action needed
-		fmt.Printf("File %s does not exist\n", filename)
+		logging.Infof("File %s does not exist\n", filename)
 		return nil
 	} else {
 		// Some other error occurred
@@ -150,7 +150,7 @@ func setupStore(basepath string) stores.Store {
 
 	store, err := badgerhold.InitStore(basepath)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to initialize store: %v", err)
 	}
 
 	handlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
@@ -194,7 +194,7 @@ func EventsEqual(a, b *nostr.Event) bool {
 }
 
 func GenerateRandomEvents(numEvents int, stores []stores.Store) error {
-	log.Printf("Generating %d random events and storing in graviton\n", numEvents)
+	logging.Infof("Generating %d random events and storing in graviton\n", numEvents)
 	for i := 0; i < numEvents; i++ {
 		event := GenerateRandomEvent()
 
@@ -220,7 +220,7 @@ func getRandomKind() int {
 }
 
 func TestEventGenerationStorageRetrieval(t *testing.T) {
-	log.Println("Testing event storage and retrieval.")
+	logging.Info("Testing event storage and retrieval.")
 	store := setupStore("test")
 	numEvents := 1000
 
@@ -242,11 +242,11 @@ func TestEventGenerationStorageRetrieval(t *testing.T) {
 			t.Fatalf("Unable to check signature. Exiting. %v", err)
 		}
 	}
-	log.Println("All signatures valid.")
+	logging.Info("All signatures valid.")
 }
 
 func TestHostConnections(t *testing.T) {
-	log.Println("Testing p2pHost connections.")
+	logging.Info("Testing p2pHost connections.")
 	//store := setupStore()
 	numHosts := 10
 
@@ -255,11 +255,11 @@ func TestHostConnections(t *testing.T) {
 	for i := 0; i < numHosts; i++ {
 		p2pHost := libp2p.GetHost("")
 		if err := libp2p.SetupMDNS(p2pHost, DiscoveryServiceTag); err != nil {
-			log.Fatal(err)
+			logging.Fatalf("Failed to setup MDNS: %v", err)
 		}
-		fmt.Printf("Host %s addresses:\n", p2pHost.ID())
+		logging.Infof("Host %s addresses:\n", p2pHost.ID())
 		for _, addr := range p2pHost.Addrs() {
-			fmt.Printf("%s/p2p/%s\n", addr, p2pHost.ID())
+			logging.Infof("%s/p2p/%s\n", addr, p2pHost.ID())
 		}
 		hosts = append(hosts, p2pHost)
 	}
@@ -274,7 +274,7 @@ func TestHostConnections(t *testing.T) {
 }
 
 func TestHostCommunication(t *testing.T) {
-	log.Println("Testing host syncing.")
+	logging.Info("Testing host syncing.")
 	ctx := context.Background()
 
 	store1 := setupStore("test")
@@ -314,16 +314,16 @@ func TestHostCommunication(t *testing.T) {
 
 		incoming, err := io.ReadAll(s)
 		if err != nil {
-			log.Println("Failed to read data from stream:", err)
+			logging.Infof("Failed to read data from stream:%s", err)
 			s.Reset()
 			t.Fatal(err)
 		}
 
 		if bytes.Equal(incoming, outgoing) {
-			log.Println("Data matches")
+			logging.Info("Data matches")
 		} else {
-			fmt.Printf("Received: %d bytes\n", len(incoming))
-			fmt.Printf("Sent: %d bytes\n", len(outgoing))
+			logging.Infof("Received: %d bytes\n", len(incoming))
+			logging.Infof("Sent: %d bytes\n", len(outgoing))
 			t.Fatal("Data mismatch")
 		}
 
@@ -342,14 +342,14 @@ func TestHostCommunication(t *testing.T) {
 		s.Reset()
 		t.Fatal(err)
 	}
-	//     fmt.Printf("Sent: %s\n", data)
+	//     logging.Infof("Sent: %s\n", data)
 
 	time.Sleep(2 * time.Second)
 
 }
 
 func TestNegentropyEventSync(t *testing.T) {
-	log.Println("Testing host syncing.")
+	logging.Info("Testing host syncing.")
 	ctx := context.Background()
 
 	store1 := setupStore("store1")

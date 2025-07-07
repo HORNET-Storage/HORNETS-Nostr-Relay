@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 )
 
 // CreatePaymentNotification creates a new payment notification
@@ -172,7 +173,7 @@ func (store *GormStatisticsStore) MarkAllPaymentNotificationsAsRead() error {
 	}
 
 	// Log the number of rows affected to verify the update
-	fmt.Printf("Marked %d payment notifications as read\n", result.RowsAffected)
+	logging.Infof("Marked %d payment notifications as read\n", result.RowsAffected)
 
 	return nil
 }

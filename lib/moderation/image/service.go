@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 )
 
 // ModerationService handles communication with the moderation API
@@ -80,7 +81,7 @@ func (s *ModerationService) ModerateURL(mediaURL string) (*ModerationResponse, e
 	if err != nil {
 		// If download fails, allow the content to avoid false positives
 		// but log the error
-		fmt.Printf("Warning: Failed to download image for moderation: %v\n", err)
+		logging.Infof("Warning: Failed to download image for moderation: %v\n", err)
 		return &ModerationResponse{
 			Decision:       string(DecisionAllow),
 			Explanation:    "Failed to download image for moderation",
@@ -132,7 +133,7 @@ func (s *ModerationService) ModerateFile(filePath string) (*ModerationResponse, 
 	}
 
 	// Log file information for debugging
-	log.Printf("Uploading image: %s (type: %s, size: %d bytes, path: %s)",
+	logging.Infof("Uploading image: %s (type: %s, size: %d bytes, path: %s)",
 		filepath.Base(filePath), imgType, fileInfo.Size(), absPath)
 
 	// Read the entire file into memory
@@ -176,7 +177,7 @@ func (s *ModerationService) ModerateFile(filePath string) (*ModerationResponse, 
 	requestBody.WriteString("--" + boundary + "--\r\n")
 
 	// Debug the request body size
-	log.Printf("Request body size: %d bytes", requestBody.Len())
+	logging.Infof("Request body size: %d bytes", requestBody.Len())
 
 	// Create and send the request
 	requestURL := fmt.Sprintf("%s/moderate?moderation_mode=%s&threshold=%f",
@@ -260,7 +261,7 @@ func (s *ModerationService) downloadImage(mediaURL string) (string, error) {
 	filename := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), baseName, ext)
 	localPath := filepath.Join(s.DownloadDir, filename)
 
-	log.Printf("Downloading media %s to %s", mediaURL, localPath)
+	logging.Infof("Downloading media %s to %s", mediaURL, localPath)
 
 	// Create a file to save the media
 	file, err := os.Create(localPath)
@@ -283,7 +284,7 @@ func (s *ModerationService) downloadImage(mediaURL string) (string, error) {
 
 	// Log content type for debugging
 	contentType := resp.Header.Get("Content-Type")
-	log.Printf("Media content type from server: %s", contentType)
+	logging.Infof("Media content type from server: %s", contentType)
 
 	// Save the media to file
 	size, err := io.Copy(file, resp.Body)
@@ -291,7 +292,7 @@ func (s *ModerationService) downloadImage(mediaURL string) (string, error) {
 		return "", fmt.Errorf("failed to save media: %w", err)
 	}
 
-	log.Printf("Successfully downloaded %d bytes to %s", size, localPath)
+	logging.Infof("Successfully downloaded %d bytes to %s", size, localPath)
 
 	return localPath, nil
 }
@@ -403,7 +404,7 @@ func (s *ModerationService) ModerateDisputeURL(mediaURL string, disputeReason st
 	imagePath, err := s.downloadImage(mediaURL)
 	if err != nil {
 		// If download fails, allow the content to avoid false positives
-		fmt.Printf("Warning: Failed to download image for dispute moderation: %v\n", err)
+		logging.Infof("Warning: Failed to download image for dispute moderation: %v\n", err)
 		return &ModerationResponse{
 			Decision:       string(DecisionAllow),
 			Explanation:    "Failed to download image for dispute moderation",
@@ -455,7 +456,7 @@ func (s *ModerationService) ModerateDisputeFile(filePath string, disputeReason s
 	}
 
 	// Log file information for debugging
-	log.Printf("Uploading image for dispute moderation: %s (type: %s, size: %d bytes, path: %s)",
+	logging.Infof("Uploading image for dispute moderation: %s (type: %s, size: %d bytes, path: %s)",
 		filepath.Base(filePath), imgType, fileInfo.Size(), absPath)
 
 	// Read the entire file into memory
@@ -506,7 +507,7 @@ func (s *ModerationService) ModerateDisputeFile(filePath string, disputeReason s
 	requestBody.WriteString("--" + boundary + "--\r\n")
 
 	// Debug the request body size
-	log.Printf("Dispute moderation request body size: %d bytes", requestBody.Len())
+	logging.Infof("Dispute moderation request body size: %d bytes", requestBody.Len())
 
 	// Create and send the request
 	requestURL := fmt.Sprintf("%s/moderate_dispute?moderation_mode=%s&threshold=%f", s.APIEndpoint, s.Mode, s.Threshold)

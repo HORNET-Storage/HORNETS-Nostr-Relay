@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 )
 
 // GenerateUserProfiles creates user profiles with adoption metrics for each month
 func (g *DemoDataGenerator) GenerateUserProfiles(store statistics.StatisticsStore) error {
-	fmt.Println("Generating user profiles month by month...")
+	logging.Infof("Generating user profiles month by month...")
 
 	// Start with base number of users
 	currentUsers := g.InitialUserCount
@@ -17,7 +18,7 @@ func (g *DemoDataGenerator) GenerateUserProfiles(store statistics.StatisticsStor
 	// Generate data for each month in the range
 	currentMonth := g.StartMonth
 	for !currentMonth.After(g.EndMonth) {
-		fmt.Printf("Generating profiles for %s...\n", currentMonth.Format("Jan 2006"))
+		logging.Infof("Generating profiles for %s...\n", currentMonth.Format("Jan 2006"))
 
 		// Calculate how many users to add this month
 		usersThisMonth := currentUsers
@@ -92,6 +93,6 @@ func (g *DemoDataGenerator) GenerateUserProfiles(store statistics.StatisticsStor
 		currentMonth = addMonth(currentMonth)
 	}
 
-	fmt.Println("User profile generation complete!")
+	logging.Infof("User profile generation complete!")
 	return nil
 }

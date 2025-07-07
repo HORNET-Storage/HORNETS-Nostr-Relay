@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"time"
 
@@ -54,12 +53,12 @@ func isConnectionBlocked(state *connectionState, store stores.Store) (bool, erro
 func terminateIfBlocked(c *websocket.Conn, state *connectionState, store stores.Store) bool {
 	isBlocked, err := isConnectionBlocked(state, store)
 	if err != nil {
-		log.Printf("Error checking if pubkey is blocked: %v", err)
+		logging.Infof("Error checking if pubkey is blocked: %v", err)
 		return false
 	}
 
 	if isBlocked {
-		log.Printf("Terminating connection from blocked pubkey: %s", state.pubkey)
+		logging.Infof("Terminating connection from blocked pubkey: %s", state.pubkey)
 		c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4403, "Blocked pubkey"))
 		c.Close()
 		return true
@@ -77,7 +76,7 @@ func BuildServer(store stores.Store) *fiber.App {
 		defer removeListener(c)
 
 		challenge := getGlobalChallenge()
-		log.Printf("Using global challenge for connection: %s", challenge)
+		logging.Infof("Using global challenge for connection: %s", challenge)
 
 		// Initialize state with empty pubkey and current time for blocked check
 		state := &connectionState{
@@ -90,7 +89,7 @@ func BuildServer(store stores.Store) *fiber.App {
 		authChallenge := []interface{}{"AUTH", challenge}
 		jsonAuth, err := json.Marshal(authChallenge)
 		if err != nil {
-			log.Printf("Error marshalling auth interface: %v", err)
+			logging.Infof("Error marshalling auth interface: %v", err)
 		}
 
 		handleIncomingMessage(c, jsonAuth)
@@ -109,12 +108,12 @@ func BuildServer(store stores.Store) *fiber.App {
 					if state.pubkey != "" {
 						isBlocked, err := store.IsBlockedPubkey(state.pubkey)
 						if err != nil {
-							log.Printf("Error checking if pubkey is blocked: %v", err)
+							logging.Infof("Error checking if pubkey is blocked: %v", err)
 							continue
 						}
 
 						if isBlocked {
-							log.Printf("Terminating connection from newly blocked pubkey: %s", state.pubkey)
+							logging.Infof("Terminating connection from newly blocked pubkey: %s", state.pubkey)
 							c.WriteMessage(websocket.CloseMessage,
 								websocket.FormatCloseMessage(4403, "Blocked pubkey"))
 							c.Close()
@@ -145,7 +144,7 @@ func StartServer(app *fiber.App) error {
 	// Generate the global challenge
 	_, err := generateGlobalChallenge()
 	if err != nil {
-		log.Fatalf("Failed to generate global challenge: %v", err)
+		logging.Fatalf("Failed to generate global challenge: %v", err)
 	}
 
 	address := viper.GetString("server.address")
@@ -153,7 +152,7 @@ func StartServer(app *fiber.App) error {
 
 	err = app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
-		log.Fatalf("error starting nostr server: %v\n", err)
+		logging.Fatalf("error starting nostr server: %v\n", err)
 	}
 
 	if viper.GetBool("server.upnp") {
@@ -186,6 +185,7 @@ func GetRelayInfo() NIP11RelayInfo {
 		Description:   viper.GetString("relay.description"),
 		Pubkey:        viper.GetString("relay.public_key"),
 		Contact:       viper.GetString("relay.contact"),
+		Icon:          viper.GetString("relay.icon"),
 		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
 		Software:      viper.GetString("relay.software"),
 		Version:       viper.GetString("relay.version"),
@@ -201,10 +201,10 @@ func GetRelayInfo() NIP11RelayInfo {
 		}
 		err = SignRelay(&relayInfo, privKey)
 		if err != nil {
-			log.Printf("Error signing relay info: %v", err)
+			logging.Infof("Error signing relay info: %v", err)
 		}
 	} else {
-		log.Printf("Not advertising hornet extension because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
+		logging.Infof("Not advertising hornet extension because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
 	}
 
 	return relayInfo
@@ -242,7 +242,7 @@ func PackRelayForSig(nr *NIP11RelayInfo) []byte {
 	// Pack PublicKey
 	pubkeyBytes, err := hex.DecodeString(nr.Pubkey)
 	if err != nil {
-		log.Printf("Skipping packing invalid pubkey %s", nr.Pubkey)
+		logging.Infof("Skipping packing invalid pubkey %s", nr.Pubkey)
 	} else {
 		packed = append(packed, pubkeyBytes...)
 	}
@@ -295,38 +295,38 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		return fmt.Errorf("read error: %w", err)
 	}
 
-	log.Printf("Received raw message: %s", string(message))
+	logging.Infof("Received raw message: %s", string(message))
 
 	// Special handling for AUTH messages
 	var rawArray []interface{}
 	if err := json.Unmarshal(message, &rawArray); err == nil {
 		if len(rawArray) >= 2 {
 			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
-				log.Printf("Detected AUTH message")
+				logging.Infof("Detected AUTH message")
 
 				// If second element is a string, it's the initial challenge
 				if challenge, ok := rawArray[1].(string); ok {
-					log.Printf("Initial AUTH challenge received: %s", challenge)
+					logging.Infof("Initial AUTH challenge received: %s", challenge)
 					return nil
 				}
 
 				// If second element is a map, it's the auth event
 				if eventMap, ok := rawArray[1].(map[string]interface{}); ok {
-					log.Printf("Received AUTH event")
+					logging.Infof("Received AUTH event")
 					eventBytes, err := json.Marshal(eventMap)
 					if err != nil {
-						log.Printf("Failed to marshal event map: %v", err)
+						logging.Infof("Failed to marshal event map: %v", err)
 						return nil
 					}
 
 					var event nostr.Event
 					if err := json.Unmarshal(eventBytes, &event); err != nil {
-						log.Printf("Failed to unmarshal event: %v", err)
+						logging.Infof("Failed to unmarshal event: %v", err)
 						return nil
 					}
 
 					authEnv := &nostr.AuthEnvelope{Event: event}
-					log.Printf("Handling AUTH event")
+					logging.Infof("Handling AUTH event")
 					handleAuthMessage(c, authEnv, challenge, state, store)
 					return nil
 				}
@@ -349,7 +349,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 	case *nostr.ReqEnvelope:
 		handleReqMessage(c, env, state, store)
 	case *nostr.AuthEnvelope:
-		log.Printf("Handling AUTH message")
+		logging.Infof("Handling AUTH message")
 		handleAuthMessage(c, env, challenge, state, store)
 	case *nostr.CloseEnvelope:
 		handleCloseMessage(c, env)
@@ -361,7 +361,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 			return nil
 		}
 		label := message[0:firstComma]
-		log.Printf("Unknown message type: %s", string(label))
+		logging.Infof("Unknown message type: %s", string(label))
 	}
 
 	return nil
@@ -373,16 +373,16 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 // 		return fmt.Errorf("read error: %w", err)
 // 	}
 
-// 	log.Printf("Received raw message: %s", string(message))
+// 	logging.Infof("Received raw message: %s", string(message))
 
 // 	// Special handling for AUTH messages since ParseMessage might not handle them correctly
 // 	var rawArray []interface{}
 // 	if err := json.Unmarshal(message, &rawArray); err == nil {
 // 		if len(rawArray) >= 2 {
 // 			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
-// 				log.Printf("Detected AUTH message")
+// 				logging.Infof("Detected AUTH message")
 // 				if len(rawArray) == 2 {
-// 					log.Printf("Initial AUTH challenge received")
+// 					logging.Infof("Initial AUTH challenge received")
 // 					return nil
 // 				} else if len(rawArray) == 3 {
 // 					if eventJSON, ok := rawArray[1].(map[string]interface{}); ok {
@@ -409,7 +409,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 // 		handleReqMessage(c, env)
 
 // 	case *nostr.AuthEnvelope:
-// 		log.Printf("Handling AUTH message")
+// 		logging.Infof("Handling AUTH message")
 // 		handleAuthMessage(c, env, challenge, state, store)
 
 // 	case *nostr.CloseEnvelope:

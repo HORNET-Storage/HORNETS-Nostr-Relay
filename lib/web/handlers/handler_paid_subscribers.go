@@ -3,12 +3,12 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -58,12 +58,12 @@ const placeholderAvatarURL = "http://localhost:3000/placeholder-avatar.png"
 
 // HandleGetPaidSubscriberProfiles gets profile pictures of paid subscribers
 func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
-	log.Printf("Fetching paid subscriber profiles")
+	logging.Infof("Fetching paid subscriber profiles")
 
 	// First, try to get paid subscribers from the statistics store
 	paidSubscribers, err := store.GetStatsStore().GetPaidSubscribers()
 	if err != nil {
-		log.Printf("Error fetching paid subscribers from database, falling back to events: %v", err)
+		logging.Infof("Error fetching paid subscribers from database, falling back to events: %v", err)
 
 		// Fall back to the original method
 		return GetSubscribersFromEvents(c, store)
@@ -71,7 +71,7 @@ func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
 
 	// If we have subscribers in the database, use them
 	if len(paidSubscribers) > 0 {
-		log.Printf("Found %d paid subscribers in database", len(paidSubscribers))
+		logging.Infof("Found %d paid subscribers in database", len(paidSubscribers))
 
 		// Collect the pubkeys of all paid subscribers
 		pubkeys := make([]string, 0, len(paidSubscribers))
@@ -82,23 +82,23 @@ func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
 		// Get profile pictures for each subscriber
 		profiles, err := GetProfilesForPubkeys(store, pubkeys)
 		if err != nil {
-			log.Printf("Error getting profiles: %v", err)
+			logging.Infof("Error getting profiles: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to fetch profiles",
 			})
 		}
 
-		log.Printf("Returning %d profiles with pictures", len(profiles))
+		logging.Infof("Returning %d profiles with pictures", len(profiles))
 		// Log the response structure to help with panel-side implementation
 		if len(profiles) > 0 {
 			exampleJSON, _ := json.MarshalIndent(profiles[0], "", "  ")
-			log.Printf("Example profile response structure: %s", exampleJSON)
+			logging.Infof("Example profile response structure: %s", exampleJSON)
 		}
 		return c.JSON(profiles)
 	}
 
 	// If no results from database, fall back to the original method
-	log.Printf("No paid subscribers found in database, falling back to events")
+	logging.Infof("No paid subscribers found in database, falling back to events")
 	return GetSubscribersFromEvents(c, store)
 }
 
@@ -121,7 +121,7 @@ func GetProfilesForPubkeys(store stores.Store, pubkeys []string) ([]PaidSubscrib
 			Limit:   1, // We only need the latest one
 		})
 		if err != nil {
-			log.Printf("Error querying metadata for pubkey %s: %v", pubkey, err)
+			logging.Infof("Error querying metadata for pubkey %s: %v", pubkey, err)
 			// Still include the profile with the placeholder avatar
 			profiles = append(profiles, profile)
 			continue
@@ -130,7 +130,7 @@ func GetProfilesForPubkeys(store stores.Store, pubkeys []string) ([]PaidSubscrib
 		if len(metadataEvents) > 0 {
 			var metadata UserMetadata
 			if err := json.Unmarshal([]byte(metadataEvents[0].Content), &metadata); err != nil {
-				log.Printf("Error unmarshaling metadata for pubkey %s: %v", pubkey, err)
+				logging.Infof("Error unmarshaling metadata for pubkey %s: %v", pubkey, err)
 				// Still include the profile with the placeholder avatar
 				profiles = append(profiles, profile)
 				continue
@@ -167,7 +167,7 @@ func GetProfilesForPubkeys(store stores.Store, pubkeys []string) ([]PaidSubscrib
 			// Log NIP-24 fields for debugging
 			if metadata.Website != "" || metadata.Banner != "" || metadata.Bot ||
 				(metadata.Birthday.Year != 0 || metadata.Birthday.Month != 0 || metadata.Birthday.Day != 0) {
-				log.Printf("NIP-24 fields for %s: Website=%s, Banner=%s, Bot=%v, Birthday=%v-%v-%v",
+				logging.Infof("NIP-24 fields for %s: Website=%s, Banner=%s, Bot=%v, Birthday=%v-%v-%v",
 					pubkey, metadata.Website, metadata.Banner, metadata.Bot,
 					metadata.Birthday.Year, metadata.Birthday.Month, metadata.Birthday.Day)
 			}
@@ -196,7 +196,7 @@ func GetSubscribersFromEvents(c *fiber.Ctx, store stores.Store) error {
 		},
 	})
 	if err != nil {
-		log.Printf("Error querying subscription events: %v", err)
+		logging.Infof("Error querying subscription events: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to fetch subscribers",
 		})
@@ -240,22 +240,22 @@ func GetSubscribersFromEvents(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	log.Printf("Found %d paid subscribers from events", len(paidSubscribers))
+	logging.Infof("Found %d paid subscribers from events", len(paidSubscribers))
 
 	// Get profiles for the subscribers
 	profiles, err := GetProfilesForPubkeys(store, paidSubscribers)
 	if err != nil {
-		log.Printf("Error getting profiles: %v", err)
+		logging.Infof("Error getting profiles: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to fetch profiles",
 		})
 	}
 
-	log.Printf("Returning %d profiles with pictures", len(profiles))
+	logging.Infof("Returning %d profiles with pictures", len(profiles))
 	// Log the response structure to help with panel-side implementation
 	if len(profiles) > 0 {
 		exampleJSON, _ := json.MarshalIndent(profiles[0], "", "  ")
-		log.Printf("Profile response structure: %s", exampleJSON)
+		logging.Infof("Profile response structure: %s", exampleJSON)
 	}
 	return c.JSON(profiles)
 }

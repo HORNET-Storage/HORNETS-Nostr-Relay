@@ -1,22 +1,22 @@
 package handlers
 
 import (
-	"log"
 	"strconv"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 )
 
 // getPaymentNotifications retrieves payment notifications with pagination
 func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Payment notification request made")
+	logging.Info("Payment notification request made")
 
 	// Log detailed request information
-	log.Printf("Request details - URL: %s, Method: %s", c.OriginalURL(), c.Method())
-	log.Printf("Query parameters - page: %s, limit: %s, filter: %s, pubkey: %s",
+	logging.Infof("Request details - URL: %s, Method: %s", c.OriginalURL(), c.Method())
+	logging.Infof("Query parameters - page: %s, limit: %s, filter: %s, pubkey: %s",
 		c.Query("page", "1"),
 		c.Query("limit", "10"),
 		c.Query("filter", "all"),
@@ -24,7 +24,7 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 
 	// Log request body if present
 	if len(c.Body()) > 0 {
-		log.Printf("Request body: %s", string(c.Body()))
+		logging.Infof("Request body: %s", string(c.Body()))
 	}
 	// Parse pagination parameters
 	page, err := strconv.Atoi(c.Query("page", "1"))
@@ -41,7 +41,7 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 	filterType := c.Query("filter", "all") // all, unread, user
 	pubkey := c.Query("pubkey", "")
 
-	log.Printf("Processing request with filter: %s, pubkey: %s, page: %d, limit: %d",
+	logging.Infof("Processing request with filter: %s, pubkey: %s, page: %d, limit: %d",
 		filterType, pubkey, page, limit)
 
 	var notifications []lib.PaymentNotification
@@ -50,73 +50,73 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 
 	switch filterType {
 	case "unread":
-		log.Printf("Fetching unread notifications with page: %d, limit: %d", page, limit)
+		logging.Infof("Fetching unread notifications with page: %d, limit: %d", page, limit)
 		notifications, metadata, fetchErr = store.GetStatsStore().GetUnreadPaymentNotifications(page, limit)
 		if fetchErr != nil {
-			log.Printf("Error fetching unread notifications: %v", fetchErr)
+			logging.Infof("Error fetching unread notifications: %v", fetchErr)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to fetch notifications: " + fetchErr.Error(),
 			})
 		}
-		log.Printf("Raw result from GetUnreadPaymentNotifications: %+v", notifications)
+		logging.Infof("Raw result from GetUnreadPaymentNotifications: %+v", notifications)
 
 		// Return 204 No Content status with no body when there are no unread notifications
 		if len(notifications) == 0 {
-			log.Println("No unread notifications found, returning 204 No Content")
+			logging.Info("No unread notifications found, returning 204 No Content")
 			return c.Status(fiber.StatusNoContent).Send(nil)
 		}
-		log.Printf("Found %d unread notifications", len(notifications))
+		logging.Infof("Found %d unread notifications", len(notifications))
 	case "user":
 		if pubkey == "" {
-			log.Println("Missing pubkey parameter for user filter, returning 400 Bad Request")
+			logging.Info("Missing pubkey parameter for user filter, returning 400 Bad Request")
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Pubkey parameter is required for user filter",
 			})
 		}
-		log.Printf("Fetching notifications for user: %s with page: %d, limit: %d", pubkey, page, limit)
+		logging.Infof("Fetching notifications for user: %s with page: %d, limit: %d", pubkey, page, limit)
 		notifications, metadata, fetchErr = store.GetStatsStore().GetUserPaymentNotifications(pubkey, page, limit)
 		if fetchErr != nil {
-			log.Printf("Error fetching user notifications: %v", fetchErr)
+			logging.Infof("Error fetching user notifications: %v", fetchErr)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to fetch notifications: " + fetchErr.Error(),
 			})
 		}
 	default: // "all"
-		log.Printf("Fetching all notifications with page: %d, limit: %d", page, limit)
+		logging.Infof("Fetching all notifications with page: %d, limit: %d", page, limit)
 		notifications, metadata, fetchErr = store.GetStatsStore().GetAllPaymentNotifications(page, limit)
 		if fetchErr != nil {
-			log.Printf("Error fetching all notifications: %v", fetchErr)
+			logging.Infof("Error fetching all notifications: %v", fetchErr)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to fetch notifications: " + fetchErr.Error(),
 			})
 		}
-		log.Printf("Raw result from GetAllPaymentNotifications: %+v", notifications)
+		logging.Infof("Raw result from GetAllPaymentNotifications: %+v", notifications)
 
 		// Detailed logging of database result
-		log.Printf("Result data type: %T", notifications)
-		log.Printf("Database response type: %+v", fetchErr)
+		logging.Infof("Result data type: %T", notifications)
+		logging.Infof("Database response type: %+v", fetchErr)
 
 		// Inspect database connection
 		if store.GetStatsStore() == nil {
-			log.Printf("ERROR: Statistics store is nil")
+			logging.Infof("ERROR: Statistics store is nil")
 		} else {
-			log.Printf("Statistics store type: %T", store.GetStatsStore())
+			logging.Infof("Statistics store type: %T", store.GetStatsStore())
 		}
 	}
 
 	// Log detailed notification information
 	if len(notifications) > 0 {
-		log.Printf("Retrieved %d notifications", len(notifications))
+		logging.Infof("Retrieved %d notifications", len(notifications))
 		for i, n := range notifications {
-			log.Printf("Notification %d: ID=%d, PubKey=%s, TxID=%s, Amount=%d, IsRead=%v",
+			logging.Infof("Notification %d: ID=%d, PubKey=%s, TxID=%s, Amount=%d, IsRead=%v",
 				i+1, n.ID, n.PubKey, n.TxID, n.Amount, n.IsRead)
 		}
 	} else {
-		log.Println("No notifications found")
+		logging.Info("No notifications found")
 	}
 
 	if metadata != nil {
-		log.Printf("Pagination: TotalItems=%d, TotalPages=%d, CurrentPage=%d, PageSize=%d",
+		logging.Infof("Pagination: TotalItems=%d, TotalPages=%d, CurrentPage=%d, PageSize=%d",
 			metadata.TotalItems, metadata.TotalPages, metadata.CurrentPage, metadata.PageSize)
 	}
 
@@ -125,11 +125,11 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 		"pagination":    metadata,
 	}
 
-	log.Printf("Sending response with %d notifications", len(notifications))
-	log.Printf("Response data: %+v", responseData)
+	logging.Infof("Sending response with %d notifications", len(notifications))
+	logging.Infof("Response data: %+v", responseData)
 
 	resp := c.JSON(responseData)
-	log.Printf("Response status: %d", c.Response().StatusCode())
+	logging.Infof("Response status: %d", c.Response().StatusCode())
 	return resp
 }
 
@@ -146,7 +146,7 @@ func MarkPaymentNotificationAsRead(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	log.Printf("Payment notification %v has been read", req.ID)
+	logging.Infof("Payment notification %v has been read", req.ID)
 
 	if req.ID == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -175,17 +175,17 @@ func MarkAllPaymentNotificationsAsRead(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		log.Printf("ERROR: Failed to parse request body: %v", err)
+		logging.Infof("ERROR: Failed to parse request body: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
 	}
 
-	log.Println("Received mark all as read from: ", req.Pubkey)
+	logging.Infof("Received mark all as read from: %s", req.Pubkey)
 
 	// Check if store is available
 	if store == nil {
-		log.Printf("ERROR: Store is nil")
+		logging.Infof("ERROR: Store is nil")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Store not available",
 		})
@@ -194,23 +194,23 @@ func MarkAllPaymentNotificationsAsRead(c *fiber.Ctx, store stores.Store) error {
 	// Check if stats store is available
 	statsStore := store.GetStatsStore()
 	if statsStore == nil {
-		log.Printf("ERROR: Stats store is nil")
+		logging.Infof("ERROR: Stats store is nil")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Stats store not available",
 		})
 	}
 
-	log.Printf("About to call MarkAllPaymentNotificationsAsRead")
+	logging.Infof("About to call MarkAllPaymentNotificationsAsRead")
 
 	// Mark all notifications as read globally
 	if err := statsStore.MarkAllPaymentNotificationsAsRead(); err != nil {
-		log.Printf("ERROR: Failed to mark notifications as read: %v", err)
+		logging.Infof("ERROR: Failed to mark notifications as read: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to mark notifications as read: " + err.Error(),
 		})
 	}
 
-	log.Printf("Successfully marked all notifications as read")
+	logging.Infof("Successfully marked all notifications as read")
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -255,16 +255,16 @@ func CreatePaymentNotification(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	// Create the notification
-	log.Printf("Creating payment notification: %+v", notification)
+	logging.Infof("Creating payment notification: %+v", notification)
 
 	if err := store.GetStatsStore().CreatePaymentNotification(&notification); err != nil {
-		log.Printf("ERROR creating notification: %v", err)
+		logging.Infof("ERROR creating notification: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create notification: " + err.Error(),
 		})
 	}
 
-	log.Printf("Successfully created payment notification with ID: %d", notification.ID)
+	logging.Infof("Successfully created payment notification with ID: %d", notification.ID)
 
 	return c.JSON(fiber.Map{
 		"success": true,

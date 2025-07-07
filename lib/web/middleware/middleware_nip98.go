@@ -122,22 +122,78 @@ func validateNIP98Event(event *nostr.Event, c *fiber.Ctx, cfg NIP98Config) error
 		scheme = "https"
 	}
 
-	// Get the original URL including query parameters
-	fullURL := fmt.Sprintf("%s://%s%s", scheme, c.Hostname(), c.OriginalURL())
-
-	// Parse both URLs to normalize them
-	requestURL, err := url.Parse(fullURL)
-	if err != nil {
-		return fmt.Errorf("failed to parse request URL")
+	// Check for forwarded protocol headers (for proxies like ngrok)
+	if proto := c.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
 	}
 
+	// Additional proxy headers to check
+	if scheme == "http" {
+		if c.Get("X-Forwarded-Ssl") == "on" || c.Get("X-Forwarded-Protocol") == "https" {
+			scheme = "https"
+		}
+	}
+
+	// Debug all headers (can be removed in production)
+	// logging.Infof("NIP-98 Debug Headers: X-Forwarded-Proto=%s, X-Forwarded-Ssl=%s, X-Forwarded-Protocol=%s\n",
+	//	c.Get("X-Forwarded-Proto"), c.Get("X-Forwarded-Ssl"), c.Get("X-Forwarded-Protocol"))
+	// logging.Infof("NIP-98 Debug: c.Protocol()=%s, detected scheme=%s\n", c.Protocol(), scheme)
+
+	// Parse the event URL to get what the client expects
 	eventURL, err := url.Parse(urlTag.Value())
 	if err != nil {
 		return fmt.Errorf("failed to parse event URL")
 	}
 
-	// Compare normalized URLs
-	if requestURL.String() != eventURL.String() {
+	// Build the request URL that we expect
+	directURL := fmt.Sprintf("%s://%s%s", scheme, c.Hostname(), c.OriginalURL())
+
+	// Parse direct URL
+	requestURL, err := url.Parse(directURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse request URL")
+	}
+
+	// FLEXIBLE VALIDATION: Handle proxy scenarios
+	isValid := false
+
+	// Method 1: Exact match
+	if requestURL.String() == eventURL.String() {
+		isValid = true
+	}
+
+	// Method 2: Proxy-aware validation
+	if !isValid {
+		// For proxy scenarios, we need to be more flexible
+		// Check if this looks like a proxy setup by examining the event URL
+
+		// If event URL has a base path (like /panel) but request doesn't,
+		// validate that the endpoint paths match and the host is the same
+		if eventURL.Host == requestURL.Host {
+			// Extract the endpoint part (last segment)
+			eventPathParts := strings.Split(strings.Trim(eventURL.Path, "/"), "/")
+			requestPathParts := strings.Split(strings.Trim(requestURL.Path, "/"), "/")
+
+			// Check if the request path is a suffix of the event path
+			// e.g., event: /panel/blossom/upload, request: /blossom/upload
+			if len(eventPathParts) >= len(requestPathParts) {
+				requestSuffix := strings.Join(requestPathParts, "/")
+				eventSuffix := strings.Join(eventPathParts[len(eventPathParts)-len(requestPathParts):], "/")
+
+				if requestSuffix == eventSuffix {
+					// The paths match at the endpoint level
+					// Now check schemes - be flexible about http/https in proxy scenarios
+					if (requestURL.Scheme == eventURL.Scheme) ||
+						(requestURL.Scheme == "http" && eventURL.Scheme == "https") ||
+						(requestURL.Scheme == "https" && eventURL.Scheme == "http") {
+						isValid = true
+					}
+				}
+			}
+		}
+	}
+
+	if !isValid {
 		return fmt.Errorf("URL mismatch: expected %s, got %s", requestURL.String(), eventURL.String())
 	}
 

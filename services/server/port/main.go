@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -451,10 +450,10 @@ func main() {
 	// Register Our Nostr Stream Handlers
 	switch filteringMode {
 	case "blacklist":
-		log.Println("Using universal stream handler because Mode set to 'blacklist'")
+		logging.Info("Using universal stream handler because Mode set to 'blacklist'")
 		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
 	case "whitelist":
-		log.Println("Using specific stream handlers because Mode set to 'whitelist'")
+		logging.Info("Using specific stream handlers because Mode set to 'whitelist'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
@@ -533,13 +532,13 @@ func main() {
 	if config.IsEnabled("web") {
 		wg.Add(1)
 
-		log.Println("Starting with web server enabled")
+		logging.Info("Starting with web server enabled")
 
 		go func() {
 			err = web.StartServer(store)
 
 			if err != nil {
-				log.Println("Fatal error occurred in web server")
+				logging.Info("Fatal error occurred in web server")
 			}
 
 			wg.Done()
@@ -550,14 +549,14 @@ func main() {
 	if config.IsEnabled("nostr") {
 		wg.Add(1)
 
-		log.Println("Starting with legacy nostr proxy web server enabled")
+		logging.Info("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
 			app := ws.BuildServer(store)
 			err := ws.StartServer(app)
 
 			if err != nil {
-				log.Println("Fatal error occurred in web server")
+				logging.Info("Fatal error occurred in web server")
 			}
 
 			wg.Done()

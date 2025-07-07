@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite_demo"
 	"github.com/HORNET-Storage/hornet-storage/services/server/demo/demodata"
@@ -19,8 +20,8 @@ func main() {
 	// Find project root and set default DB path to project root
 	projectRoot, err := findProjectRoot()
 	if err != nil {
-		fmt.Printf("Warning: Could not determine project root: %v\n", err)
-		fmt.Println("Using current directory as a fallback.")
+		logging.Infof("Warning: Could not determine project root: %v\n", err)
+		logging.Infof("Using current directory as a fallback.")
 		projectRoot, _ = os.Getwd()
 	}
 	defaultDBPath := filepath.Join(projectRoot, "demo_statistics.db")
@@ -32,14 +33,14 @@ func main() {
 
 	dbPath := *dbPathPtr
 
-	fmt.Println("HORNETS-Nostr-Relay Demo Data Generator")
-	fmt.Println("=======================================")
-	fmt.Printf("Using database: %s\n\n", dbPath)
+	logging.Infof("HORNETS-Nostr-Relay Demo Data Generator")
+	logging.Infof("=======================================")
+	logging.Infof("Using database: %s\n\n", dbPath)
 
 	// Initialize the SQLite demo store
 	store, err := sqlite_demo.InitStore(dbPath)
 	if err != nil {
-		fmt.Printf("Error initializing SQLite demo store: %v\n", err)
+		logging.Infof("Error initializing SQLite demo store: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -48,13 +49,13 @@ func main() {
 
 	// If auto mode is enabled, generate data with default settings
 	if *autoPtr {
-		fmt.Println("Running in auto mode with default settings...")
+		logging.Infof("Running in auto mode with default settings...")
 		err := generateAllData(generator, store)
 		if err != nil {
-			fmt.Printf("Error generating data: %v\n", err)
+			logging.Infof("Error generating data: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("Data generation complete!")
+		logging.Infof("Data generation complete!")
 		return
 	}
 
@@ -74,7 +75,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 	for {
 		printMainMenu()
 
-		fmt.Print("> ")
+		logging.Infof("> ")
 		scanner.Scan()
 		choice := strings.TrimSpace(scanner.Text())
 
@@ -82,23 +83,23 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 		case "1":
 			err := generateAllData(generator, store)
 			if err != nil {
-				fmt.Printf("Error generating all data: %v\n", err)
+				logging.Infof("Error generating all data: %v\n", err)
 			}
 
 		case "2":
 			err := generator.GenerateUserProfiles(store)
 			if err != nil {
-				fmt.Printf("Error generating user profiles: %v\n", err)
+				logging.Infof("Error generating user profiles: %v\n", err)
 			}
 
 		case "3":
 			err := generator.GenerateEventKinds(store)
 			if err != nil {
-				fmt.Printf("Error generating event kinds: %v\n", err)
+				logging.Infof("Error generating event kinds: %v\n", err)
 			}
 
 		case "4":
-			fmt.Print("How many payment notifications do you want to generate? [50]: ")
+			logging.Infof("How many payment notifications do you want to generate? [50]: ")
 			scanner.Scan()
 			countStr := strings.TrimSpace(scanner.Text())
 			count := 50
@@ -110,17 +111,17 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 
 			err := generator.GeneratePaymentNotifications(store, count)
 			if err != nil {
-				fmt.Printf("Error generating payment notifications: %v\n", err)
+				logging.Infof("Error generating payment notifications: %v\n", err)
 			}
 
 		case "5":
 			err := generator.GenerateWalletBalance(store)
 			if err != nil {
-				fmt.Printf("Error generating wallet balance history: %v\n", err)
+				logging.Infof("Error generating wallet balance history: %v\n", err)
 			}
 
 		case "6":
-			fmt.Print("How many wallet transactions do you want to generate? [100]: ")
+			logging.Infof("How many wallet transactions do you want to generate? [100]: ")
 			scanner.Scan()
 			countStr := strings.TrimSpace(scanner.Text())
 			count := 100
@@ -132,11 +133,11 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 
 			err := generator.GenerateWalletTransactions(store, count)
 			if err != nil {
-				fmt.Printf("Error generating wallet transactions: %v\n", err)
+				logging.Infof("Error generating wallet transactions: %v\n", err)
 			}
 
 		case "7":
-			fmt.Print("How many wallet addresses do you want to generate? [50]: ")
+			logging.Infof("How many wallet addresses do you want to generate? [50]: ")
 			scanner.Scan()
 			countStr := strings.TrimSpace(scanner.Text())
 			count := 50
@@ -148,7 +149,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 
 			err := generator.GenerateWalletAddresses(store, count)
 			if err != nil {
-				fmt.Printf("Error generating wallet addresses: %v\n", err)
+				logging.Infof("Error generating wallet addresses: %v\n", err)
 			}
 
 		case "8":
@@ -165,182 +166,182 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 
 		case "12":
 			generator = demodata.NewDemoDataGenerator()
-			fmt.Println("Settings reset to defaults.")
+			logging.Infof("Settings reset to defaults.")
 
 		case "0", "q", "quit", "exit":
-			fmt.Println("Exiting...")
+			logging.Infof("Exiting...")
 			return
 
 		default:
-			fmt.Println("Invalid choice. Please try again.")
+			logging.Infof("Invalid choice. Please try again.")
 		}
 
-		fmt.Println("\nPress Enter to continue...")
+		logging.Infof("\nPress Enter to continue...")
 		scanner.Scan()
 	}
 }
 
 func printMainMenu() {
-	fmt.Println("\nHORNETS-Nostr-Relay Demo Data Generator")
-	fmt.Println("=======================================")
-	fmt.Println("Main Menu:")
-	fmt.Println("1. Generate All Demo Data (User Profiles, Events, Files, Wallet Data)")
-	fmt.Println("2. Generate User Profiles Only (for Address Adoption charts)")
-	fmt.Println("3. Generate Event Kinds Only (for Gigabytes Per Month charts)")
-	fmt.Println("4. Generate Payment Notifications")
-	fmt.Println("5. Generate Wallet Balance History")
-	fmt.Println("6. Generate Wallet Transactions")
-	fmt.Println("7. Generate Wallet Addresses")
-	fmt.Println("8. Configure Time Range")
-	fmt.Println("9. Configure Growth Patterns")
-	fmt.Println("10. Configure Kind Distribution")
-	fmt.Println("11. Show Current Settings")
-	fmt.Println("12. Reset to Defaults")
-	fmt.Println("0. Exit")
+	logging.Infof("\nHORNETS-Nostr-Relay Demo Data Generator")
+	logging.Infof("=======================================")
+	logging.Infof("Main Menu:")
+	logging.Infof("1. Generate All Demo Data (User Profiles, Events, Files, Wallet Data)")
+	logging.Infof("2. Generate User Profiles Only (for Address Adoption charts)")
+	logging.Infof("3. Generate Event Kinds Only (for Gigabytes Per Month charts)")
+	logging.Infof("4. Generate Payment Notifications")
+	logging.Infof("5. Generate Wallet Balance History")
+	logging.Infof("6. Generate Wallet Transactions")
+	logging.Infof("7. Generate Wallet Addresses")
+	logging.Infof("8. Configure Time Range")
+	logging.Infof("9. Configure Growth Patterns")
+	logging.Infof("10. Configure Kind Distribution")
+	logging.Infof("11. Show Current Settings")
+	logging.Infof("12. Reset to Defaults")
+	logging.Infof("0. Exit")
 }
 
 func configureTimeRange(scanner *bufio.Scanner, generator *demodata.DemoDataGenerator) {
-	fmt.Println("\nConfigure Time Range")
-	fmt.Println("===================")
-	fmt.Printf("Current range: %s to %s (%d months)\n\n",
+	logging.Infof("\nConfigure Time Range")
+	logging.Infof("===================")
+	logging.Infof("Current range: %s to %s (%d months)\n\n",
 		generator.StartMonth.Format("Jan 2006"),
 		generator.EndMonth.Format("Jan 2006"),
 		monthsBetween(generator.StartMonth, generator.EndMonth)+1)
 
-	fmt.Println("1. Set start month (format: MM/YYYY)")
-	fmt.Println("2. Set end month (format: MM/YYYY)")
-	fmt.Println("3. Use last 12 months")
-	fmt.Println("4. Use last 24 months")
-	fmt.Println("5. Return to main menu")
+	logging.Infof("1. Set start month (format: MM/YYYY)")
+	logging.Infof("2. Set end month (format: MM/YYYY)")
+	logging.Infof("3. Use last 12 months")
+	logging.Infof("4. Use last 24 months")
+	logging.Infof("5. Return to main menu")
 
-	fmt.Print("\n> ")
+	logging.Infof("\n> ")
 	scanner.Scan()
 	choice := strings.TrimSpace(scanner.Text())
 
 	switch choice {
 	case "1":
-		fmt.Printf("Enter start month (MM/YYYY) [%s]: ", generator.StartMonth.Format("01/2006"))
+		logging.Infof("Enter start month (MM/YYYY) [%s]: ", generator.StartMonth.Format("01/2006"))
 		scanner.Scan()
 		dateStr := strings.TrimSpace(scanner.Text())
 		if dateStr != "" {
 			if date, err := time.Parse("01/2006", dateStr); err == nil {
 				generator.StartMonth = date
-				fmt.Printf("Start month set to %s\n", date.Format("Jan 2006"))
+				logging.Infof("Start month set to %s\n", date.Format("Jan 2006"))
 			} else {
-				fmt.Printf("Invalid date format: %v\n", err)
+				logging.Infof("Invalid date format: %v\n", err)
 			}
 		}
 
 	case "2":
-		fmt.Printf("Enter end month (MM/YYYY) [%s]: ", generator.EndMonth.Format("01/2006"))
+		logging.Infof("Enter end month (MM/YYYY) [%s]: ", generator.EndMonth.Format("01/2006"))
 		scanner.Scan()
 		dateStr := strings.TrimSpace(scanner.Text())
 		if dateStr != "" {
 			if date, err := time.Parse("01/2006", dateStr); err == nil {
 				generator.EndMonth = date
-				fmt.Printf("End month set to %s\n", date.Format("Jan 2006"))
+				logging.Infof("End month set to %s\n", date.Format("Jan 2006"))
 			} else {
-				fmt.Printf("Invalid date format: %v\n", err)
+				logging.Infof("Invalid date format: %v\n", err)
 			}
 		}
 
 	case "3":
 		generator.EndMonth = time.Now()
 		generator.StartMonth = generator.EndMonth.AddDate(-1, 0, 0)
-		fmt.Printf("Time range set to last 12 months: %s to %s\n",
+		logging.Infof("Time range set to last 12 months: %s to %s\n",
 			generator.StartMonth.Format("Jan 2006"),
 			generator.EndMonth.Format("Jan 2006"))
 
 	case "4":
 		generator.EndMonth = time.Now()
 		generator.StartMonth = generator.EndMonth.AddDate(-2, 0, 0)
-		fmt.Printf("Time range set to last 24 months: %s to %s\n",
+		logging.Infof("Time range set to last 24 months: %s to %s\n",
 			generator.StartMonth.Format("Jan 2006"),
 			generator.EndMonth.Format("Jan 2006"))
 	}
 }
 
 func configureGrowthPatterns(scanner *bufio.Scanner, generator *demodata.DemoDataGenerator) {
-	fmt.Println("\nConfigure Growth Patterns")
-	fmt.Println("=======================")
-	fmt.Printf("1. Set initial user count [current: %d]\n", generator.InitialUserCount)
-	fmt.Printf("2. Set monthly user growth rate [current: %.0f%%]\n", (generator.MonthlyUserGrowthRate-1.0)*100)
-	fmt.Printf("3. Set lightning address adoption rate [current: %.0f%%]\n", generator.LightningAdoptionRate*100)
-	fmt.Printf("4. Set DHT key adoption rate [current: %.0f%%]\n", generator.DHTKeyAdoptionRate*100)
-	fmt.Printf("5. Set both adoption rate [current: %.0f%%]\n", generator.BothAdoptionRate*100)
-	fmt.Printf("6. Set initial notes per day [current: %d]\n", generator.InitialNotesPerDay)
-	fmt.Printf("7. Set notes growth rate [current: %.0f%%]\n", (generator.NotesGrowthRate-1.0)*100)
-	fmt.Printf("8. Set media percentage [current: %.0f%%]\n", generator.MediaPercentage*100)
-	fmt.Println("9. Return to main menu")
+	logging.Infof("\nConfigure Growth Patterns")
+	logging.Infof("=======================")
+	logging.Infof("1. Set initial user count [current: %d]\n", generator.InitialUserCount)
+	logging.Infof("2. Set monthly user growth rate [current: %.0f%%]\n", (generator.MonthlyUserGrowthRate-1.0)*100)
+	logging.Infof("3. Set lightning address adoption rate [current: %.0f%%]\n", generator.LightningAdoptionRate*100)
+	logging.Infof("4. Set DHT key adoption rate [current: %.0f%%]\n", generator.DHTKeyAdoptionRate*100)
+	logging.Infof("5. Set both adoption rate [current: %.0f%%]\n", generator.BothAdoptionRate*100)
+	logging.Infof("6. Set initial notes per day [current: %d]\n", generator.InitialNotesPerDay)
+	logging.Infof("7. Set notes growth rate [current: %.0f%%]\n", (generator.NotesGrowthRate-1.0)*100)
+	logging.Infof("8. Set media percentage [current: %.0f%%]\n", generator.MediaPercentage*100)
+	logging.Infof("9. Return to main menu")
 
-	fmt.Print("\n> ")
+	logging.Infof("\n> ")
 	scanner.Scan()
 	choice := strings.TrimSpace(scanner.Text())
 
 	switch choice {
 	case "1":
-		fmt.Printf("Enter initial user count [%d]: ", generator.InitialUserCount)
+		logging.Infof("Enter initial user count [%d]: ", generator.InitialUserCount)
 		scanner.Scan()
 		countStr := strings.TrimSpace(scanner.Text())
 		if countStr != "" {
 			if val, err := strconv.Atoi(countStr); err == nil && val > 0 {
 				generator.InitialUserCount = val
-				fmt.Printf("Initial user count set to %d\n", val)
+				logging.Infof("Initial user count set to %d\n", val)
 			} else {
-				fmt.Printf("Invalid value: %v\n", err)
+				logging.Infof("Invalid value: %v\n", err)
 			}
 		}
 
 	case "2":
-		fmt.Printf("Enter monthly user growth rate in percent [%.0f]: ", (generator.MonthlyUserGrowthRate-1.0)*100)
+		logging.Infof("Enter monthly user growth rate in percent [%.0f]: ", (generator.MonthlyUserGrowthRate-1.0)*100)
 		scanner.Scan()
 		rateStr := strings.TrimSpace(scanner.Text())
 		if rateStr != "" {
 			if val, err := strconv.ParseFloat(rateStr, 64); err == nil && val >= 0 {
 				generator.MonthlyUserGrowthRate = 1.0 + (val / 100.0)
-				fmt.Printf("Monthly user growth rate set to %.0f%% (factor: %.2f)\n", val, generator.MonthlyUserGrowthRate)
+				logging.Infof("Monthly user growth rate set to %.0f%% (factor: %.2f)\n", val, generator.MonthlyUserGrowthRate)
 			} else {
-				fmt.Printf("Invalid value: %v\n", err)
+				logging.Infof("Invalid value: %v\n", err)
 			}
 		}
 
 	case "3":
-		fmt.Printf("Enter lightning address adoption rate in percent [%.0f]: ", generator.LightningAdoptionRate*100)
+		logging.Infof("Enter lightning address adoption rate in percent [%.0f]: ", generator.LightningAdoptionRate*100)
 		scanner.Scan()
 		rateStr := strings.TrimSpace(scanner.Text())
 		if rateStr != "" {
 			if val, err := strconv.ParseFloat(rateStr, 64); err == nil && val >= 0 && val <= 100 {
 				generator.LightningAdoptionRate = val / 100.0
-				fmt.Printf("Lightning address adoption rate set to %.0f%%\n", val)
+				logging.Infof("Lightning address adoption rate set to %.0f%%\n", val)
 			} else {
-				fmt.Printf("Invalid value: %v\n", err)
+				logging.Infof("Invalid value: %v\n", err)
 			}
 		}
 	}
 }
 
 func configureKindDistribution(scanner *bufio.Scanner, generator *demodata.DemoDataGenerator) {
-	fmt.Println("\nConfigure Kind Distribution")
-	fmt.Println("==========================")
-	fmt.Println("Current kind distribution:")
+	logging.Infof("\nConfigure Kind Distribution")
+	logging.Infof("==========================")
+	logging.Infof("Current kind distribution:")
 	for kind, percentage := range generator.KindDistribution {
-		fmt.Printf("- Kind %d: %.0f%%\n", kind, percentage*100)
+		logging.Infof("- Kind %d: %.0f%%\n", kind, percentage*100)
 	}
 
-	fmt.Println("\n1. Modify kind percentages")
-	fmt.Println("2. Return to main menu")
+	logging.Infof("\n1. Modify kind percentages")
+	logging.Infof("2. Return to main menu")
 
-	fmt.Print("\n> ")
+	logging.Infof("\n> ")
 	scanner.Scan()
 	choice := strings.TrimSpace(scanner.Text())
 
 	if choice == "1" {
-		fmt.Println("\nEnter new percentages for each kind (must sum to 100%):")
+		logging.Infof("\nEnter new percentages for each kind (must sum to 100%):")
 		newDistribution := make(map[int]float64)
 		totalPercentage := 0.0
 
 		for kind := range generator.KindDistribution {
-			fmt.Printf("Kind %d [%.0f%%]: ", kind, generator.KindDistribution[kind]*100)
+			logging.Infof("Kind %d [%.0f%%]: ", kind, generator.KindDistribution[kind]*100)
 			scanner.Scan()
 			percentStr := strings.TrimSpace(scanner.Text())
 
@@ -353,7 +354,7 @@ func configureKindDistribution(scanner *bufio.Scanner, generator *demodata.DemoD
 					newDistribution[kind] = percent / 100.0
 					totalPercentage += percent / 100.0
 				} else {
-					fmt.Printf("Invalid value: %v, using default\n", err)
+					logging.Infof("Invalid value: %v, using default\n", err)
 					newDistribution[kind] = generator.KindDistribution[kind]
 					totalPercentage += generator.KindDistribution[kind]
 				}
@@ -363,36 +364,36 @@ func configureKindDistribution(scanner *bufio.Scanner, generator *demodata.DemoD
 		// Check if percentages sum to approximately 1.0 (allowing for small floating point errors)
 		if totalPercentage > 0.99 && totalPercentage < 1.01 {
 			generator.KindDistribution = newDistribution
-			fmt.Println("Kind distribution updated successfully")
+			logging.Infof("Kind distribution updated successfully")
 		} else {
-			fmt.Printf("Error: Percentages sum to %.2f%%, must be 100%%\n", totalPercentage*100)
+			logging.Infof("Error: Percentages sum to %.2f%%, must be 100%%\n", totalPercentage*100)
 		}
 	}
 }
 
 func showCurrentSettings(generator *demodata.DemoDataGenerator) {
-	fmt.Println("\nCurrent Settings")
-	fmt.Println("===============")
-	fmt.Printf("Time Range: %s to %s (%d months)\n",
+	logging.Infof("\nCurrent Settings")
+	logging.Infof("===============")
+	logging.Infof("Time Range: %s to %s (%d months)\n",
 		generator.StartMonth.Format("Jan 2006"),
 		generator.EndMonth.Format("Jan 2006"),
 		monthsBetween(generator.StartMonth, generator.EndMonth)+1)
 
-	fmt.Printf("Initial User Count: %d\n", generator.InitialUserCount)
-	fmt.Printf("Monthly User Growth Rate: %.0f%% (factor: %.2f)\n",
+	logging.Infof("Initial User Count: %d\n", generator.InitialUserCount)
+	logging.Infof("Monthly User Growth Rate: %.0f%% (factor: %.2f)\n",
 		(generator.MonthlyUserGrowthRate-1.0)*100, generator.MonthlyUserGrowthRate)
-	fmt.Printf("Lightning Address Adoption: %.0f%%\n", generator.LightningAdoptionRate*100)
-	fmt.Printf("DHT Key Adoption: %.0f%%\n", generator.DHTKeyAdoptionRate*100)
-	fmt.Printf("Both Adoption: %.0f%%\n", generator.BothAdoptionRate*100)
+	logging.Infof("Lightning Address Adoption: %.0f%%\n", generator.LightningAdoptionRate*100)
+	logging.Infof("DHT Key Adoption: %.0f%%\n", generator.DHTKeyAdoptionRate*100)
+	logging.Infof("Both Adoption: %.0f%%\n", generator.BothAdoptionRate*100)
 
-	fmt.Printf("Initial Notes Per Day: %d\n", generator.InitialNotesPerDay)
-	fmt.Printf("Notes Growth Rate: %.0f%% (factor: %.2f)\n",
+	logging.Infof("Initial Notes Per Day: %d\n", generator.InitialNotesPerDay)
+	logging.Infof("Notes Growth Rate: %.0f%% (factor: %.2f)\n",
 		(generator.NotesGrowthRate-1.0)*100, generator.NotesGrowthRate)
-	fmt.Printf("Media Percentage: %.0f%%\n", generator.MediaPercentage*100)
+	logging.Infof("Media Percentage: %.0f%%\n", generator.MediaPercentage*100)
 
-	fmt.Println("\nKind Distribution:")
+	logging.Infof("\nKind Distribution:")
 	for kind, percentage := range generator.KindDistribution {
-		fmt.Printf("- Kind %d: %.0f%%\n", kind, percentage*100)
+		logging.Infof("- Kind %d: %.0f%%\n", kind, percentage*100)
 	}
 }
 

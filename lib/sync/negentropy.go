@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"strconv"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -49,7 +49,7 @@ func SendNegentropyMessage(
 	case "NEG-NEED":
 		jsonBytes, err := json.Marshal(needIds)
 		if err != nil {
-			log.Println("Error marshaling to JSON:", err)
+			logging.Infof("Error marshaling to JSON:%s", err)
 			return err
 		}
 		msgArray = append(msgArray, string(jsonBytes))
@@ -60,11 +60,11 @@ func SendNegentropyMessage(
 
 	jsonData, err := json.Marshal(msgArray)
 	if err != nil {
-		log.Fatal("Error marshaling JSON:", err)
+		logging.Fatalf("Error marshaling JSON: %v", err)
 	}
 
-	//log.Printf("%s sent: %s", hostId, string(jsonData))
-	log.Printf("%s sent: %s", hostId, msgType)
+	//logging.Infof("%s sent: %s", hostId, string(jsonData))
+	logging.Infof("%s sent: %s", hostId, msgType)
 
 	_, err = io.WriteString(stream, string(jsonData)+"\n")
 	if err != nil {

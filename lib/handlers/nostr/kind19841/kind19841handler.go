@@ -1,7 +1,6 @@
 package kind19841
 
 import (
-	"log"
 	"strconv"
 	"time"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -74,13 +74,13 @@ func CreateModerationTicket(store stores.Store, blockedEventID string, userPubKe
 
 	// Sign the event with the relay's private key
 	if err := ticketEvent.Sign(relayPrivKey); err != nil {
-		log.Printf("Error signing moderation ticket: %v", err)
+		logging.Infof("Error signing moderation ticket: %v", err)
 		return nil, err
 	}
 
 	// Store the ticket event
 	if err := store.StoreEvent(&ticketEvent); err != nil {
-		log.Printf("Error storing moderation ticket: %v", err)
+		logging.Infof("Error storing moderation ticket: %v", err)
 		return nil, err
 	}
 

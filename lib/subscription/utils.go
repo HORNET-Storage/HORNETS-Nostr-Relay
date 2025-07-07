@@ -4,7 +4,6 @@ package subscription
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -42,12 +42,12 @@ func (m *SubscriptionManager) getRelayMode() string {
 	// Load allowed users settings from config to get current mode
 	var allowedUsersSettings types.AllowedUsersSettings
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
-		log.Printf("[DEBUG] Warning: could not load allowed_users settings: %v", err)
+		logging.Infof("[DEBUG] Warning: could not load allowed_users settings: %v", err)
 		return "unknown"
 	}
 
 	mode := strings.ToLower(allowedUsersSettings.Mode)
-	log.Printf("[DEBUG] Creating storage info for npub: mode=%s", mode)
+	logging.Infof("[DEBUG] Creating storage info for npub: mode=%s", mode)
 
 	// Map new access control modes to subscription system modes
 	switch mode {
@@ -61,7 +61,7 @@ func (m *SubscriptionManager) getRelayMode() string {
 		return "only-me"
 
 	default:
-		log.Printf("[DEBUG] Unknown mode '%s', defaulting to 'unknown'", mode)
+		logging.Infof("[DEBUG] Unknown mode '%s', defaulting to 'unknown'", mode)
 		return "unknown"
 	}
 }
@@ -96,11 +96,11 @@ func (m *SubscriptionManager) checkAddressPoolStatus() error {
 		return fmt.Errorf("failed to count available addresses: %v", err)
 	}
 
-	log.Println("Available count: ", availableCount)
+	logging.Infof("Available count: %v", availableCount)
 
 	// If we have less than 50% of addresses available, request more
 	if availableCount < 50 {
-		log.Printf("Address pool running low (%d available). Requesting 100 new addresses", availableCount)
+		logging.Infof("Address pool running low (%d available). Requesting 100 new addresses", availableCount)
 		return m.RequestNewAddresses(20)
 	}
 
@@ -119,24 +119,24 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentTier *types.SubscriptionTier, allowedUsersSettings *types.AllowedUsersSettings) *types.SubscriptionTier {
 	mode := strings.ToLower(allowedUsersSettings.Mode)
 
-	log.Printf("DEBUG: findAppropriateTierForUser called with mode='%s', pubkey='%s'", mode, pubkey)
-	log.Printf("DEBUG: Available tiers in findAppropriateTierForUser: %d", len(allowedUsersSettings.Tiers))
+	logging.Infof("DEBUG: findAppropriateTierForUser called with mode='%s', pubkey='%s'", mode, pubkey)
+	logging.Infof("DEBUG: Available tiers in findAppropriateTierForUser: %d", len(allowedUsersSettings.Tiers))
 
 	switch mode {
 	case "public", "free":
 		// In public/free mode, assign users to the first available free tier
-		log.Printf("DEBUG: Looking for free tier (PriceSats <= 0)")
+		logging.Infof("DEBUG: Looking for free tier (PriceSats <= 0)")
 		for i := range allowedUsersSettings.Tiers {
 			tier := &allowedUsersSettings.Tiers[i]
-			log.Printf("DEBUG: Checking tier %d: Name='%s', PriceSats=%d, MonthlyLimitBytes=%d",
+			logging.Infof("DEBUG: Checking tier %d: Name='%s', PriceSats=%d, MonthlyLimitBytes=%d",
 				i, tier.Name, tier.PriceSats, tier.MonthlyLimitBytes)
 			if tier.PriceSats <= 0 {
-				log.Printf("DEBUG: Found free tier: %s with %d bytes", tier.Name, tier.MonthlyLimitBytes)
+				logging.Infof("DEBUG: Found free tier: %s with %d bytes", tier.Name, tier.MonthlyLimitBytes)
 				return tier
 			}
 		}
 		// Fallback to basic free allocation
-		log.Printf("DEBUG: No free tier found in config, using fallback")
+		logging.Infof("DEBUG: No free tier found in config, using fallback")
 		return &types.SubscriptionTier{
 			Name:              "Basic Free",
 			MonthlyLimitBytes: 100 * 1024 * 1024, // 100 MB
@@ -168,41 +168,41 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 			// Normalize the pubkey to ensure we're using the right format
 			hexKey, _, err := normalizePubkey(pubkey)
 			if err != nil {
-				log.Printf("DEBUG: Error normalizing pubkey %s: %v", pubkey, err)
+				logging.Infof("DEBUG: Error normalizing pubkey %s: %v", pubkey, err)
 			} else {
-				log.Printf("DEBUG: Looking up allowed user with hex key: %s", hexKey)
+				logging.Infof("DEBUG: Looking up allowed user with hex key: %s", hexKey)
 				allowedUser, err := statsStore.GetAllowedUser(hexKey)
 				if err != nil {
-					log.Printf("DEBUG: Error getting allowed user: %v", err)
+					logging.Infof("DEBUG: Error getting allowed user: %v", err)
 				} else if allowedUser == nil {
-					log.Printf("DEBUG: User %s not found in allowed users table", hexKey)
+					logging.Infof("DEBUG: User %s not found in allowed users table", hexKey)
 				} else {
-					log.Printf("DEBUG: Found allowed user %s with tier: '%s'", hexKey, allowedUser.Tier)
+					logging.Infof("DEBUG: Found allowed user %s with tier: '%s'", hexKey, allowedUser.Tier)
 					if allowedUser.Tier != "" {
 						// Find the tier in the configuration that matches the user's assigned tier
 						for i := range allowedUsersSettings.Tiers {
 							if allowedUsersSettings.Tiers[i].Name == allowedUser.Tier {
-								log.Printf("User %s assigned tier '%s' from allowed users table", pubkey, allowedUser.Tier)
+								logging.Infof("User %s assigned tier '%s' from allowed users table", pubkey, allowedUser.Tier)
 								return &allowedUsersSettings.Tiers[i]
 							}
 						}
-						log.Printf("Warning: User %s has tier '%s' but it's not in current config", pubkey, allowedUser.Tier)
+						logging.Infof("Warning: User %s has tier '%s' but it's not in current config", pubkey, allowedUser.Tier)
 					}
 				}
 			}
 		} else {
-			log.Printf("DEBUG: Stats store is nil")
+			logging.Infof("DEBUG: Stats store is nil")
 		}
 
 		// Fallback: if user is in allowed list but no tier found, give first available tier
 		if m.isUserInAllowedLists(pubkey) {
 			if len(allowedUsersSettings.Tiers) > 0 {
-				log.Printf("User %s in allowed list but no tier assigned, using first available tier", pubkey)
+				logging.Infof("User %s in allowed list but no tier assigned, using first available tier", pubkey)
 				return &allowedUsersSettings.Tiers[0]
 			}
 		}
 
-		log.Printf("DEBUG: User %s not in allowed lists or no tier available", pubkey)
+		logging.Infof("DEBUG: User %s not in allowed lists or no tier available", pubkey)
 		// User not in allowed lists or no tier available
 		return nil
 
@@ -218,7 +218,7 @@ func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentT
 		return nil
 
 	default:
-		log.Printf("Unknown mode: %s", allowedUsersSettings.Mode)
+		logging.Infof("Unknown mode: %s", allowedUsersSettings.Mode)
 		return currentTier
 	}
 }

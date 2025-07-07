@@ -1,10 +1,9 @@
 package kind30009
 
 import (
-	"log"
-
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -39,7 +38,7 @@ func BuildKind30009Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Perform validation of the Badge Definition event.
 		isValid, errMsg := validateBadgeDefinitionEvent(env.Event)
 		if !isValid {
-			log.Println(errMsg)
+			logging.Info(errMsg)
 			write("OK", env.Event.ID, false, errMsg)
 			return
 		}
@@ -59,11 +58,11 @@ func BuildKind30009Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 // validateBadgeDefinitionEvent performs specific validations for Badge Definition events.
 func validateBadgeDefinitionEvent(event nostr.Event) (bool, string) {
-	log.Println("Validating Badge Definition event.")
+	logging.Info("Validating Badge Definition event.")
 	// Example validation: ensure the 'd' tag is present and correctly formatted.
 	for _, tag := range event.Tags {
 		if tag[0] == "d" && len(tag) == 2 {
-			log.Println("Badge Definition event is valid.")
+			logging.Info("Badge Definition event is valid.")
 			return true, ""
 		}
 	}

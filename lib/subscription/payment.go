@@ -4,13 +4,13 @@ package subscription
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -20,7 +20,7 @@ func (m *SubscriptionManager) ProcessPayment(
 	transactionID string,
 	amountSats int64,
 ) error {
-	log.Printf("Processing payment of %d sats for %s", amountSats, npub)
+	logging.Infof("Processing payment of %d sats for %s", amountSats, npub)
 
 	// Validate payment amount
 	if amountSats <= 0 {
@@ -32,7 +32,7 @@ func (m *SubscriptionManager) ProcessPayment(
 	creditSats, err := m.store.GetStatsStore().GetSubscriberCredit(npub)
 	if err == nil && creditSats > 0 {
 		totalAmount = amountSats + creditSats
-		log.Printf("Adding existing credit of %d sats to payment (total: %d)",
+		logging.Infof("Adding existing credit of %d sats to payment (total: %d)",
 			creditSats, totalAmount)
 	}
 
@@ -60,7 +60,7 @@ func (m *SubscriptionManager) ProcessPayment(
 		// If we have credit, reset it since we're using it
 		if creditSats > 0 {
 			if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, 0); err != nil {
-				log.Printf("Warning: failed to reset credit: %v", err)
+				logging.Infof("Warning: failed to reset credit: %v", err)
 			}
 		}
 		return m.processHighTierPayment(npub, transactionID, totalAmount, highestTier)
@@ -78,7 +78,7 @@ func (m *SubscriptionManager) ProcessPayment(
 				return fmt.Errorf("failed to update credit: %v", err)
 			}
 
-			log.Printf("Added %d sats to credit for %s (total credit: %d)",
+			logging.Infof("Added %d sats to credit for %s (total credit: %d)",
 				amountSats, npub, newCredit)
 
 			// Update the NIP-88 event to reflect the new credit amount
@@ -93,7 +93,7 @@ func (m *SubscriptionManager) ProcessPayment(
 				// Extract current info
 				storageInfo, err := m.extractStorageInfo(currentEvent)
 				if err != nil {
-					log.Printf("Warning: could not extract storage info: %v", err)
+					logging.Infof("Warning: could not extract storage info: %v", err)
 					return nil
 				}
 
@@ -115,9 +115,9 @@ func (m *SubscriptionManager) ProcessPayment(
 					Npub:    npub,
 					Address: address,
 				}, activeTier, expirationDate, &storageInfo); err != nil {
-					log.Printf("Warning: failed to update NIP-88 event with credit: %v", err)
+					logging.Infof("Warning: failed to update NIP-88 event with credit: %v", err)
 				} else {
-					log.Printf("Updated NIP-88 event for %s with credit: %d sats", npub, newCredit)
+					logging.Infof("Updated NIP-88 event for %s with credit: %d sats", npub, newCredit)
 				}
 			}
 
@@ -129,11 +129,11 @@ func (m *SubscriptionManager) ProcessPayment(
 	// We have a matching tier - reset credit if we used it
 	if creditSats > 0 {
 		if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, 0); err != nil {
-			log.Printf("Warning: failed to reset credit after using: %v", err)
+			logging.Infof("Warning: failed to reset credit after using: %v", err)
 		}
 	}
 
-	log.Printf("Found matching tier: %+v", tier)
+	logging.Infof("Found matching tier: %+v", tier)
 
 	// Fetch current NIP-88 event to get existing state
 	// Normalize pubkey to search in both formats
@@ -141,7 +141,7 @@ func (m *SubscriptionManager) ProcessPayment(
 	if err != nil {
 		return fmt.Errorf("failed to normalize pubkey: %v", err)
 	}
-	
+
 	// Get all kind 11888 events and filter manually (like batch processing does)
 	allEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{11888},
@@ -149,7 +149,7 @@ func (m *SubscriptionManager) ProcessPayment(
 	if err != nil {
 		return fmt.Errorf("failed to query events: %v", err)
 	}
-	
+
 	// Find the event for this specific user
 	var userEvent *nostr.Event
 	for _, event := range allEvents {
@@ -165,7 +165,7 @@ func (m *SubscriptionManager) ProcessPayment(
 			break
 		}
 	}
-	
+
 	if userEvent == nil {
 		return fmt.Errorf("no NIP-88 event found for user")
 	}
@@ -182,7 +182,7 @@ func (m *SubscriptionManager) ProcessPayment(
 	if paidTierBytes <= 0 && !tier.Unlimited {
 		return fmt.Errorf("invalid paid tier storage limit: %d bytes", paidTierBytes)
 	}
-	log.Printf("Processing payment for tier: %s (%d bytes, unlimited: %t)", tier.Name, paidTierBytes, tier.Unlimited)
+	logging.Infof("Processing payment for tier: %s (%d bytes, unlimited: %t)", tier.Name, paidTierBytes, tier.Unlimited)
 
 	// Get current expiration date from event
 	expirationUnix := getTagUnixValue(currentEvent.Tags, "active_subscription")
@@ -197,7 +197,7 @@ func (m *SubscriptionManager) ProcessPayment(
 
 	// Add new tier capacity to existing capacity
 	storageInfo.TotalBytes += newTierBytes
-	log.Printf("Accumulating storage: adding %d bytes to existing %d bytes (new total: %d bytes)",
+	logging.Infof("Accumulating storage: adding %d bytes to existing %d bytes (new total: %d bytes)",
 		newTierBytes, prevBytes, storageInfo.TotalBytes)
 
 	// Calculate new expiration date - add one month from current expiration
@@ -205,12 +205,12 @@ func (m *SubscriptionManager) ProcessPayment(
 	var endDate time.Time
 	if existingExpiration.After(time.Now()) {
 		endDate = existingExpiration.AddDate(0, 1, 0)
-		log.Printf("Extending subscription expiration from %s to %s",
+		logging.Infof("Extending subscription expiration from %s to %s",
 			existingExpiration.Format("2006-01-02"), endDate.Format("2006-01-02"))
 	} else {
 		// If expired or no previous subscription, start fresh
 		endDate = time.Now().AddDate(0, 1, 0)
-		log.Printf("Setting new subscription expiration to %s", endDate.Format("2006-01-02"))
+		logging.Infof("Setting new subscription expiration to %s", endDate.Format("2006-01-02"))
 	}
 
 	storageInfo.UpdatedAt = time.Now()
@@ -235,7 +235,7 @@ func (m *SubscriptionManager) ProcessPayment(
 	verifyEvents, err := m.store.QueryEvents(nostr.Filter{
 		Kinds: []int{11888},
 	})
-	
+
 	var verifyEvent *nostr.Event
 	if err == nil {
 		for _, event := range verifyEvents {
@@ -252,11 +252,11 @@ func (m *SubscriptionManager) ProcessPayment(
 			}
 		}
 	}
-	
+
 	if verifyEvent == nil {
-		log.Printf("Warning: couldn't verify NIP-88 event update")
+		logging.Infof("Warning: couldn't verify NIP-88 event update")
 	} else {
-		log.Printf("Updated NIP-88 event status: %s",
+		logging.Infof("Updated NIP-88 event status: %s",
 			getTagValue(verifyEvent.Tags, "subscription_status"))
 	}
 
@@ -264,18 +264,18 @@ func (m *SubscriptionManager) ProcessPayment(
 	tierPriceSats := int64(tier.PriceSats)
 	if totalAmount > tierPriceSats {
 		leftover := totalAmount - tierPriceSats
-		log.Printf("Payment has %d sats leftover after purchasing tier", leftover)
+		logging.Infof("Payment has %d sats leftover after purchasing tier", leftover)
 
 		// Update credit with leftover amount
 		if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, leftover); err != nil {
-			log.Printf("Warning: failed to update credit with leftover amount: %v", err)
+			logging.Infof("Warning: failed to update credit with leftover amount: %v", err)
 		} else {
-			log.Printf("Added %d sats to credit for %s", leftover, npub)
+			logging.Infof("Added %d sats to credit for %s", leftover, npub)
 
 			// Check if the updated credit can be used to purchase additional tier capacity
 			_, err := m.checkAndApplyCredit(npub, address, &storageInfo, endDate)
 			if err != nil {
-				log.Printf("Warning: error checking credit for additional tier purchase: %v", err)
+				logging.Infof("Warning: error checking credit for additional tier purchase: %v", err)
 			}
 
 			// Fetch the final credit amount to include in the NIP-88 event
@@ -287,16 +287,16 @@ func (m *SubscriptionManager) ProcessPayment(
 					Npub:    npub,
 					Address: address,
 				}, tier, endDate, &storageInfo); err != nil {
-					log.Printf("Warning: failed to update final NIP-88 event with credit: %v", err)
+					logging.Infof("Warning: failed to update final NIP-88 event with credit: %v", err)
 				} else {
-					log.Printf("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
+					logging.Infof("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
 				}
 			}
 		}
 	}
 
 	// Add transaction processing log
-	log.Printf("Successfully processed payment for %s: %d sats for tier %s",
+	logging.Infof("Successfully processed payment for %s: %d sats for tier %s",
 		npub, amountSats, tier.Name)
 
 	return nil
@@ -310,7 +310,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 	amountSats int64,
 	highestTier *types.SubscriptionTier,
 ) error {
-	log.Printf("Processing high-tier payment (tx: %s) for %s: %d sats for tier %s",
+	logging.Infof("Processing high-tier payment (tx: %s) for %s: %d sats for tier %s",
 		transactionID, npub, amountSats, highestTier.Name)
 
 	// Fetch current NIP-88 event to get existing state
@@ -355,7 +355,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 	storageInfo.TotalBytes += totalNewStorage
 	storageInfo.UpdatedAt = time.Now()
 
-	log.Printf("Upgrading storage from %d to %d bytes (adding %d bytes for %d periods of tier: %s)",
+	logging.Infof("Upgrading storage from %d to %d bytes (adding %d bytes for %d periods of tier: %s)",
 		prevBytes, storageInfo.TotalBytes, totalNewStorage, fullPeriods, highestTier.Name)
 
 	// Calculate end date based on multiple periods
@@ -367,18 +367,18 @@ func (m *SubscriptionManager) processHighTierPayment(
 		if endTime.After(time.Now()) {
 			// Extend from current end date
 			endDate = endTime.AddDate(0, int(fullPeriods), 0)
-			log.Printf("Extending existing subscription by %d months (from %s to %s)",
+			logging.Infof("Extending existing subscription by %d months (from %s to %s)",
 				fullPeriods, endTime.Format("2006-01-02"), endDate.Format("2006-01-02"))
 		} else {
 			// Expired - start fresh from now
 			endDate = time.Now().AddDate(0, int(fullPeriods), 0)
-			log.Printf("Existing subscription expired, starting new %d month subscription",
+			logging.Infof("Existing subscription expired, starting new %d month subscription",
 				fullPeriods)
 		}
 	} else {
 		// No existing subscription, start from now
 		endDate = time.Now().AddDate(0, int(fullPeriods), 0)
-		log.Printf("Starting new %d month subscription", fullPeriods)
+		logging.Infof("Starting new %d month subscription", fullPeriods)
 	}
 
 	// Update the NIP-88 event with extended period
@@ -397,7 +397,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 	// Try to use remaining sats for lower tiers (cascading approach)
 	// Sort tiers by PriceSats (descending)
 	if remainingSats > 0 && len(m.subscriptionTiers) > 1 {
-		log.Printf("Attempting to use remaining %d sats for lower tiers", remainingSats)
+		logging.Infof("Attempting to use remaining %d sats for lower tiers", remainingSats)
 
 		// Create a sorted list of tiers by PriceSats (descending)
 		type tierInfo struct {
@@ -445,7 +445,7 @@ func (m *SubscriptionManager) processHighTierPayment(
 				// Add storage
 				storageInfo.TotalBytes += tierBytes
 
-				log.Printf("Using %d sats for additional tier: %s (adding %d bytes)",
+				logging.Infof("Using %d sats for additional tier: %s (adding %d bytes)",
 					tierInfo.PriceSats, tierInfo.tier.Name, tierBytes)
 
 				// Subtract from remaining sats
@@ -477,14 +477,14 @@ func (m *SubscriptionManager) processHighTierPayment(
 	// Credit remainder if any
 	if remainingSats > 0 {
 		if err := m.store.GetStatsStore().UpdateSubscriberCredit(npub, remainingSats); err != nil {
-			log.Printf("Warning: failed to save remainder credit of %d sats: %v", remainingSats, err)
+			logging.Infof("Warning: failed to save remainder credit of %d sats: %v", remainingSats, err)
 		} else {
-			log.Printf("Credited remainder of %d sats to user account", remainingSats)
+			logging.Infof("Credited remainder of %d sats to user account", remainingSats)
 
 			// Check if the stored credit can be used to purchase additional tier capacity
 			_, err := m.checkAndApplyCredit(npub, address, &storageInfo, endDate)
 			if err != nil {
-				log.Printf("Warning: error checking credit for additional tier purchase: %v", err)
+				logging.Infof("Warning: error checking credit for additional tier purchase: %v", err)
 			}
 		}
 	}
@@ -499,13 +499,13 @@ func (m *SubscriptionManager) processHighTierPayment(
 		}, highestTier, endDate, &storageInfo)
 
 		if err != nil {
-			log.Printf("Warning: failed to update final NIP-88 event with credit: %v", err)
+			logging.Infof("Warning: failed to update final NIP-88 event with credit: %v", err)
 		} else {
-			log.Printf("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
+			logging.Infof("Updated final NIP-88 event for %s with credit: %d sats", npub, finalCredit)
 		}
 	}
 
-	log.Printf("Successfully processed high-tier payment: %d sats for %d months of %s tier",
+	logging.Infof("Successfully processed high-tier payment: %d sats for %d months of %s tier",
 		amountSats, fullPeriods, highestTier.Name)
 
 	return nil
@@ -522,7 +522,7 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 		m.subscriptionTiers = allowedUsersSettings.Tiers
 	}
 
-	log.Printf("Finding tier for %d sats among %d tiers: %+v",
+	logging.Infof("Finding tier for %d sats among %d tiers: %+v",
 		amountSats, len(m.subscriptionTiers), m.subscriptionTiers)
 
 	var bestMatch *types.SubscriptionTier
@@ -530,17 +530,17 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 
 	for _, tier := range m.subscriptionTiers {
 		if tier.MonthlyLimitBytes <= 0 && !tier.Unlimited {
-			log.Printf("Warning: skipping invalid tier: Name='%s', MonthlyLimitBytes='%d', Unlimited='%t'",
+			logging.Infof("Warning: skipping invalid tier: Name='%s', MonthlyLimitBytes='%d', Unlimited='%t'",
 				tier.Name, tier.MonthlyLimitBytes, tier.Unlimited)
 			continue
 		}
 		if tier.PriceSats == 0 {
-			log.Printf("Warning: skipping free tier: Name='%s'", tier.Name)
+			logging.Infof("Warning: skipping free tier: Name='%s'", tier.Name)
 			continue
 		}
 
 		PriceSats := int64(tier.PriceSats)
-		log.Printf("Checking tier: Name='%s', PriceSats='%d' (%d sats)",
+		logging.Infof("Checking tier: Name='%s', PriceSats='%d' (%d sats)",
 			tier.Name, tier.PriceSats, PriceSats)
 
 		// Strict matching: Payment must be >= tier PriceSats exactly
@@ -556,7 +556,7 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 				Unlimited:         tier.Unlimited,
 			}
 			bestPriceSats = PriceSats
-			log.Printf("New best match: Name='%s', PriceSats='%d' (exact match)",
+			logging.Infof("New best match: Name='%s', PriceSats='%d' (exact match)",
 				bestMatch.Name, bestMatch.PriceSats)
 		}
 	}
@@ -565,7 +565,7 @@ func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.Subscri
 		return nil, fmt.Errorf("no matching tier for payment of %d sats", amountSats)
 	}
 
-	log.Printf("Selected tier: Name='%s', PriceSats='%d'",
+	logging.Infof("Selected tier: Name='%s', PriceSats='%d'",
 		bestMatch.Name, bestMatch.PriceSats)
 	return bestMatch, nil
 }

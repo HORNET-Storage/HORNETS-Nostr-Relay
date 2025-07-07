@@ -4,12 +4,13 @@ import (
 	"fmt"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 )
 
 // GeneratePaymentNotifications creates payment notifications
 func (g *DemoDataGenerator) GeneratePaymentNotifications(store statistics.StatisticsStore, count int) error {
-	fmt.Printf("Generating %d payment notifications...\n", count)
+	logging.Infof("Generating %d payment notifications...\n", count)
 
 	// Define subscription tiers
 	tiers := []string{"1GB", "5GB", "10GB", "50GB", "100GB"}
@@ -33,7 +34,7 @@ func (g *DemoDataGenerator) GeneratePaymentNotifications(store statistics.Statis
 			currentBatchSize = count - i
 		}
 
-		fmt.Printf("Generating notifications %d to %d...\n", i+1, i+currentBatchSize)
+		logging.Infof("Generating notifications %d to %d...\n", i+1, i+currentBatchSize)
 
 		// Generate a batch of notifications
 		for j := 0; j < currentBatchSize; j++ {
@@ -68,6 +69,6 @@ func (g *DemoDataGenerator) GeneratePaymentNotifications(store statistics.Statis
 		}
 	}
 
-	fmt.Println("Payment notification generation complete!")
+	logging.Infof("Payment notification generation complete!")
 	return nil
 }

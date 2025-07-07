@@ -1,11 +1,10 @@
 package kind1984
 
 import (
-	"log"
-
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -74,7 +73,7 @@ func BuildKind1984Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			// Try to find an existing report notification for this event
 			existingNotification, err := store.GetStatsStore().GetReportNotificationByEventID(reportedEventID)
 			if err != nil {
-				log.Printf("Error checking for existing report notification: %v", err)
+				logging.Infof("Error checking for existing report notification: %v", err)
 				// Continue anyway, as we'll just try to create a new one
 			}
 
@@ -82,7 +81,7 @@ func BuildKind1984Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 				// Increment the report count
 				err = store.GetStatsStore().UpdateReportCount(reportedEventID)
 				if err != nil {
-					log.Printf("Error updating report count: %v", err)
+					logging.Infof("Error updating report count: %v", err)
 				}
 			} else {
 				// Create a new report notification
@@ -99,7 +98,7 @@ func BuildKind1984Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 
 				err = store.GetStatsStore().CreateReportNotification(notification)
 				if err != nil {
-					log.Printf("Error creating report notification: %v", err)
+					logging.Infof("Error creating report notification: %v", err)
 				}
 			}
 		}

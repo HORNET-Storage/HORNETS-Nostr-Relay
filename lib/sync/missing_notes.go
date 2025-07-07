@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -29,7 +29,7 @@ type MissingNoteResponse struct {
 // RetrieveMissingNote retrieves a missing note from relays associated with a user
 // It uses the DHT to find the user's relay list, then queries those relays for the note
 func RetrieveMissingNote(eventID string, authorPubkey string, relayStore *RelayStore, eventStore stores.Store) (*MissingNoteResponse, error) {
-	log.Printf("Retrieving missing note %s from author %s", eventID, authorPubkey)
+	logging.Infof("Retrieving missing note %s from author %s", eventID, authorPubkey)
 
 	// First check if we already have the event locally
 	filter := nostr.Filter{
@@ -37,7 +37,7 @@ func RetrieveMissingNote(eventID string, authorPubkey string, relayStore *RelayS
 	}
 	localEvents, err := eventStore.QueryEvents(filter)
 	if err == nil && len(localEvents) > 0 {
-		log.Printf("Event %s found locally", eventID)
+		logging.Infof("Event %s found locally", eventID)
 		return &MissingNoteResponse{
 			Event:     localEvents[0],
 			Found:     true,
@@ -62,28 +62,28 @@ func RetrieveMissingNote(eventID string, authorPubkey string, relayStore *RelayS
 		return nil, fmt.Errorf("no relays found for author %s", authorPubkey)
 	}
 
-	log.Printf("Found %d relays for author %s", len(relayURLs), authorPubkey)
+	logging.Infof("Found %d relays for author %s", len(relayURLs), authorPubkey)
 
 	// Try to retrieve the note from each relay
 	for _, relayURL := range relayURLs {
 		event, err := retrieveEventFromRelay(eventID, relayURL)
 		if err != nil {
-			log.Printf("Error retrieving event %s from relay %s: %v", eventID, relayURL, err)
+			logging.Infof("Error retrieving event %s from relay %s: %v", eventID, relayURL, err)
 			continue
 		}
 
 		if event != nil {
-			log.Printf("Event %s found at relay %s", eventID, relayURL)
+			logging.Infof("Event %s found at relay %s", eventID, relayURL)
 
 			// Verify the event signature
 			if ok, err := event.CheckSignature(); err != nil || !ok {
-				log.Printf("Event %s has invalid signature: %v", eventID, err)
+				logging.Infof("Event %s has invalid signature: %v", eventID, err)
 				continue
 			}
 
 			// Store the event locally for future reference
 			if err := eventStore.StoreEvent(event); err != nil {
-				log.Printf("Error storing event %s locally: %v", eventID, err)
+				logging.Infof("Error storing event %s locally: %v", eventID, err)
 			}
 
 			return &MissingNoteResponse{

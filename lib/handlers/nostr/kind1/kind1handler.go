@@ -1,8 +1,7 @@
 package kind1
 
 import (
-	"log"
-
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	jsoniter "github.com/json-iterator/go"
@@ -66,7 +65,7 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			if relayStore != nil {
 				relays, err := relayStore.GetRelayListFromDHT(dhtKey)
 				if err != nil {
-					log.Printf("Failed to get relay list: %v", err)
+					logging.Infof("Failed to get relay list: %v", err)
 					write("NOTICE", "Failed to get relay list.")
 				} else {
 					filter := nostr.Filter{Authors: []string{*parentAuthor}}
@@ -79,12 +78,12 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 					relayStore.AddAuthor(*parentAuthor)
 				}
 			} else {
-				log.Println("relay store has not been initialized")
+				logging.Info("relay store has not been initialized")
 				write("NOTICE", "Relay store has not be initialized")
 			}
 		} else {
-			log.Println("event tags incomplete, cannot sync")
-			log.Printf("replyToMissingID: %s dhtKey: %s parentAuthor: %s", replyingToMissingID, dhtKey, parentAuthor)
+			logging.Info("event tags incomplete, cannot sync")
+			logging.Infof("replyToMissingID: %v dhtKey: %v parentAuthor: %v", replyingToMissingID, dhtKey, parentAuthor)
 		}
 
 		// Successfully processed event
@@ -94,6 +93,8 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 	return handler
 }
 
-func missingEvent(eventId string) bool {
+func missingEvent(_ string) bool {
+	// TODO: Implement proper event existence check
+	// For now, assume all referenced events are missing to trigger sync
 	return true
 }

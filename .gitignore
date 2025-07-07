@@ -42,3 +42,5 @@ hornet-demo-generator
 hornet-storage-demo
 
 config.yaml
+
+settings.local.json

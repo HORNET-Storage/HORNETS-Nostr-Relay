@@ -2,9 +2,9 @@ package badgerhold
 
 import (
 	"fmt"
-	"log"
 
 	// Import the demo SQLite package we just created
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	statistics_gorm_sqlite_demo "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite_demo"
 )
 
@@ -15,7 +15,7 @@ func (store *BadgerholdStore) UseDemoStatisticsDB() error {
 	var err error
 
 	// Initialize the demo statistics database
-	log.Println("Switching to demo statistics database...")
+	logging.Info("Switching to demo statistics database...")
 
 	// Initialize demo statistics database
 	// This will create a new database file called demo_statistics.db
@@ -27,6 +27,6 @@ func (store *BadgerholdStore) UseDemoStatisticsDB() error {
 	// Replace the existing statistics database connection with our demo version
 	store.StatsDatabase = demoStatsDB
 
-	log.Println("Successfully switched to demo statistics database")
+	logging.Info("Successfully switched to demo statistics database")
 	return nil
 }

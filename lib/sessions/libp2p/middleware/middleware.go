@@ -48,7 +48,7 @@ func SessionMiddleware(h host.Host) func(network.StreamHandler) network.StreamHa
 
 				json, err := json.Marshal(peerInfo)
 				if err == nil {
-					fmt.Println(string(json))
+					logging.Infof(string(json))
 				}
 			*/
 

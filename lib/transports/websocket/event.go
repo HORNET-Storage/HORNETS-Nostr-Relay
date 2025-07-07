@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/gofiber/contrib/websocket"
 	jsoniter "github.com/json-iterator/go"
@@ -10,6 +9,7 @@ import (
 	"github.com/spf13/viper"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -27,9 +27,9 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 	if store != nil {
 		isBlocked, err := store.IsBlockedPubkey(env.Event.PubKey)
 		if err != nil {
-			log.Printf("Error checking if pubkey is blocked: %v", err)
+			logging.Infof("Error checking if pubkey is blocked: %v", err)
 		} else if isBlocked {
-			log.Printf("Rejected event from blocked pubkey: %s", env.Event.PubKey)
+			logging.Infof("Rejected event from blocked pubkey: %s", env.Event.PubKey)
 
 			// Notify the client that their event was rejected
 			write("OK", env.Event.ID, false, "Event rejected: Pubkey is blocked")
@@ -41,7 +41,7 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 	if accessControl := GetAccessControl(); accessControl != nil {
 		err := accessControl.CanWrite(env.Event.PubKey)
 		if err != nil {
-			log.Printf("Write access denied for pubkey: %s", env.Event.PubKey)
+			logging.Infof("Write access denied for pubkey: %s", env.Event.PubKey)
 			write("OK", env.Event.ID, false, "Event rejected: Write access denied")
 			return
 		}
@@ -58,7 +58,7 @@ func handleBlacklistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler("universal")
 
-	log.Println("handled by blacklist mode.")
+	logging.Info("handled by blacklist mode.")
 
 	read := func() ([]byte, error) {
 		return json.Marshal(env)
@@ -83,7 +83,7 @@ func handleBlacklistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 func handleWhitelistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
-	log.Println("handled by whitelist mode.")
+	logging.Info("handled by whitelist mode.")
 
 	read := func() ([]byte, error) {
 		return json.Marshal(env)

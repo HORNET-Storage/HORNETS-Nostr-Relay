@@ -2,11 +2,11 @@ package badgerhold
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 	"github.com/timshannon/badgerhold/v4"
@@ -88,7 +88,7 @@ func (store *BadgerholdStore) GetAndRemovePendingModeration(batchSize int) ([]li
 		if err != nil {
 			// If we fail to delete, log the error but continue with other events
 			// This is non-fatal as the event will still be processed this time
-			fmt.Printf("Error removing event %s from pending moderation: %v\n", event.EventID, err)
+			logging.Infof("Error removing event %s from pending moderation: %v\n", event.EventID, err)
 		}
 	}
 
@@ -146,7 +146,7 @@ func (store *BadgerholdStore) MarkEventBlockedWithDetails(eventID string, timest
 	)
 
 	if err != nil {
-		log.Printf("Error creating moderation ticket: %v", err)
+		logging.Infof("Error creating moderation ticket: %v", err)
 		// Continue anyway as the event is already marked as blocked
 	}
 
@@ -202,10 +202,10 @@ func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, erro
 			// Delete the event from both the blocked list and the main event store
 			key := fmt.Sprintf("blocked:%s", event.EventID)
 			if err := store.Database.Delete(key, lib.BlockedEvent{}); err != nil {
-				fmt.Printf("Error deleting blocked event %s: %v\n", event.EventID, err)
+				logging.Infof("Error deleting blocked event %s: %v\n", event.EventID, err)
 				continue
 			}
-			
+
 			// Delete the associated kind 19841 moderation ticket
 			filter := nostr.Filter{
 				Kinds: []int{19841},
@@ -213,22 +213,22 @@ func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, erro
 					"e": []string{event.EventID},
 				},
 			}
-			
+
 			moderationTickets, err := store.QueryEvents(filter)
 			if err == nil && len(moderationTickets) > 0 {
 				for _, ticket := range moderationTickets {
 					if err := store.DeleteEvent(ticket.ID); err != nil {
 						// Log but don't fail - the main deletion was successful
-						fmt.Printf("Error deleting moderation ticket %s for event %s: %v\n", ticket.ID, event.EventID, err)
+						logging.Infof("Error deleting moderation ticket %s for event %s: %v\n", ticket.ID, event.EventID, err)
 					} else {
-						fmt.Printf("Successfully deleted moderation ticket %s for event %s\n", ticket.ID, event.EventID)
+						logging.Infof("Successfully deleted moderation ticket %s for event %s\n", ticket.ID, event.EventID)
 					}
 				}
 			}
 
 			// Also delete from main event store if it still exists
 			if err := store.DeleteEvent(event.EventID); err != nil {
-				fmt.Printf("Error deleting event %s: %v\n", event.EventID, err)
+				logging.Infof("Error deleting event %s: %v\n", event.EventID, err)
 				// Continue anyway as we've already removed it from the blocked list
 			}
 
@@ -259,19 +259,19 @@ func (store *BadgerholdStore) DeleteResolutionEventsOlderThan(age int64) (int, e
 		return 0, fmt.Errorf("failed to query resolution events: %w", err)
 	}
 
-	log.Printf("Found %d resolution events older than %s", len(resolutionEvents), cutoffTime.Format(time.RFC3339))
+	logging.Infof("Found %d resolution events older than %s", len(resolutionEvents), cutoffTime.Format(time.RFC3339))
 
 	// Delete each resolution event
 	for _, event := range resolutionEvents {
 		if err := store.DeleteEvent(event.ID); err != nil {
-			log.Printf("Error deleting resolution event %s: %v", event.ID, err)
+			logging.Infof("Error deleting resolution event %s: %v", event.ID, err)
 			continue
 		}
 		deletedCount++
 	}
 
 	if deletedCount > 0 {
-		log.Printf("Successfully deleted %d resolution events", deletedCount)
+		logging.Infof("Successfully deleted %d resolution events", deletedCount)
 	}
 
 	return deletedCount, nil
@@ -354,7 +354,7 @@ func (store *BadgerholdStore) GetAndRemovePendingDisputeModeration(batchSize int
 		err := store.Database.Delete(key, lib.PendingDisputeModeration{})
 		if err != nil {
 			// If we fail to delete, log the error but continue with other disputes
-			fmt.Printf("Error removing dispute %s from pending dispute moderation: %v\n", dispute.DisputeID, err)
+			logging.Infof("Error removing dispute %s from pending dispute moderation: %v\n", dispute.DisputeID, err)
 		}
 	}
 

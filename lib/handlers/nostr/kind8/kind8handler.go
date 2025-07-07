@@ -1,10 +1,9 @@
 package kind8
 
 import (
-	"log"
-
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -74,11 +73,11 @@ func isValidBadgeAwardEvent(event nostr.Event) bool {
 	}
 
 	if !hasATag {
-		log.Println("Badge Award event missing 'a' tag.")
+		logging.Info("Badge Award event missing 'a' tag.")
 		return false
 	}
 	if !hasPTag {
-		log.Println("Badge Award event missing 'p' tag.")
+		logging.Info("Badge Award event missing 'p' tag.")
 		return false
 	}
 

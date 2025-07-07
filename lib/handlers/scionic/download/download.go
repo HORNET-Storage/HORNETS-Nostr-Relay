@@ -2,13 +2,13 @@ package download
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
@@ -34,7 +34,7 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			return
 		}
 
-		fmt.Println("Downloading Dag: " + message.Root)
+		logging.Infof("Downloading Dag: " + message.Root)
 
 		rootData, err := store.RetrieveLeaf(message.Root, message.Root, true, false)
 		if err != nil {

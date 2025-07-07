@@ -1,11 +1,11 @@
 package moderation
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation/image"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
@@ -65,9 +65,9 @@ func InitModeration(store stores.Store, apiEndpoint string, options ...Option) e
 
 		// Start the worker
 		imageWorker.Start()
-		log.Printf("Image moderation system initialized with API endpoint: %s", config.APIEndpoint)
+		logging.Infof("Image moderation system initialized with API endpoint: %s", config.APIEndpoint)
 	} else {
-		log.Printf("Image moderation system initialized but disabled")
+		logging.Infof("Image moderation system initialized but disabled")
 	}
 
 	return nil
@@ -140,13 +140,13 @@ func WithEnabled(enabled bool) Option {
 // Shutdown stops the moderation worker gracefully and cleans up temporary files
 func Shutdown() {
 	if imageWorker != nil && imageWorker.Running {
-		log.Println("Shutting down image moderation worker...")
+		logging.Info("Shutting down image moderation worker...")
 		imageWorker.Stop()
 	}
 
 	// Clean up any temporary files
 	if moderationService != nil && moderationService.DownloadDir != "" {
-		log.Println("Cleaning up moderation temporary files...")
+		logging.Info("Cleaning up moderation temporary files...")
 		cleanupTempFiles(moderationService.DownloadDir)
 	}
 }
@@ -159,14 +159,14 @@ func cleanupTempFiles(dir string) {
 
 	// Ensure we don't accidentally delete important directories
 	if dir == "/" || dir == "/tmp" || dir == "/var/tmp" {
-		log.Println("Refusing to clean potentially system directory:", dir)
+		logging.Infof("Refusing to clean potentially system directory:%s", dir)
 		return
 	}
 
 	// Read the directory
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		log.Printf("Error reading temp directory %s: %v", dir, err)
+		logging.Infof("Error reading temp directory %s: %v", dir, err)
 		return
 	}
 
@@ -179,13 +179,13 @@ func cleanupTempFiles(dir string) {
 
 		path := filepath.Join(dir, file.Name())
 		if err := os.Remove(path); err != nil {
-			log.Printf("Error removing temp file %s: %v", path, err)
+			logging.Infof("Error removing temp file %s: %v", path, err)
 		} else {
 			deletedCount++
 		}
 	}
 
-	log.Printf("Cleaned up %d temporary files from %s", deletedCount, dir)
+	logging.Infof("Cleaned up %d temporary files from %s", deletedCount, dir)
 }
 
 // GetService returns the initialized moderation service

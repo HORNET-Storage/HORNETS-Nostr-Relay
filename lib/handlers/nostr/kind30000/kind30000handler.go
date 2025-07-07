@@ -2,10 +2,10 @@ package kind30000
 
 import (
 	"fmt"
-	"log"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -48,14 +48,14 @@ func BuildKind30000Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 		existingEvents, err := store.QueryEvents(filter)
 		if err != nil {
-			log.Printf("Error querying existing kind 30000 events: %v", err)
+			logging.Infof("Error querying existing kind 30000 events: %v", err)
 			write("NOTICE", fmt.Sprintf("Error querying existing events: %v", err))
 			return
 		}
 
 		for _, oldEvent := range existingEvents {
 			if err := store.DeleteEvent(oldEvent.ID); err != nil {
-				log.Printf("Error deleting old kind 30000 event %s: %v", oldEvent.ID, err)
+				logging.Infof("Error deleting old kind 30000 event %s: %v", oldEvent.ID, err)
 				// Optionally respond or handle delete failures
 			}
 		}

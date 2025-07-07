@@ -5,10 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 
 	"sync/atomic"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/puzpuzpuz/xsync/v3"
@@ -68,7 +68,7 @@ func notifyListeners(event *nostr.Event) {
 				return true
 			}
 			if err := ws.WriteJSON(nostr.EventEnvelope{SubscriptionID: &id, Event: *event}); err != nil {
-				log.Printf("Error notifying listener: %v\n", err)
+				logging.Infof("Error notifying listener: %v\n", err)
 			}
 			return true
 		})

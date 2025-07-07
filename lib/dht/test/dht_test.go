@@ -9,6 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
+	"net"
+	"testing"
+	"time"
+
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	sync "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/anacrolix/dht/v2"
@@ -18,11 +24,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/stretchr/testify/require"
-	"log"
-	"math/rand"
-	"net"
-	"testing"
-	"time"
 )
 
 func TestPutGetDHT(t *testing.T) {
@@ -322,10 +323,10 @@ func doPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.Public
 	var target krpc.ID
 	if privKey == nil {
 		target = createTarget(value)
-		log.Printf("Derived immutable target %x from %x", target, value)
+		logging.Infof("Derived immutable target %x from %x", target, value)
 	} else {
 		target = sync.CreateMutableTarget(*pubKey, salt)
-		log.Printf("Derived mutable target %x from pubkey %x and salt %x", target, pubKey, salt)
+		logging.Infof("Derived mutable target %x from pubkey %x and salt %x", target, pubKey, salt)
 	}
 
 	stats, err := getput.Put(ctx, target, server, salt, func(seq int64) bep44.Put {
@@ -341,25 +342,25 @@ func doPut(server *dht.Server, value []byte, salt []byte, pubKey *ed25519.Public
 			put.K = &pub
 			err := sync.SignPut(&put, *privKey)
 			if err != nil {
-				log.Printf("Unable to sign")
+				logging.Info("Unable to sign")
 			}
 		}
 
-		log.Printf("Put created %+v", put)
+		logging.Infof("Put created %+v", put)
 
 		return put
 	})
 
-	log.Printf("DHT put stats %+v", stats)
+	logging.Infof("DHT put stats %+v", stats)
 
 	if err != nil {
-		log.Printf("Put operation failed: %v", err)
+		logging.Infof("Put operation failed: %v", err)
 	} else {
-		log.Printf("Put operation successful")
+		logging.Info("Put operation successful")
 	}
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		log.Printf("Put operation timed out")
+		logging.Info("Put operation timed out")
 		return target, errors.New("Put operation timed out")
 	}
 

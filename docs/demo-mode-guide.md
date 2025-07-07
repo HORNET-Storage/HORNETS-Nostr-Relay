@@ -109,9 +109,9 @@ if !viper.GetBool("demo_mode") {
     secured.Use(func(c *fiber.Ctx) error {
         return jwtMiddleware(c, store)
     })
-    log.Println("JWT authentication enabled for API routes")
+    logging.Info("JWT authentication enabled for API routes")
 } else {
-    log.Println("WARNING: Running in demo mode - API routes are UNSECURED!")
+    logging.Info("WARNING: Running in demo mode - API routes are UNSECURED!")
 }
 ```
 
@@ -120,9 +120,9 @@ if !viper.GetBool("demo_mode") {
 ```go
 // Initializing separate demo statistics database
 if err := store.UseDemoStatisticsDB(); err != nil {
-    log.Printf("Warning: Failed to switch to demo statistics database: %v", err)
+    logging.Info("Warning: Failed to switch to demo statistics database: %v", err)
 } else {
-    log.Println("Demo server is using demo_statistics.db")
+    logging.Info("Demo server is using demo_statistics.db")
 }
 ```
 

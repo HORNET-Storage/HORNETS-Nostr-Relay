@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/illuzen/go-negentropy"
 	"github.com/libp2p/go-libp2p"
@@ -41,19 +41,19 @@ func handleIncomingNegentropyEventStream(stream network.Stream, hostId string, s
 	// Log the incoming connection (optional)
 	localPeer := stream.Conn().LocalPeer()
 	remotePeer := stream.Conn().RemotePeer()
-	log.Printf("Received negentropy sync request to %s from %s", localPeer, remotePeer)
+	logging.Infof("Received negentropy sync request to %s from %s", localPeer, remotePeer)
 
 	// Perform the negentropy sync
 	err := listenNegentropy(&negentropy.Negentropy{}, stream, hostId, store, false)
 	if err != nil {
 		// Send error message but don't overwrite the original error
 		if sendErr := SendNegentropyMessage(hostId, stream, "NEG-ERR", nostr.Filter{}, []byte{}, err.Error(), []string{}, []byte{}); sendErr != nil {
-			log.Printf("Failed to send error message: %v", sendErr)
+			logging.Infof("Failed to send error message: %v", sendErr)
 		}
 		return
 	}
 
-	log.Printf("Successfully completed negentropy sync with %s", remotePeer)
+	logging.Infof("Successfully completed negentropy sync with %s", remotePeer)
 }
 
 func LoadEventVector(events []*nostr.Event) (*negentropy.Vector, error) {
@@ -79,12 +79,12 @@ func LoadEventVector(events []*nostr.Event) (*negentropy.Vector, error) {
 }
 
 func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string, store stores.Store) error {
-	log.Printf("Performing negentropy on %s", hostId)
+	logging.Infof("Performing negentropy on %s", hostId)
 	events, err := store.QueryEvents(filter)
 	if err != nil {
 		return err
 	}
-	log.Printf("%s has %d events", hostId, len(events))
+	logging.Infof("%s has %d events", hostId, len(events))
 
 	// vector conforms to Storage interface, fill it with events
 	vector, err := LoadEventVector(events)
@@ -92,7 +92,7 @@ func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string
 		return err
 	}
 
-	log.Printf("%s sealed the events", hostId)
+	logging.Infof("%s sealed the events", hostId)
 
 	neg, err := negentropy.NewNegentropy(vector, uint64(FrameSizeLimit))
 	if err != nil {
@@ -103,7 +103,7 @@ func InitiateEventSync(stream network.Stream, filter nostr.Filter, hostId string
 	if err != nil {
 		return fmt.Errorf("failed to initiate negentropy: %w", err)
 	}
-	log.Printf("%s is initiating with version %d", hostId, initialMsg[0])
+	logging.Infof("%s is initiating with version %d", hostId, initialMsg[0])
 
 	if err = SendNegentropyMessage(hostId, stream, "NEG-OPEN", filter, initialMsg, "", []string{}, []byte{}); err != nil {
 		return err
@@ -128,24 +128,24 @@ func DownloadDag(root string) {
 	// Connect to a hornet storage node
 	publicKey, err := signing.DeserializePublicKey(hornetNpub)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to deserialize public key: %v", err)
 	}
 
 	libp2pPubKey, err := signing.ConvertPubKeyToLibp2pPubKey(publicKey)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to convert pubkey to libp2p pubkey: %v", err)
 	}
 
 	peerId, err := peer.IDFromPublicKey(*libp2pPubKey)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to get peer ID from public key: %v", err)
 	}
 
 	conMgr := connmgr.NewGenericConnectionManager()
 
 	err = conMgr.ConnectWithLibp2p(ctx, "default", fmt.Sprintf("/ip4/127.0.0.1/udp/9000/quic-v1/p2p/%s", peerId.String()), libp2p.Transport(libp2pquic.NewTransport))
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to connect with libp2p: %v", err)
 	}
 
 	progressChan := make(chan lib.DownloadProgress)
@@ -153,9 +153,9 @@ func DownloadDag(root string) {
 	go func() {
 		for progress := range progressChan {
 			if progress.Error != nil {
-				fmt.Printf("Error uploading to %s: %v\n", progress.ConnectionID, progress.Error)
+				logging.Infof("Error uploading to %s: %v\n", progress.ConnectionID, progress.Error)
 			} else {
-				fmt.Printf("Progress for %s: %d leafs downloaded\n", progress.ConnectionID, progress.LeafsRetreived)
+				logging.Infof("Progress for %s: %d leafs downloaded\n", progress.ConnectionID, progress.LeafsRetreived)
 			}
 		}
 	}()
@@ -163,7 +163,7 @@ func DownloadDag(root string) {
 	// Upload the dag to the hornet storage node
 	_, dag, err := connmgr.DownloadDag(ctx, conMgr, "default", root, nil, nil, progressChan)
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to download DAG: %v", err)
 	}
 
 	close(progressChan)
@@ -171,15 +171,15 @@ func DownloadDag(root string) {
 	// Verify the entire dag
 	err = dag.Dag.Verify()
 	if err != nil {
-		log.Fatalf("Error: %s", err)
+		logging.Fatalf("Error: %s", err)
 	}
 
-	log.Println("Dag verified correctly")
+	logging.Info("Dag verified correctly")
 
 	// Disconnect client as we no longer need it
 	err = conMgr.Disconnect("default")
 	if err != nil {
-		log.Printf("Could not disconnect from hornet storage: %v", err)
+		logging.Infof("Could not disconnect from hornet storage: %v", err)
 	}
 }
 
@@ -197,7 +197,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			return fmt.Errorf("error reading from stream: %w", err)
 		}
 		response = strings.TrimSpace(response)
-		//log.Printf("%s received: %s", hostId, response)
+		//logging.Infof("%s received: %s", hostId, response)
 
 		// Create a slice to hold the parsed data
 		var parsedData []string
@@ -205,12 +205,12 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 		// Unmarshal the JSON string into the slice
 		err = json.Unmarshal([]byte(response), &parsedData)
 		if err != nil {
-			log.Println("Error parsing JSON:", err)
+			logging.Infof("Error parsing JSON:%s", err)
 			return err
 		}
 
 		msgType := parsedData[0]
-		log.Println(hostId, "Received:", msgType)
+		logging.Infof(hostId, "Received:%s", msgType)
 
 		switch msgType {
 		case "NEG-OPEN":
@@ -218,7 +218,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 
 			err := json.Unmarshal([]byte(parsedData[2]), &filter)
 			if err != nil {
-				log.Println("Error unmarshaling filter data:", err)
+				logging.Infof("Error unmarshaling filter data:%s", err)
 				return err
 			}
 
@@ -226,14 +226,14 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			if err != nil {
 				return err
 			}
-			log.Printf("%s has %d events", hostId, len(events))
+			logging.Infof("%s has %d events", hostId, len(events))
 
 			vector, err := LoadEventVector(events)
 			if err != nil {
 				return err
 			}
 
-			log.Printf("%s sealed the events", hostId)
+			logging.Infof("%s sealed the events", hostId)
 			// intentional shadowing
 			neg, err = negentropy.NewNegentropy(vector, uint64(FrameSizeLimit))
 			if err != nil {
@@ -264,8 +264,8 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 				if err != nil {
 					return err
 				}
-				log.Println(hostId, "have", len(have), "need", len(need))
-				//log.Println(hostId, "have:", have, "need:", need)
+				logging.Infof(hostId, "have", len(have), "need", len(need))
+				//logging.Info(hostId, "have:", have, "need:", need)
 
 				// upload have
 				if len(have) > 0 {
@@ -282,12 +282,12 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					if err != nil {
 						return err
 					}
-					//log.Println(haveEvents)
+					//logging.Info(haveEvents)
 
 					// Marshal the array of events to JSON
 					haveBytes, err := json.Marshal(haveEvents)
 					if err != nil {
-						log.Println("Error marshaling to JSON:", err)
+						logging.Infof("Error marshaling to JSON:%s", err)
 						return err
 					}
 
@@ -315,7 +315,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			}
 
 			if len(msg) == 0 {
-				log.Println(hostId, ": Sync complete")
+				logging.Infof(hostId, "%s: Sync complete")
 				if len(need) == 0 {
 					// we are done
 					if err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []byte{}); err != nil {
@@ -327,7 +327,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					final = true
 				}
 			} else {
-				log.Println(hostId, ": Sync incomplete, drilling down")
+				logging.Infof(hostId, "%s: Sync incomplete, drilling down")
 				if err = SendNegentropyMessage(hostId, stream, "NEG-MSG", nostr.Filter{}, msg, "", []string{}, []byte{}); err != nil {
 					return err
 				}
@@ -342,7 +342,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			for _, event := range newEvents {
 				err := store.StoreEvent(event)
 				if err != nil {
-					log.Printf("Could not store event %+v skipping", event)
+					logging.Infof("Could not store event %+v skipping", event)
 					continue
 				}
 				// TODO: this needs to be more thoroughly tested
@@ -350,7 +350,7 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					// do leaf sync
 					root, found := GetScionicRoot(event)
 					if !found {
-						log.Printf("Event of type 117 with no 'scionic_root' tag, skipping tree download %+v", event)
+						logging.Infof("Event of type 117 with no 'scionic_root' tag, skipping tree download %+v", event)
 						continue
 					}
 
@@ -370,12 +370,12 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			if err != nil {
 				return fmt.Errorf("failed to unmarshal need IDs: %w", err)
 			}
-			//log.Printf("other hos t sent %s\n", needIds)
+			//logging.Infof("other hos t sent %s\n", needIds)
 
 			filter := nostr.Filter{
 				IDs: needIds,
 			}
-			//log.Printf("other host needs %d\n", len(needIds))
+			//logging.Infof("other host needs %d\n", len(needIds))
 
 			haveEvents, err := store.QueryEvents(filter)
 			if err != nil {
@@ -385,13 +385,13 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 			// Marshal the array of events to JSON
 			haveBytes, err := json.Marshal(haveEvents)
 			if err != nil {
-				log.Println("Error marshaling to JSON:", err)
+				logging.Infof("Error marshaling to JSON:%s", err)
 				return err
 			}
 
 			// upload
 			if err = SendNegentropyMessage(hostId, stream, "NEG-HAVE", nostr.Filter{}, []byte{}, "", []string{}, haveBytes); err != nil {
-				log.Println(hostId, "Error uploading", err)
+				logging.Infof(hostId, "Error uploading", err)
 				return err
 			}
 

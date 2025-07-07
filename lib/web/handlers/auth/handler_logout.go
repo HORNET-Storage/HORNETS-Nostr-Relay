@@ -1,9 +1,9 @@
 package auth
 
 import (
-	"log"
 	"strings"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
@@ -32,7 +32,7 @@ func LogoutUser(c *fiber.Ctx, store stores.Store) error {
 	// Find the user associated with this token
 	user, err := store.GetStatsStore().FindUserByToken(token)
 	if err != nil {
-		log.Printf("Failed to find user for token during logout: %v", err)
+		logging.Infof("Failed to find user for token during logout: %v", err)
 		// Still return success as we want to log out anyway
 		return c.JSON(fiber.Map{
 			"message": "Successfully logged out",
@@ -42,7 +42,7 @@ func LogoutUser(c *fiber.Ctx, store stores.Store) error {
 	// If we found the user, delete all their active tokens
 	if user != nil {
 		if err := store.GetStatsStore().DeleteActiveToken(user.ID); err != nil {
-			log.Printf("Failed to delete tokens for user %d: %v", user.ID, err)
+			logging.Infof("Failed to delete tokens for user %d: %v", user.ID, err)
 			// Still return success as we want to log out anyway
 		}
 	}

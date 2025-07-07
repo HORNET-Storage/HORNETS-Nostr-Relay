@@ -4,9 +4,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"log"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 )
@@ -17,7 +17,7 @@ func ApiKeyMiddleware(c *fiber.Ctx) error {
 	signature := c.Get("X-Signature")
 
 	if apiKey == "" || timestamp == "" || signature == "" {
-		log.Println("Missing authentication headers")
+		logging.Info("Missing authentication headers")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Missing authentication headers",
 		})
@@ -25,7 +25,7 @@ func ApiKeyMiddleware(c *fiber.Ctx) error {
 
 	expectedAPIKey := viper.GetString("external_services.wallet.key")
 	if apiKey != expectedAPIKey {
-		log.Println("Invalid API key")
+		logging.Info("Invalid API key")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid API key",
 		})
@@ -34,7 +34,7 @@ func ApiKeyMiddleware(c *fiber.Ctx) error {
 	// Verify timestamp (e.g., within last 5 minutes)
 	requestTime, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil || time.Since(requestTime) > 5*time.Minute {
-		log.Println("Invalid or expired timestamp")
+		logging.Info("Invalid or expired timestamp")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired timestamp",
 		})
@@ -45,7 +45,7 @@ func ApiKeyMiddleware(c *fiber.Ctx) error {
 	expectedSignature := generateHMAC(message, expectedAPIKey)
 
 	if signature != expectedSignature {
-		log.Println("Invalid signature")
+		logging.Info("Invalid signature")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid signature",
 		})

@@ -1,10 +1,10 @@
 package auth
 
 import (
-	"log"
 	"time"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
@@ -12,11 +12,11 @@ import (
 
 // Refactored loginUser function
 func LoginUser(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Login request received")
+	logging.Info("Login request received")
 	var loginPayload types.LoginPayload
 
 	if err := c.BodyParser(&loginPayload); err != nil {
-		log.Printf("Failed to parse JSON: %v", err)
+		logging.Infof("Failed to parse JSON: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
@@ -25,7 +25,7 @@ func LoginUser(c *fiber.Ctx, store stores.Store) error {
 	// Find the user by npub
 	user, err := store.GetStatsStore().FindUserByNpub(loginPayload.Npub)
 	if err != nil {
-		log.Printf("User not found: %v", err)
+		logging.Infof("User not found: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid npub or password",
 		})
@@ -33,7 +33,7 @@ func LoginUser(c *fiber.Ctx, store stores.Store) error {
 
 	// Compare passwords
 	if err := store.GetStatsStore().ComparePasswords(user.Pass, loginPayload.Password); err != nil {
-		log.Printf("Invalid password for user %s: %v", user.Npub, err)
+		logging.Infof("Invalid password for user %s: %v", user.Npub, err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid npub or password",
 		})
@@ -48,7 +48,7 @@ func LoginUser(c *fiber.Ctx, store stores.Store) error {
 	for i := 0; i < maxRetries; i++ {
 		challenge, hash, err = generateChallenge()
 		if err != nil {
-			log.Printf("Error generating challenge: %v", err)
+			logging.Infof("Error generating challenge: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Internal server error",
 			})
@@ -75,16 +75,16 @@ func LoginUser(c *fiber.Ctx, store stores.Store) error {
 		}
 
 		if i == maxRetries-1 {
-			log.Printf("Failed to save challenge after %d attempts: %v", maxRetries, saveErr)
+			logging.Infof("Failed to save challenge after %d attempts: %v", maxRetries, saveErr)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Internal server error",
 			})
 		}
 
-		log.Printf("Challenge collision occurred, retrying (%d/%d)", i+1, maxRetries)
+		logging.Infof("Challenge collision occurred, retrying (%d/%d)", i+1, maxRetries)
 	}
 
-	log.Printf("Login challenge created for user %s", user.Npub)
+	logging.Infof("Login challenge created for user %s", user.Npub)
 
 	return c.JSON(fiber.Map{
 		"event": event,

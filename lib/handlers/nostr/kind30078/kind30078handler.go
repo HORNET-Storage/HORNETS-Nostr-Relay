@@ -1,9 +1,8 @@
 package kind30078
 
 import (
-	"log"
-
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	jsoniter "github.com/json-iterator/go"
@@ -43,9 +42,10 @@ func BuildKind30078Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		for _, tag := range env.Event.Tags {
 			if len(tag) >= 2 {
-				if tag[0] == "r" {
+				switch tag[0] {
+				case "r":
 					relayURLs = append(relayURLs, tag[1])
-				} else if tag[0] == "dht" {
+				case "dht":
 					dhtKey = tag[1]
 				}
 			}
@@ -72,7 +72,7 @@ func BuildKind30078Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Store the relay list in the DHT
 		err = relayStore.StoreRelayList(dhtKey, relayURLs, env.Event.PubKey, env.Event.Sig)
 		if err != nil {
-			log.Printf("Error storing relay list in DHT: %v", err)
+			logging.Infof("Error storing relay list in DHT: %v", err)
 			write("NOTICE", "Failed to store relay list in DHT.")
 			return
 		}

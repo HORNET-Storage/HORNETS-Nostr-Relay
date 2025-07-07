@@ -1,13 +1,13 @@
 package kind1063
 
 import (
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -53,7 +53,7 @@ func BuildKind1063Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 		// Check for existing events to replace (same author + same blossom_hash)
 		existingEvents, err := findExistingAudioEvents(store, env.Event.PubKey, blossomHash)
 		if err != nil {
-			log.Printf("Kind 1063 handler: Error checking for existing events: %v", err)
+			logging.Infof("Kind 1063 handler: Error checking for existing events: %v", err)
 			write("NOTICE", "Failed to check for existing events")
 			return
 		}
@@ -64,11 +64,11 @@ func BuildKind1063Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			if env.Event.CreatedAt > existingEvent.CreatedAt {
 				// New event is newer, mark old event for deletion
 				eventsToDelete = append(eventsToDelete, existingEvent.ID)
-				log.Printf("Kind 1063 handler: Replacing older event %s with newer event %s",
+				logging.Infof("Kind 1063 handler: Replacing older event %s with newer event %s",
 					existingEvent.ID, env.Event.ID)
 			} else {
 				// Existing event is newer or same age, reject new event
-				log.Printf("Kind 1063 handler: Rejecting event %s - older than existing event %s",
+				logging.Infof("Kind 1063 handler: Rejecting event %s - older than existing event %s",
 					env.Event.ID, existingEvent.ID)
 				write("NOTICE", "Event rejected - older than existing event for same audio file")
 				return
@@ -78,7 +78,7 @@ func BuildKind1063Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 		// Delete replaced events
 		for _, eventID := range eventsToDelete {
 			if err := store.DeleteEvent(eventID); err != nil {
-				log.Printf("Kind 1063 handler: Warning - failed to delete replaced event %s: %v", eventID, err)
+				logging.Infof("Kind 1063 handler: Warning - failed to delete replaced event %s: %v", eventID, err)
 				// Continue anyway - the new event will still be stored
 			}
 		}
@@ -89,7 +89,7 @@ func BuildKind1063Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		log.Printf("Kind 1063 handler: Stored audio message - Author: %s, Hash: %s, Event ID: %s, Replaced: %d events",
+		logging.Infof("Kind 1063 handler: Stored audio message - Author: %s, Hash: %s, Event ID: %s, Replaced: %d events",
 			env.Event.PubKey, blossomHash, env.Event.ID, len(eventsToDelete))
 
 		// Successfully processed event

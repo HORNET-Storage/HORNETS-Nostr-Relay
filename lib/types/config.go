@@ -63,6 +63,7 @@ type RelayConfig struct {
 	Name          string `mapstructure:"name"`
 	Description   string `mapstructure:"description"`
 	Contact       string `mapstructure:"contact"`
+	Icon          string `mapstructure:"icon"`
 	Software      string `mapstructure:"software"`
 	Version       string `mapstructure:"version"`
 	ServiceTag    string `mapstructure:"service_tag"`

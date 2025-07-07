@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	statistics_gorm "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm"
 )
 
@@ -24,15 +25,15 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	// Find the project root directory by looking for go.mod file
 	projectRoot, err := findProjectRoot()
 	if err != nil {
-		fmt.Printf("Warning: Could not determine project root: %v\n", err)
-		fmt.Println("Using current directory as a fallback.")
+		logging.Infof("Warning: Could not determine project root: %v\n", err)
+		logging.Infof("Using current directory as a fallback.")
 		projectRoot, _ = os.Getwd()
 	}
 
 	// Use absolute path to demo_statistics.db in the project root
 	dbPath := filepath.Join(projectRoot, "demo_statistics.db")
 	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate&_synchronous=normal&_mutex=no&_locking_mode=normal&cache=shared"
-	fmt.Printf("Using database at absolute path: %s\n", dbPath)
+	logging.Infof("Using database at absolute path: %s\n", dbPath)
 
 	// Configure GORM with the same settings as the production version
 	store.DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -74,7 +75,7 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	store.DB.Exec("PRAGMA cache_size = -32000")
 	store.DB.Exec("PRAGMA temp_store = MEMORY")
 
-	fmt.Println("Demo SQLite database initialized with optimized settings")
+	logging.Infof("Demo SQLite database initialized with optimized settings")
 
 	return store, nil
 }

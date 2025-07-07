@@ -250,12 +250,12 @@ The automated dispute processing system consists of several components:
        // Delete resolution events older than the age
        count, err := w.Store.DeleteResolutionEventsOlderThan(age)
        if err != nil {
-           log.Printf("Error cleaning up resolution events: %v", err)
+           logging.Info("Error cleaning up resolution events: %v", err)
            return
        }
        
        if count > 0 {
-           log.Printf("Deleted %d resolution events older than 7 days", count)
+           logging.Info("Deleted %d resolution events older than 7 days", count)
        }
    }
    ```
@@ -286,7 +286,7 @@ The automated dispute processing system consists of several components:
    // Check if this user has already disputed this event
    hasDisputed, err := store.HasUserDisputedEvent(blockedEventID, env.Event.PubKey)
    if err != nil {
-       log.Printf("Error checking if user has disputed event: %v", err)
+       logging.Info("Error checking if user has disputed event: %v", err)
        write("NOTICE", "Error processing dispute. Please try again later.")
        return
    }
@@ -295,7 +295,7 @@ The automated dispute processing system consists of several components:
    if hasDisputed {
        isPaid, err := IsPaidSubscriber(store, env.Event.PubKey)
        if err != nil {
-           log.Printf("Error checking paid subscriber status: %v", err)
+           logging.Info("Error checking paid subscriber status: %v", err)
            write("NOTICE", "Error processing dispute. Please try again later.")
            return
        }

@@ -2,7 +2,6 @@ package wallet
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/gofiber/fiber/v2"
@@ -30,12 +30,12 @@ type transactionDetails struct {
 
 // Refactored getPendingTransactions function
 func GetPendingTransactions(c *fiber.Ctx, store stores.Store) error {
-	log.Println("Request for unconfirmed transactions.")
+	logging.Info("Request for unconfirmed transactions.")
 
 	// Use the statistics store to retrieve pending transactions
 	pendingTransactions, err := store.GetStatsStore().GetPendingTransactions()
 	if err != nil {
-		log.Printf("Error querying pending transactions: %v", err)
+		logging.Infof("Error querying pending transactions: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database query error",
 		})
@@ -48,11 +48,11 @@ func GetPendingTransactions(c *fiber.Ctx, store stores.Store) error {
 // Refactored saveUnconfirmedTransaction function
 func SaveUnconfirmedTransaction(c *fiber.Ctx, store stores.Store) error {
 	var pendingTransaction types.PendingTransaction
-	log.Println("Saving unconfirmed transaction.")
+	logging.Info("Saving unconfirmed transaction.")
 
 	// Parse the JSON body into the struct with field mappings
 	if err := c.BodyParser(&pendingTransaction); err != nil {
-		log.Printf("Failed to parse JSON: %v", err)
+		logging.Infof("Failed to parse JSON: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
@@ -61,7 +61,7 @@ func SaveUnconfirmedTransaction(c *fiber.Ctx, store stores.Store) error {
 	// Use the statistics store to save the pending transaction
 	err := store.GetStatsStore().SaveUnconfirmedTransaction(&pendingTransaction)
 	if err != nil {
-		log.Printf("Error saving pending transaction: %v", err)
+		logging.Infof("Error saving pending transaction: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database save error",
 		})
@@ -78,7 +78,7 @@ func ReplaceTransaction(c *fiber.Ctx, store stores.Store) error {
 	// Parse the JSON body into the ReplaceTransactionRequest struct
 	var replaceRequest types.ReplaceTransactionRequest
 	if err := c.BodyParser(&replaceRequest); err != nil {
-		log.Printf("Failed to parse replacement request: %v", err)
+		logging.Infof("Failed to parse replacement request: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Cannot parse JSON",
 		})
@@ -92,7 +92,7 @@ func ReplaceTransaction(c *fiber.Ctx, store stores.Store) error {
 				"error": "Original transaction not found",
 			})
 		}
-		log.Printf("Error replacing transaction: %v", err)
+		logging.Infof("Error replacing transaction: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Error replacing transaction",
 		})
@@ -110,7 +110,7 @@ func GetLatestWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	// Get the latest wallet transactions
 	transactions, err := store.GetStatsStore().GetLatestWalletTransactions()
 	if err != nil {
-		log.Printf("Error querying transactions: %v", err)
+		logging.Infof("Error querying transactions: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Database query error",
 		})
@@ -120,7 +120,7 @@ func GetLatestWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	for i, transaction := range transactions {
 		value, err := strconv.ParseFloat(transaction.Value, 64)
 		if err != nil {
-			log.Printf("Error converting value to float64: %v", err)
+			logging.Infof("Error converting value to float64: %v", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Conversion error",
 			})
@@ -136,7 +136,7 @@ func GetLatestWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 // updateWalletTransactions processes incoming wallet transactions
 func UpdateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	var transactions []map[string]interface{}
-	log.Println("Transactions request received")
+	logging.Info("Transactions request received")
 
 	// Parse the JSON body into the slice of maps
 	if err := c.BodyParser(&transactions); err != nil {
@@ -156,7 +156,7 @@ func UpdateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	// Get the global subscription manager
 	subManager := subscription.GetGlobalManager()
 	if subManager == nil {
-		log.Printf("Global subscription manager not initialized")
+		logging.Infof("Global subscription manager not initialized")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Subscription system not available",
 		})
@@ -206,7 +206,7 @@ func UpdateWalletTransactions(c *fiber.Ctx, store stores.Store) error {
 	var processedCount, errorCount int
 	for err := range results {
 		if err != nil {
-			log.Printf("Error processing transaction: %v", err)
+			logging.Infof("Error processing transaction: %v", err)
 			errorCount++
 		} else {
 			processedCount++
@@ -230,7 +230,7 @@ func ProcessWalletTransaction(store stores.Store, subManager *subscription.Subsc
 	// Process pending transaction
 	txID := strings.Split(txDetails.address, ":")[0]
 	if err := store.GetStatsStore().DeletePendingTransaction(txID); err != nil {
-		log.Printf("Warning: could not delete pending transaction: %v", err)
+		logging.Infof("Warning: could not delete pending transaction: %v", err)
 	}
 
 	// Check if transaction already exists
@@ -261,15 +261,15 @@ func ProcessWalletTransaction(store stores.Store, subManager *subscription.Subsc
 	// After subscriber retrieval in processTransaction
 	subscriber, err := store.GetStatsStore().GetSubscriberByAddress(txDetails.output)
 	if err != nil {
-		log.Printf("Error: subscriber not found for address %s: %v", txDetails.output, err)
+		logging.Infof("Error: subscriber not found for address %s: %v", txDetails.output, err)
 		return fmt.Errorf("subscriber not found for address %s: %v", txDetails.output, err)
 	} else {
-		log.Printf("Subscriber retrieved: %v", subscriber)
+		logging.Infof("Subscriber retrieved: %v", subscriber)
 	}
 
 	// Check if subscriber.Npub is nil before dereferencing
 	if subscriber.Npub == nil {
-		log.Printf("Warning: subscriber found for address %s but has nil Npub", txDetails.output)
+		logging.Infof("Warning: subscriber found for address %s but has nil Npub", txDetails.output)
 		return fmt.Errorf("subscriber found but has nil npub for address: %s", txDetails.output)
 	}
 
@@ -327,14 +327,14 @@ func ProcessWalletTransaction(store stores.Store, subManager *subscription.Subsc
 	}
 
 	if err := store.GetStatsStore().CreatePaymentNotification(notification); err != nil {
-		log.Printf("Warning: failed to create payment notification: %v", err)
+		logging.Infof("Warning: failed to create payment notification: %v", err)
 		// Continue processing - non-fatal error
 	} else {
-		log.Printf("Created payment notification for %s: %d sats, tier: %s",
+		logging.Infof("Created payment notification for %s: %d sats, tier: %s",
 			*subscriber.Npub, satoshis, tier)
 	}
 
-	log.Printf("Successfully processed subscription payment for %s: %s sats",
+	logging.Infof("Successfully processed subscription payment for %s: %s sats",
 		*subscriber.Npub, txDetails.valueStr)
 	return nil
 }
@@ -353,9 +353,9 @@ func InitializeSubscriptionManager(store stores.Store) (*subscription.Subscripti
 	}
 
 	// Log the tiers for debugging
-	log.Printf("Loading subscription tiers from relay_settings: %+v", settings.AllowedUsersSettings)
+	logging.Infof("Loading subscription tiers from relay_settings: %+v", settings.AllowedUsersSettings)
 	for i, tier := range settings.AllowedUsersSettings.Tiers {
-		log.Printf("Tier %d: Name='%s', MonthlyLimitBytes='%d', Price='%d', Unlimited='%t'",
+		logging.Infof("Tier %d: Name='%s', MonthlyLimitBytes='%d', Price='%d', Unlimited='%t'",
 			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
 

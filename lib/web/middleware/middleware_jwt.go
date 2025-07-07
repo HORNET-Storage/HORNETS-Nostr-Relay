@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
@@ -28,7 +28,7 @@ func JwtMiddleware(c *fiber.Ctx, store stores.Store) error {
 
 	// Check if the header is empty or doesn't start with "Bearer "
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		log.Println("JWT Middleware: Missing or invalid Authorization header")
+		logging.Info("JWT Middleware: Missing or invalid Authorization header")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Missing or invalid Authorization header",
 		})
@@ -40,12 +40,12 @@ func JwtMiddleware(c *fiber.Ctx, store stores.Store) error {
 	// Check if the token is active and not expired using the store method
 	isActive, err := store.GetStatsStore().IsActiveToken(tokenString)
 	if err != nil {
-		log.Printf("JWT Middleware: Error checking token: %v", err)
+		logging.Infof("JWT Middleware: Error checking token: %v", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 	}
 
 	if !isActive {
-		log.Println("JWT Middleware: Token not found in ActiveTokens or expired")
+		logging.Info("JWT Middleware: Token not found in ActiveTokens or expired")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired token",
 		})
@@ -61,7 +61,7 @@ func JwtMiddleware(c *fiber.Ctx, store stores.Store) error {
 	})
 
 	if err != nil {
-		log.Printf("JWT Middleware: Token parsing error: %v", err)
+		logging.Infof("JWT Middleware: Token parsing error: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired token",
 		})
@@ -73,7 +73,7 @@ func JwtMiddleware(c *fiber.Ctx, store stores.Store) error {
 		return c.Next()
 	}
 
-	log.Println("JWT Middleware: Invalid token claims")
+	logging.Info("JWT Middleware: Invalid token claims")
 	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 		"error": "Invalid token claims",
 	})

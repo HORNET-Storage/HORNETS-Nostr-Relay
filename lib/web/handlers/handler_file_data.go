@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"encoding/base64"
-	"log"
 	"strconv"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
 
@@ -59,7 +59,7 @@ func AddContent(fileInfo *types.FileInfo, content []byte) *FileInfoWithContent {
 }
 
 func HandleGetFilesByType(c *fiber.Ctx, store stores.Store) error {
-	log.Println("files by type request made.")
+	logging.Info("files by type request made.")
 	mimeType := c.Query("type")
 	if mimeType == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{

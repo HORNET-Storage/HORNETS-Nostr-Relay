@@ -1,11 +1,11 @@
 package kind30023
 
 import (
-	"log"
 	"regexp"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -106,13 +106,13 @@ func validateMarkdownContent(content string) bool {
 
 	// Check for HTML tags
 	if htmlTagRegex.MatchString(content) {
-		log.Println("Found HTML tags.")
+		logging.Info("Found HTML tags.")
 		return false // Found HTML tags, return false
 	}
 
 	// Check for hard line-breaks
 	if hardLineBreakRegex.MatchString(content) {
-		log.Println("Found hard line-breaks.")
+		logging.Info("Found hard line-breaks.")
 		return false // Found hard line-breaks, return false
 	}
 

@@ -1,7 +1,6 @@
 package kind19842
 
 import (
-	"log"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -9,6 +8,7 @@ import (
 	"github.com/spf13/viper"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 )
 
@@ -50,7 +50,7 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Log the dispute reason for debugging
 		if disputeReason != "" {
-			log.Printf("Dispute reason: %s", disputeReason)
+			logging.Infof("Dispute reason: %s", disputeReason)
 		}
 
 		// Validate required fields
@@ -98,7 +98,7 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Check if this user has already disputed this event
 		hasDisputed, err := store.HasUserDisputedEvent(blockedEventID, env.Event.PubKey)
 		if err != nil {
-			log.Printf("Error checking if user has disputed event: %v", err)
+			logging.Infof("Error checking if user has disputed event: %v", err)
 			write("NOTICE", "Error processing dispute. Please try again later.")
 			return
 		}
@@ -107,7 +107,7 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		if hasDisputed {
 			isPaid, err := IsPaidSubscriber(store, env.Event.PubKey)
 			if err != nil {
-				log.Printf("Error checking paid subscriber status: %v", err)
+				logging.Infof("Error checking paid subscriber status: %v", err)
 				write("NOTICE", "Error processing dispute. Please try again later.")
 				return
 			}
@@ -118,7 +118,7 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 				return
 			}
 
-			log.Printf("Paid subscriber %s submitting a subsequent dispute for event %s", env.Event.PubKey, blockedEventID)
+			logging.Infof("Paid subscriber %s submitting a subsequent dispute for event %s", env.Event.PubKey, blockedEventID)
 		}
 
 		// Update the ticket status to "disputed"
@@ -153,10 +153,10 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Sign and store the updated ticket
 		if err := updatedTicket.Sign(serializedPrivKey); err != nil {
-			log.Printf("Error signing updated ticket: %v", err)
+			logging.Infof("Error signing updated ticket: %v", err)
 		} else {
 			if err := store.StoreEvent(&updatedTicket); err != nil {
-				log.Printf("Error storing updated ticket: %v", err)
+				logging.Infof("Error storing updated ticket: %v", err)
 			}
 		}
 
@@ -168,7 +168,7 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		// Mark the event as disputed to prevent it from being deleted
 		if err := store.MarkEventDisputed(blockedEventID); err != nil {
-			log.Printf("Error marking event as disputed: %v", err)
+			logging.Infof("Error marking event as disputed: %v", err)
 			// Continue anyway as the dispute is still valid
 		}
 
@@ -190,7 +190,7 @@ func BuildKind19842Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			disputeReason,
 			env.Event.PubKey,
 		); err != nil {
-			log.Printf("Error adding dispute to pending moderation: %v", err)
+			logging.Infof("Error adding dispute to pending moderation: %v", err)
 			// Continue anyway as the dispute is still valid
 		}
 

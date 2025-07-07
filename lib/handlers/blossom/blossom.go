@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -82,16 +81,16 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		Authors: []string{pubkey},
 	}
 
-	log.Printf("Blossom upload: Searching for kind 117 events (broad search) - Author: %s, Hash: %s", pubkey, encodedHash)
+	logging.Infof("Blossom upload: Searching for kind 117 events (broad search) - Author: %s, Hash: %s", pubkey, encodedHash)
 
 	// Get all kind 117 events from this author
 	allEvents, err := s.storage.QueryEvents(broadFilter)
 	if err != nil {
-		log.Printf("Blossom upload: Error querying events: %v", err)
+		logging.Infof("Blossom upload: Error querying events: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to query events"})
 	}
 
-	log.Printf("Blossom upload: Found %d total kind 117 events from author, filtering for hash %s", len(allEvents), encodedHash)
+	logging.Infof("Blossom upload: Found %d total kind 117 events from author, filtering for hash %s", len(allEvents), encodedHash)
 
 	// Manually filter for events with matching blossom_hash
 	var matchingEvents []*nostr.Event
@@ -99,14 +98,14 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "blossom_hash" && tag[1] == encodedHash {
 				matchingEvents = append(matchingEvents, event)
-				log.Printf("Blossom upload: Found matching event - ID: %s, Hash: %s", event.ID, tag[1])
+				logging.Infof("Blossom upload: Found matching event - ID: %s, Hash: %s", event.ID, tag[1])
 				break
 			}
 		}
 	}
 
 	if len(matchingEvents) == 0 {
-		log.Printf("Blossom upload: No matching kind 117 event found for hash %s from author %s", encodedHash, pubkey)
+		logging.Infof("Blossom upload: No matching kind 117 event found for hash %s from author %s", encodedHash, pubkey)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "no matching kind 117 event found",
 			"detail":  fmt.Sprintf("Please create a kind 117 event with blossom_hash tag '%s' before uploading", encodedHash),
@@ -155,10 +154,10 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		subManager := subscription.GetGlobalManager()
 		if subManager != nil {
 			if err := subManager.UpdateStorageUsage(pk, size); err != nil {
-				log.Printf("Warning: Failed to update storage usage for pubkey %s: %v", pk, err)
+				logging.Infof("Warning: Failed to update storage usage for pubkey %s: %v", pk, err)
 			}
 		} else {
-			log.Printf("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pk)
+			logging.Infof("Warning: Global subscription manager not available, storage not tracked for pubkey %s", pk)
 		}
 	}(pubkey, int64(len(data)))
 

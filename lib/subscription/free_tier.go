@@ -4,12 +4,12 @@ package subscription
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -22,7 +22,7 @@ func InitDailyFreeSubscriptionRenewal() {
 			nextRun := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 1, 0, 0, now.Location())
 			delay := nextRun.Sub(now)
 
-			log.Printf("Scheduled free tier renewal in %v (at %s)",
+			logging.Infof("Scheduled free tier renewal in %v (at %s)",
 				delay, nextRun.Format("2006-01-02 15:04:05"))
 
 			time.Sleep(delay)
@@ -30,11 +30,11 @@ func InitDailyFreeSubscriptionRenewal() {
 			// Run the renewal
 			manager := GetGlobalManager()
 			if manager != nil {
-				log.Printf("Starting daily free tier renewal process")
+				logging.Infof("Starting daily free tier renewal process")
 				if err := manager.RefreshExpiredFreeTierSubscriptions(); err != nil {
-					log.Printf("Error in free tier renewal: %v", err)
+					logging.Infof("Error in free tier renewal: %v", err)
 				} else {
-					log.Printf("Successfully completed daily free tier renewal")
+					logging.Infof("Successfully completed daily free tier renewal")
 				}
 			}
 		}
@@ -46,17 +46,17 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 	// Load allowed users settings to check for free mode
 	var allowedUsersSettings types.AllowedUsersSettings
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
-		log.Printf("Error loading allowed users settings: %v", err)
+		logging.Infof("Error loading allowed users settings: %v", err)
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
 
 	// Only process free tier renewals in free mode
 	if allowedUsersSettings.Mode != "free" {
-		log.Printf("Skipping free tier renewal - not in free mode (current mode: %s)", allowedUsersSettings.Mode)
+		logging.Infof("Skipping free tier renewal - not in free mode (current mode: %s)", allowedUsersSettings.Mode)
 		return nil
 	}
 
-	log.Printf("Checking for expired free tier subscriptions to refresh")
+	logging.Infof("Checking for expired free tier subscriptions to refresh")
 
 	now := time.Now()
 	batchSize := 50
@@ -117,7 +117,7 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 			// Get current storage info
 			storageInfo, err := m.extractStorageInfo(event)
 			if err != nil {
-				log.Printf("Warning: could not extract storage info for %s: %v", pubkey, err)
+				logging.Infof("Warning: could not extract storage info for %s: %v", pubkey, err)
 				continue
 			}
 
@@ -151,7 +151,7 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 					if pendingTier.Unlimited {
 						storageInfo.TotalBytes = types.MaxMonthlyLimitBytes
 					}
-					log.Printf("Applying pending adjustment for %s: new limit %s (%d bytes)",
+					logging.Infof("Applying pending adjustment for %s: new limit %s (%d bytes)",
 						pubkey, pendingTierLimit, storageInfo.TotalBytes)
 				}
 			}
@@ -169,10 +169,10 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 			}, tierToUse, newExpiration, &storageInfo)
 
 			if err != nil {
-				log.Printf("Error refreshing free tier: %v", err)
+				logging.Infof("Error refreshing free tier: %v", err)
 			} else {
 				refreshed++
-				log.Printf("Refreshed free tier for %s until %s",
+				logging.Infof("Refreshed free tier for %s until %s",
 					pubkey, newExpiration.Format("2006-01-02"))
 			}
 		}
@@ -183,7 +183,7 @@ func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 		}
 	}
 
-	log.Printf("Free tier refresh complete: processed %d events, refreshed %d subscriptions",
+	logging.Infof("Free tier refresh complete: processed %d events, refreshed %d subscriptions",
 		processed, refreshed)
 	return nil
 }

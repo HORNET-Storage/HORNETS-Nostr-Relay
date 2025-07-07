@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
@@ -18,80 +17,80 @@ func init() {
 	// Initialze config system
 	err := config.InitConfig()
 	if err != nil {
-		log.Fatalf("Failed to initialize config: %v", err)
+		logging.Fatalf("Failed to initialize config: %v", err)
 	}
 
 	// Initialize logging system
 	if err := logging.InitLogger(); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		logging.Fatalf("Failed to initialize logger: %v", err)
 	}
 
 	viper.Set("server.demo", true)
 }
 
 func main() {
-	log.Println("========================================")
-	log.Println("  HORNETS RELAY DEMO MODE")
-	log.Println("  Authentication bypassed for admin panel")
-	log.Println("  For demonstration purposes only")
-	log.Println("  NOT FOR PRODUCTION USE")
-	log.Println("========================================")
+	logging.Info("========================================")
+	logging.Info("  HORNETS RELAY DEMO MODE")
+	logging.Info("  Authentication bypassed for admin panel")
+	logging.Info("  For demonstration purposes only")
+	logging.Info("  NOT FOR PRODUCTION USE")
+	logging.Info("========================================")
 
 	// Use a separate data directory for the demo server to avoid conflicts
 	// Initialize BadgerHold store with a separate data directory for demo mode
 	store, err := badgerhold.InitStore("demo-data")
 	if err != nil {
-		log.Fatal(err)
+		logging.Fatalf("Failed to initialize BadgerHold store: %v", err)
 	}
 
 	// Switch to using a separate statistics database for demo mode
 	// This ensures we don't mix demo data with production statistics
 	dbPath := "demo_statistics.db"
 	if err := store.UseDemoStatisticsDB(); err != nil {
-		log.Printf("Warning: Failed to switch to demo statistics database: %v", err)
-		log.Println("Continuing with standard statistics database...")
+		logging.Infof("Warning: Failed to switch to demo statistics database: %v", err)
+		logging.Info("Continuing with standard statistics database...")
 		// Continue anyway as this is not a critical failure
 	} else {
-		log.Println("Demo server is using a separate statistics database (demo_statistics.db)")
+		logging.Info("Demo server is using a separate statistics database (demo_statistics.db)")
 
 		// Check if the database is empty and generate demo data if needed
 		isEmpty, count, err := databaseIsEmptyWithCount(dbPath)
 		if err != nil {
-			log.Printf("Warning: Failed to check if database is empty: %v", err)
+			logging.Infof("Warning: Failed to check if database is empty: %v", err)
 		} else if isEmpty {
-			log.Println("Statistics database is empty, generating demo data...")
+			logging.Info("Statistics database is empty, generating demo data...")
 			if err := generateDemoData(dbPath); err != nil {
-				log.Printf("Warning: Failed to generate demo data: %v", err)
-				log.Println("Demo charts may not display correctly without data")
+				logging.Infof("Warning: Failed to generate demo data: %v", err)
+				logging.Info("Demo charts may not display correctly without data")
 			} else {
-				log.Println("Successfully generated demo data for statistics visualization")
+				logging.Info("Successfully generated demo data for statistics visualization")
 			}
 		} else {
-			log.Printf("Using existing demo data in statistics database (found %d events)", count)
+			logging.Infof("Using existing demo data in statistics database (found %d events)", count)
 		}
 	}
 
 	// Set up cleanup on exit
 	defer func() {
-		log.Println("Cleaning up demo relay resources...")
+		logging.Info("Cleaning up demo relay resources...")
 		err := store.Cleanup()
 		if err != nil {
-			log.Printf("Failed to cleanup demo data: %v", err)
+			logging.Infof("Failed to cleanup demo data: %v", err)
 		} else {
-			log.Println("Demo data cleanup successful")
+			logging.Info("Demo data cleanup successful")
 		}
 	}()
 	// Log which ports will be used
 	demoPort := config.GetPort("web")
 	if demoPort > 0 {
-		log.Printf("Demo server will use port %d (web panel on port %d)", demoPort-2, demoPort)
+		logging.Infof("Demo server will use port %d (web panel on port %d)", demoPort-2, demoPort)
 	}
 
-	log.Println("Starting demo web server...")
+	logging.Info("Starting demo web server...")
 	err = web.StartServer(store)
 
 	if err != nil {
-		log.Fatalf("Fatal error occurred in demo web server: %v", err)
+		logging.Fatalf("Fatal error occurred in demo web server: %v", err)
 	}
 }
 

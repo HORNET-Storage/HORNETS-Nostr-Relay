@@ -2,11 +2,11 @@ package nostr
 
 import (
 	"fmt"
-	"log"
 
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/fxamacker/cbor/v2"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -80,13 +80,13 @@ func Responder(stream network.Stream, messageType string, params ...interface{})
 	message = append(message, params...)
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling response message: %s\n", err)
+		logging.Infof("Error marshaling response message: %s\n", err)
 		return
 	}
 
 	// Write the JSON message to the stream
 	if _, err := stream.Write(jsonMessage); err != nil {
-		log.Printf("Error writing to stream: %s\n", err)
+		logging.Infof("Error writing to stream: %s\n", err)
 	}
 }
 
@@ -103,7 +103,7 @@ func BuildResponse(messageType string, params ...interface{}) []byte {
 
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling response message: %s\n", err)
+		logging.Infof("Error marshaling response message: %s\n", err)
 		return nil
 	}
 
@@ -124,7 +124,7 @@ func BuildCborResponse(messageType string, params ...interface{}) []byte {
 
 	cborMessage, err := cbor.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling response message: %s\n", err)
+		logging.Infof("Error marshaling response message: %s\n", err)
 		return nil
 	}
 
@@ -147,7 +147,7 @@ func extractInterfaceValues(data ...interface{}) []interface{} {
 
 func CloseStream(stream network.Stream) {
 	if err := stream.CloseWrite(); err != nil {
-		log.Printf("Error closing stream: %s\n", err)
+		logging.Infof("Error closing stream: %s\n", err)
 	}
 }
 

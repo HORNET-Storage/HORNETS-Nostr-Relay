@@ -18,6 +18,7 @@ type NIP11RelayInfo struct {
 	Description     string           `json:"description,omitempty"`
 	Pubkey          string           `json:"pubkey,omitempty"`
 	Contact         string           `json:"contact,omitempty"`
+	Icon            string           `json:"icon,omitempty"`
 	SupportedNIPs   []int            `json:"supported_nips,omitempty"`
 	Software        string           `json:"software,omitempty"`
 	Version         string           `json:"version,omitempty"`

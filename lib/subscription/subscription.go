@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,12 +18,13 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
 // InitializeSubscriber creates a new subscriber or retrieves an existing one and creates their initial NIP-88 event.
 func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) error {
-	log.Printf("Initializing subscriber for npub: %s in mode: %s", npub, mode)
+	logging.Infof("Initializing subscriber for npub: %s in mode: %s", npub, mode)
 
 	// Step 1: Conditionally allocate a Bitcoin address based on mode
 	var addressStr string
@@ -32,38 +32,38 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 		// Run address pool check in background for subscription mode
 		go func() {
 			if err := m.checkAddressPoolStatus(); err != nil {
-				log.Printf("Warning: error checking address pool status: %v", err)
+				logging.Infof("Warning: error checking address pool status: %v", err)
 			}
 		}()
 
-		log.Println("Address Pool checked Going to allocate address")
+		logging.Info("Address Pool checked Going to allocate address")
 
 		// Allocate a Bitcoin address for subscription mode
 		address, err := m.store.GetStatsStore().AllocateBitcoinAddress(npub)
 		if err != nil {
-			log.Printf("Error allocating bitcoin address: %v", err)
+			logging.Infof("Error allocating bitcoin address: %v", err)
 			return fmt.Errorf("failed to allocate Bitcoin address: %v", err)
 		}
 		addressStr = address.Address
-		log.Printf("Successfully allocated address: %s", address.Address)
+		logging.Infof("Successfully allocated address: %s", address.Address)
 	} else {
 		// For non-subscription modes, use empty string
 		addressStr = ""
-		log.Printf("Skipping Bitcoin address allocation for mode: %s", mode)
+		logging.Infof("Skipping Bitcoin address allocation for mode: %s", mode)
 	}
 
 	// Step 2: Load allowed users settings to determine appropriate tier
 	settings, err := config.GetConfig()
 	if err != nil {
-		log.Printf("Error getting config: %v", err)
+		logging.Infof("Error getting config: %v", err)
 		return fmt.Errorf("failed to get config: %v", err)
 	}
 
 	// Step 3: Determine appropriate tier for new user
-	log.Printf("DEBUG: AllowedUsersSettings mode: %s", settings.AllowedUsersSettings.Mode)
-	log.Printf("DEBUG: Available tiers in settings: %d", len(settings.AllowedUsersSettings.Tiers))
+	logging.Infof("DEBUG: AllowedUsersSettings mode: %s", settings.AllowedUsersSettings.Mode)
+	logging.Infof("DEBUG: Available tiers in settings: %d", len(settings.AllowedUsersSettings.Tiers))
 	for i, tier := range settings.AllowedUsersSettings.Tiers {
-		log.Printf("DEBUG: Settings tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d",
+		logging.Infof("DEBUG: Settings tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d",
 			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats)
 	}
 
@@ -77,18 +77,18 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 
 	if tierLimit != nil {
 		storageInfo.TotalBytes = tierLimit.MonthlyLimitBytes
-		log.Printf("Setting initial storage limit to %d bytes for tier: %s", storageInfo.TotalBytes, tierLimit.Name)
+		logging.Infof("Setting initial storage limit to %d bytes for tier: %s", storageInfo.TotalBytes, tierLimit.Name)
 	} else {
 		storageInfo.TotalBytes = 0
-		log.Printf("No tier assigned. Setting initial storage limit to 0 bytes")
+		logging.Infof("No tier assigned. Setting initial storage limit to 0 bytes")
 	}
 
 	// Set expiration date (1 month for all initial subscriptions)
 	expirationDate := time.Now().AddDate(0, 1, 0)
 	if tierLimit != nil {
-		log.Printf("Setting tier limit: %s with expiration: %v", tierLimit.Name, expirationDate)
+		logging.Infof("Setting tier limit: %s with expiration: %v", tierLimit.Name, expirationDate)
 	} else {
-		log.Printf("Setting no tier limit with expiration: %v", expirationDate)
+		logging.Infof("Setting no tier limit with expiration: %v", expirationDate)
 	}
 
 	// Step 4: Create the NIP-88 event asynchronously to avoid blocking event processing
@@ -105,21 +105,21 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 		}
 
 		if err := m.createNIP88EventIfNotExists(subscriber, tierLimitStr, expirationDate, &storageInfo); err != nil {
-			log.Printf("Error creating NIP-88 event asynchronously for %s: %v", npub, err)
+			logging.Infof("Error creating NIP-88 event asynchronously for %s: %v", npub, err)
 		} else {
 			if tierLimit != nil {
-				log.Printf("Successfully created NIP-88 event for subscriber %s with tier: %s", npub, tierLimit.Name)
+				logging.Infof("Successfully created NIP-88 event for subscriber %s with tier: %s", npub, tierLimit.Name)
 			} else {
-				log.Printf("Successfully created NIP-88 event for subscriber %s with no tier", npub)
+				logging.Infof("Successfully created NIP-88 event for subscriber %s with no tier", npub)
 			}
 		}
 	}()
 
 	// Return immediately without waiting for NIP-88 event creation
 	if tierLimit != nil {
-		log.Printf("Successfully initialized subscriber %s with tier: %s (NIP-88 event creating asynchronously)", npub, tierLimit.Name)
+		logging.Infof("Successfully initialized subscriber %s with tier: %s (NIP-88 event creating asynchronously)", npub, tierLimit.Name)
 	} else {
-		log.Printf("Successfully initialized subscriber %s with no tier (NIP-88 event creating asynchronously)", npub)
+		logging.Infof("Successfully initialized subscriber %s with no tier (NIP-88 event creating asynchronously)", npub)
 	}
 	return nil
 }
@@ -136,7 +136,7 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 		Limit: 1,
 	})
 	if err != nil || len(events) == 0 {
-		log.Printf("Warning: No NIP-88 event found for user %s, storage not tracked (newBytes: %d)", npub, newBytes)
+		logging.Infof("Warning: No NIP-88 event found for user %s, storage not tracked (newBytes: %d)", npub, newBytes)
 		return nil // Don't fail the operation
 	}
 	currentEvent := events[0]
@@ -144,7 +144,7 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 	// Extract and update storage information
 	storageInfo, err := m.extractStorageInfo(currentEvent)
 	if err != nil {
-		log.Printf("Warning: Failed to extract storage info for user %s: %v", npub, err)
+		logging.Infof("Warning: Failed to extract storage info for user %s: %v", npub, err)
 		return nil // Don't fail the operation
 	}
 
@@ -152,7 +152,7 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 
 	// Check storage limits but only log warnings for unlimited storage
 	if !storageInfo.IsUnlimited && newUsedBytes > storageInfo.TotalBytes {
-		log.Printf("Warning: Storage limit exceeded for user %s: would use %d of %d bytes", npub, newUsedBytes, storageInfo.TotalBytes)
+		logging.Infof("Warning: Storage limit exceeded for user %s: would use %d of %d bytes", npub, newUsedBytes, storageInfo.TotalBytes)
 		// In development, we'll allow this but log the warning
 		// In production, you might want to enforce this limit
 	}
@@ -170,11 +170,11 @@ func (m *SubscriptionManager) UpdateStorageUsage(npub string, newBytes int64) er
 		Npub:    npub,
 		Address: address,
 	}, activeSubscription, expirationTime, &storageInfo); err != nil {
-		log.Printf("Warning: Failed to update NIP-88 event for user %s: %v", npub, err)
+		logging.Infof("Warning: Failed to update NIP-88 event for user %s: %v", npub, err)
 		return nil // Don't fail the operation
 	}
 
-	log.Printf("Successfully updated storage usage for user %s: +%d bytes (total: %d)", npub, newBytes, newUsedBytes)
+	logging.Infof("Successfully updated storage usage for user %s: +%d bytes (total: %d)", npub, newBytes, newUsedBytes)
 	return nil
 }
 
@@ -292,7 +292,7 @@ func (m *SubscriptionManager) RequestNewAddresses(count int) error {
 		return fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	log.Printf("Successfully requested generation of %d addresses", count)
+	logging.Infof("Successfully requested generation of %d addresses", count)
 	return nil
 }
 
@@ -304,7 +304,7 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 		return event, nil
 	}
 
-	log.Printf("Checking kind 11888 event for updates based on free tier status")
+	logging.Infof("Checking kind 11888 event for updates based on free tier status")
 
 	// Get the pubkey from the p tag
 	var pubkey string
@@ -362,7 +362,7 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	// Load allowed users settings to check last update timestamp
 	var allowedUsersSettings types.AllowedUsersSettings
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
-		log.Printf("Error loading allowed users settings: %v", err)
+		logging.Infof("Error loading allowed users settings: %v", err)
 		return event, nil // Return original event if we can't get settings
 	}
 
@@ -372,7 +372,7 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 
 	// If event is newer than the last settings change, it's already up to date
 	if allowedUsersSettings.LastUpdated > 0 && eventCreatedAt.After(settingsUpdatedAt) {
-		log.Printf("Event was created/updated after the last settings change, no update needed")
+		logging.Infof("Event was created/updated after the last settings change, no update needed")
 		return event, nil
 	}
 
@@ -395,16 +395,16 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	if expectedTier == nil {
 		// User should not have access in current mode
 		if allowedUsersSettings.Mode == "exclusive" {
-			log.Printf("User %s no longer in allowed lists for exclusive mode, but keeping existing allocation", pubkey)
+			logging.Infof("User %s no longer in allowed lists for exclusive mode, but keeping existing allocation", pubkey)
 			// Don't remove existing allocations, just don't give new ones
 		}
 	} else if expectedTier.Name != activeTier {
 		// Tier has changed
-		log.Printf("Expected tier changed for %s: %s -> %s", pubkey, activeTier, expectedTier.Name)
+		logging.Infof("Expected tier changed for %s: %s -> %s", pubkey, activeTier, expectedTier.Name)
 		needsUpdate = true
 	} else if status == "inactive" || storageInfo.TotalBytes == 0 {
 		// User should have active allocation but doesn't
-		log.Printf("User %s should have active %s tier but status is %s", pubkey, expectedTier.Name, status)
+		logging.Infof("User %s should have active %s tier but status is %s", pubkey, expectedTier.Name, status)
 		needsUpdate = true
 	}
 
@@ -449,14 +449,14 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 		return event, fmt.Errorf("failed to store updated event: %v", err)
 	}
 
-	log.Printf("Successfully updated kind 11888 event for pubkey %s", pubkey)
+	logging.Infof("Successfully updated kind 11888 event for pubkey %s", pubkey)
 	return updatedEvent, nil
 }
 
 // UpdateUserSubscriptionFromDatabase updates a user's kind 11888 event by looking up their tier from the database
 // This follows the correct flow: DB lookup -> config lookup -> update event
 func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) error {
-	log.Printf("Updating kind 11888 event for npub %s (looking up tier from database)", npub)
+	logging.Infof("Updating kind 11888 event for npub %s (looking up tier from database)", npub)
 
 	// Load allowed users settings to get tier configuration
 	var allowedUsersSettings types.AllowedUsersSettings
@@ -489,7 +489,7 @@ func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) er
 		return fmt.Errorf("user %s has no tier assigned", npub)
 	}
 
-	log.Printf("Found user %s with assigned tier: %s", npub, allowedUser.Tier)
+	logging.Infof("Found user %s with assigned tier: %s", npub, allowedUser.Tier)
 
 	// Find the tier configuration that matches the user's assigned tier
 	var activeTier *types.SubscriptionTier
@@ -504,7 +504,7 @@ func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) er
 		return fmt.Errorf("tier %s not found in configuration", allowedUser.Tier)
 	}
 
-	log.Printf("Found tier configuration: Name=%s, MonthlyLimitBytes=%d", activeTier.Name, activeTier.MonthlyLimitBytes)
+	logging.Infof("Found tier configuration: Name=%s, MonthlyLimitBytes=%d", activeTier.Name, activeTier.MonthlyLimitBytes)
 
 	// Create subscriber info
 	subscriber := &types.Subscriber{
@@ -532,18 +532,18 @@ func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) er
 		existingStorageInfo, err := m.extractStorageInfo(existingEvents[0])
 		if err == nil {
 			currentUsedBytes = existingStorageInfo.UsedBytes
-			log.Printf("Preserving current used storage for %s: %d bytes", npub, currentUsedBytes)
+			logging.Infof("Preserving current used storage for %s: %d bytes", npub, currentUsedBytes)
 		} else {
-			log.Printf("Warning: Could not extract existing storage info for %s: %v", npub, err)
+			logging.Infof("Warning: Could not extract existing storage info for %s: %v", npub, err)
 		}
 	} else {
-		log.Printf("No existing kind 11888 event found for %s, starting with 0 used bytes", npub)
+		logging.Infof("No existing kind 11888 event found for %s, starting with 0 used bytes", npub)
 	}
 
 	// Create storage info from tier - check for unlimited storage
 	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
 
-	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t, preservedUsedBytes=%d",
+	logging.Infof("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t, preservedUsedBytes=%d",
 		npub, activeTier.Name, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited, currentUsedBytes)
 
 	storageInfo := &StorageInfo{
@@ -560,7 +560,7 @@ func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) er
 // UpdateNpubSubscriptionEvent updates the kind 11888 event for a specific npub with new tier information
 // This is called when access control lists are updated and we need to sync the kind 11888 events
 func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string) error {
-	log.Printf("Updating kind 11888 event for npub %s with tier %s", npub, tierName)
+	logging.Infof("Updating kind 11888 event for npub %s with tier %s", npub, tierName)
 
 	// Load allowed users settings to get tier configuration
 	var allowedUsersSettings types.AllowedUsersSettings
@@ -596,7 +596,7 @@ func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string)
 	// Create storage info from tier - check for unlimited storage
 	isUnlimited := activeTier.MonthlyLimitBytes == 0 || allowedUsersSettings.Mode == "personal"
 
-	log.Printf("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t",
+	logging.Infof("[DEBUG] Creating storage info for npub %s: tier=%s, monthlyLimitBytes=%d, mode=%s, isUnlimited=%t",
 		npub, tierName, activeTier.MonthlyLimitBytes, allowedUsersSettings.Mode, isUnlimited)
 
 	storageInfo := &StorageInfo{
@@ -621,7 +621,7 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 	// Load allowed users settings to check if this is a free tier
 	var allowedUsersSettings types.AllowedUsersSettings
 	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
-		log.Printf("Error loading allowed users settings: %v", err)
+		logging.Infof("Error loading allowed users settings: %v", err)
 		return
 	}
 
@@ -645,14 +645,14 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 	}
 
 	if isFree {
-		log.Printf("Skipping paid subscriber record update for free tier: %s", tierName)
+		logging.Infof("Skipping paid subscriber record update for free tier: %s", tierName)
 		return
 	}
 
 	// Try to get the existing subscriber
 	existingSubscriber, err := m.store.GetStatsStore().GetPaidSubscriberByNpub(npub)
 	if err != nil {
-		log.Printf("Warning: error checking for existing paid subscriber record: %v", err)
+		logging.Infof("Warning: error checking for existing paid subscriber record: %v", err)
 		return
 	}
 
@@ -675,9 +675,9 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 	}
 
 	if updateErr != nil {
-		log.Printf("Warning: failed to update paid subscriber record: %v", updateErr)
+		logging.Infof("Warning: failed to update paid subscriber record: %v", updateErr)
 	} else {
-		log.Printf("Successfully updated paid subscriber record for %s", npub)
+		logging.Infof("Successfully updated paid subscriber record for %s", npub)
 	}
 }
 
@@ -695,7 +695,7 @@ func (m *SubscriptionManager) isUserInAllowedLists(pubkey string) bool {
 func CheckWalletServiceHealth() (bool, error) {
 	// Get API key from config
 	apiKey := viper.GetString("external_services.wallet.key")
-	log.Printf("Wallet health check: API key configured: %t", len(apiKey) > 0)
+	logging.Infof("Wallet health check: API key configured: %t", len(apiKey) > 0)
 
 	// Generate JWT token using API key
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -707,7 +707,7 @@ func CheckWalletServiceHealth() (bool, error) {
 	// Sign token with API key
 	tokenString, err := token.SignedString([]byte(apiKey))
 	if err != nil {
-		log.Printf("Wallet health check: Failed to generate token: %v", err)
+		logging.Infof("Wallet health check: Failed to generate token: %v", err)
 		return false, fmt.Errorf("failed to generate token: %v", err)
 	}
 
@@ -718,7 +718,7 @@ func CheckWalletServiceHealth() (bool, error) {
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		log.Printf("Wallet health check: Failed to marshal request: %v", err)
+		logging.Infof("Wallet health check: Failed to marshal request: %v", err)
 		return false, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
@@ -731,12 +731,12 @@ func CheckWalletServiceHealth() (bool, error) {
 
 	walletAddress := config.GetExternalURL("wallet")
 	healthURL := walletAddress + "/health"
-	log.Printf("Wallet health check: Attempting request to %s", healthURL)
+	logging.Infof("Wallet health check: Attempting request to %s", healthURL)
 
 	// Create POST request
 	req, err := http.NewRequest("POST", healthURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Printf("Wallet health check: Failed to create request: %v", err)
+		logging.Infof("Wallet health check: Failed to create request: %v", err)
 		return false, fmt.Errorf("failed to create request: %v", err)
 	}
 
@@ -747,7 +747,7 @@ func CheckWalletServiceHealth() (bool, error) {
 	req.Header.Set("X-Timestamp", timestamp)
 	req.Header.Set("X-Signature", signature)
 
-	log.Printf("Wallet health check: Request headers set, sending request...")
+	logging.Infof("Wallet health check: Request headers set, sending request...")
 
 	// Send request
 	client := &http.Client{
@@ -755,18 +755,18 @@ func CheckWalletServiceHealth() (bool, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Wallet health check: Request failed: %v", err)
+		logging.Infof("Wallet health check: Request failed: %v", err)
 		return false, fmt.Errorf("wallet service unreachable: %v", err)
 	}
 	defer resp.Body.Close()
 
-	log.Printf("Wallet health check: Received response with status: %d (%s)", resp.StatusCode, resp.Status)
+	logging.Infof("Wallet health check: Received response with status: %d (%s)", resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		// Read response body for more details
 		body := make([]byte, 1024)
 		n, _ := resp.Body.Read(body)
-		log.Printf("Wallet health check: Non-200 response body: %s", string(body[:n]))
+		logging.Infof("Wallet health check: Non-200 response body: %s", string(body[:n]))
 		return false, fmt.Errorf("wallet service returned status: %v", resp.Status)
 	}
 
@@ -780,17 +780,17 @@ func CheckWalletServiceHealth() (bool, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&healthData); err != nil {
-		log.Printf("Warning: could not parse wallet health response: %v", err)
+		logging.Infof("Warning: could not parse wallet health response: %v", err)
 		// Still return true as the wallet responded with 200
 		return true, nil
 	}
 
 	// Log wallet status details
-	log.Printf("Wallet health check: status=%s, locked=%v, synced=%v, peers=%d",
+	logging.Infof("Wallet health check: status=%s, locked=%v, synced=%v, peers=%d",
 		healthData.Status, healthData.WalletLocked, healthData.ChainSynced, healthData.PeerCount)
 
 	// Only check if wallet is responding (status 200)
 	// The other fields are informational only
-	log.Printf("Wallet health check: SUCCESS - wallet is responding")
+	logging.Infof("Wallet health check: SUCCESS - wallet is responding")
 	return true, nil
 }
