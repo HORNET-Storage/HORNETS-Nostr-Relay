@@ -4,7 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -129,6 +132,77 @@ func setDefaults() {
 			"unlimited":           false,
 		},
 	})
+
+	// NIP mappings defaults - maps Nostr kinds to their corresponding NIP numbers
+	viper.SetDefault("nip_mappings", map[string]string{
+		// NIP-01: Basic Protocol
+		"0": "1", // Profile metadata
+		"1": "1", // Short text note
+		"2": "1", // Recommend relay (deprecated)
+
+		// NIP-02: Contact List
+		"3": "2", // Contact list
+
+		// NIP-09: Event Deletion
+		"5": "9", // Deletion request
+
+		// NIP-18: Reposts
+		"6":  "18", // Repost
+		"16": "18", // Generic repost
+
+		// NIP-25: Reactions
+		"7": "25", // Reaction
+
+		// NIP-58: Badges
+		"8":     "58", // Badge award
+		"30008": "58", // Profile badge
+		"30009": "58", // Badge definition
+
+		// NIP-23: Long-form Content
+		"30023": "23", // Long-form content
+
+		// NIP-51: Lists
+		"10000": "51", // Mute list
+		"10001": "51", // Pin list
+		"30000": "51", // Categorized people list
+
+		// NIP-56: Reporting
+		"1984": "56", // Reporting
+
+		// NIP-57: Lightning Zaps
+		"9735": "57", // Zap receipt
+
+		// NIP-65: Relay List Metadata
+		"10002": "65", // Relay list metadata
+
+		// NIP-84: Highlights
+		"9802": "84", // Highlight
+
+		// NIP-116: Event Paths
+		"30079": "116", // Event paths
+
+		// NIP-117: Double Ratchet DM
+		"1060": "117", // Message event
+
+		// NIP-118: Double Ratchet DM Invite
+		"30078": "118", // Invite event
+
+		// Custom HORNETS NIPs
+		"117":   "888", // Blossom blob
+		"10411": "888", // Subscription info
+		"11888": "888", // Custom HORNETS protocol
+		"555":   "555", // X-Nostr bridge
+
+		// Additional kinds
+		"10010": "51",  // Additional list type
+		"10011": "51",  // Additional list type
+		"10022": "51",  // Additional list type
+		"9803":  "84",  // Additional highlight type
+		"22242": "888", // Custom HORNETS kind
+		"19841": "888", // Payment subscription
+		"19842": "888", // Payment subscription
+		"19843": "888", // Payment subscription
+	})
 }
 
 // GetConfig returns the configuration struct marshaled from viper
@@ -221,4 +295,112 @@ func GenerateRandomAPIKey() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+// GetNIPMappings returns the current NIP mappings from configuration
+func GetNIPMappings() map[string]string {
+	return viper.GetStringMapString("nip_mappings")
+}
+
+// UpdateNIPMapping updates or adds a single NIP mapping
+func UpdateNIPMapping(kind, nip string) error {
+	mappings := GetNIPMappings()
+	if mappings == nil {
+		mappings = make(map[string]string)
+	}
+	mappings[kind] = nip
+	viper.Set("nip_mappings", mappings)
+	return SaveConfig()
+}
+
+// RemoveNIPMapping removes a NIP mapping for a specific kind
+func RemoveNIPMapping(kind string) error {
+	mappings := GetNIPMappings()
+	if mappings == nil {
+		return nil // Nothing to remove
+	}
+	delete(mappings, kind)
+	viper.Set("nip_mappings", mappings)
+	return SaveConfig()
+}
+
+
+// GetNIPForKind returns the NIP number for a given kind by reading directly from config
+func GetNIPForKind(kind int) (int, error) {
+	kindStr := strconv.Itoa(kind)
+
+	// Read mappings directly from config
+	mappings := GetNIPMappings()
+	if len(mappings) == 0 {
+		return 0, fmt.Errorf("no NIP mappings found in configuration")
+	}
+
+	nipStr, exists := mappings[kindStr]
+	if !exists {
+		return 0, fmt.Errorf("no NIP mapping found for kind %d", kind)
+	}
+
+	nip, err := strconv.Atoi(nipStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid NIP number for kind %d: %v", kind, err)
+	}
+
+	return nip, nil
+}
+
+// GetSupportedNIPsFromKinds returns unique NIP numbers for given kinds
+func GetSupportedNIPsFromKinds(kinds []string) ([]int, error) {
+	nipSet := make(map[int]struct{})
+
+	// Always include system-critical NIPs
+	systemCriticalKinds := []int{555, 10411, 11888}
+	for _, kind := range systemCriticalKinds {
+		if nip, err := GetNIPForKind(kind); err == nil {
+			nipSet[nip] = struct{}{}
+		}
+	}
+
+	// Process user-configured kinds
+	for _, kindStr := range kinds {
+		// Remove "kind" prefix if present
+		kindStr = strings.TrimPrefix(kindStr, "kind")
+
+		kind, err := strconv.Atoi(kindStr)
+		if err != nil {
+			log.Printf("Warning: Invalid kind number '%s': %v", kindStr, err)
+			continue
+		}
+
+		nip, err := GetNIPForKind(kind)
+		if err != nil {
+			log.Printf("Warning: No NIP mapping found for kind %d: %v", kind, err)
+			continue
+		}
+
+		nipSet[nip] = struct{}{}
+	}
+
+	// Convert set to sorted slice
+	nips := make([]int, 0, len(nipSet))
+	for nip := range nipSet {
+		nips = append(nips, nip)
+	}
+	sort.Ints(nips)
+
+	return nips, nil
+}
+
+// AddKindToNIPMapping adds or updates a kind-to-NIP mapping
+func AddKindToNIPMapping(kind int, nip int) error {
+	kindStr := strconv.Itoa(kind)
+	nipStr := strconv.Itoa(nip)
+
+	err := UpdateNIPMapping(kindStr, nipStr)
+	if err != nil {
+		return fmt.Errorf("failed to add kind-to-NIP mapping: %v", err)
+	}
+
+	log.Printf("Added kind-to-NIP mapping: kind=%d, nip=%d", kind, nip)
+
+	return nil
 }
