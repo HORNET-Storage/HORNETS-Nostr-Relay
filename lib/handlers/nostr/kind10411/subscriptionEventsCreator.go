@@ -15,6 +15,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/viper"
 )
 
@@ -30,7 +31,7 @@ const (
 type RelayInfo struct {
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description,omitempty"`
-	Pubkey            string                 `json:"pubkey"`
+	Pubkey            string                 `json:"-"`                     // Exclude pubkey from JSON
 	Contact           string                 `json:"contact"`
 	Icon              string                 `json:"icon,omitempty"`
 	SupportedNIPs     []int                  `json:"supported_nips"`
@@ -115,12 +116,22 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 		})
 	}
 
+	// Format contact field as "email | npub"
+	email := viper.GetString("relay.contact")
+	publicKeyHex := viper.GetString("relay.public_key")
+	contact := email
+	if email != "" && publicKeyHex != "" {
+		if npub, err := nip19.EncodePublicKey(publicKeyHex); err == nil {
+			contact = fmt.Sprintf("%s | %s", email, npub)
+		}
+	}
+
 	// Get relay info
 	relayInfo := RelayInfo{
 		Name:              viper.GetString("relay.name"),
 		Description:       viper.GetString("relay.description"),
 		Pubkey:            viper.GetString("relay.public_key"),
-		Contact:           viper.GetString("relay.contact"),
+		Contact:           contact,
 		Icon:              viper.GetString("relay.icon"),
 		SupportedNIPs:     viper.GetIntSlice("relay.supported_nips"),
 		Software:          viper.GetString("relay.software"),

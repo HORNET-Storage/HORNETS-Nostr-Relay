@@ -94,6 +94,12 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}
 
+	// Initialize kind-to-NIP mappings
+	err = store.InitializeKindToNIPMappings()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize kind-to-NIP mappings: %v", err)
+	}
+
 	return store, nil
 }
 
