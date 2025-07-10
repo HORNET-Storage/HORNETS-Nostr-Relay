@@ -184,21 +184,31 @@ func setDefaults() {
 		// NIP-117: Double Ratchet DM
 		"1060": "117", // Message event
 
-		// NIP-118: Double Ratchet DM Invite
-		"30078": "118", // Invite event
+		// NIP-78: Application-specific Data
+		"30078": "78", // Application-specific Data
+
+		// NIP-94: File Metadata
+		"1063": "94", // File metadata
 
 		// Custom HORNETS NIPs
 		"117":   "888", // Blossom blob
 		"10411": "888", // Subscription info
 		"11888": "888", // Custom HORNETS protocol
+		"11011": "888", // Custom HORNETS
 		"555":   "555", // X-Nostr bridge
+
+		// Custom kinds
+		"9372":  "888", // Custom application
+		"9373":  "888", // Custom application
+		"16629": "888", // Custom HORNETS
+		"16630": "888", // Custom HORNETS
 
 		// Additional kinds
 		"10010": "51",  // Additional list type
 		"10011": "51",  // Additional list type
 		"10022": "51",  // Additional list type
 		"9803":  "84",  // Additional highlight type
-		"22242": "888", // Custom HORNETS kind
+		"22242": "42", // Client Authentication
 		"19841": "888", // Payment subscription
 		"19842": "888", // Payment subscription
 		"19843": "888", // Payment subscription
