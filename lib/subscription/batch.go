@@ -134,6 +134,25 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
 
+	currentMode := strings.ToLower(allowedUsersSettings.Mode)
+	
+	// Check if user should be cleaned up in only-me or invite-only modes
+	if currentMode == "only-me" || currentMode == "invite-only" {
+		shouldDelete, err := m.shouldDeleteUserEvent(pubkey, currentMode, &allowedUsersSettings)
+		if err != nil {
+			logging.Infof("Error checking if user %s should be deleted: %v", pubkey, err)
+			// Continue with normal processing if we can't determine
+		} else if shouldDelete {
+			// Delete the event for unauthorized users
+			if err := m.deleteSubscriptionEvent(event); err != nil {
+				logging.Infof("Error deleting subscription event for unauthorized user %s: %v", pubkey, err)
+			} else {
+				logging.Infof("Deleted kind 11888 event for unauthorized user %s in %s mode", pubkey, currentMode)
+			}
+			return nil // Skip further processing for deleted events
+		}
+	}
+
 	// Check if relay_mode tag already exists and is current
 	currentRelayMode := getTagValue(event.Tags, "relay_mode")
 	expectedRelayMode := m.getRelayMode()
@@ -399,6 +418,38 @@ func (m *SubscriptionManager) ensureSufficientAddresses(usersNeedingAddresses in
 
 	// If we've exhausted all retries, return an error
 	return fmt.Errorf("timeout waiting for sufficient Bitcoin addresses after %d attempts (5 minutes)", maxRetries)
+}
+
+// shouldDeleteUserEvent checks if a user's subscription event should be deleted based on current access control
+func (m *SubscriptionManager) shouldDeleteUserEvent(pubkey string, mode string, _ *types.AllowedUsersSettings) (bool, error) {
+	switch mode {
+	case "only-me":
+		// Only the relay owner should have access in only-me mode
+		if !m.isRelayOwner(pubkey) {
+			return true, nil
+		}
+		return false, nil
+		
+	case "invite-only":
+		// Check if user is in the allowed users list
+		if !m.isUserInAllowedLists(pubkey) {
+			return true, nil
+		}
+		return false, nil
+		
+	default:
+		// For other modes, don't delete
+		return false, nil
+	}
+}
+
+// deleteSubscriptionEvent deletes a kind 11888 subscription event from the database
+func (m *SubscriptionManager) deleteSubscriptionEvent(event *nostr.Event) error {
+	// Use the store's delete method to remove the event
+	if err := m.store.DeleteEvent(event.ID); err != nil {
+		return fmt.Errorf("failed to delete event %s: %v", event.ID, err)
+	}
+	return nil
 }
 
 // isFreeMode checks if a mode is a free mode
