@@ -13,7 +13,7 @@ rm -rf panel-source
 
 # Clone fresh copy from local path
 echo "📥 Cloning latest panel source..."
-git clone /Users/siphiwetapisi/HORNETS-Relay-Panel ./panel-source
+git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-source
 
 # Navigate to panel source directory
 cd panel-source
