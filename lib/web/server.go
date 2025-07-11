@@ -225,6 +225,11 @@ func StartServer(store stores.Store) error {
 		return settings.GetRelayCount(c, store)
 	})
 
+	// Relay icon upload route (secured with JWT)
+	secured.Post("/relay/icon", func(c *fiber.Ctx) error {
+		return settings.UploadRelayIcon(c, store)
+	})
+
 	// ================================
 	// MODERATION ROUTES
 	// ================================

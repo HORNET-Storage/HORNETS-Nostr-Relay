@@ -325,9 +325,9 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 					logging.Infof("DEBUG: Unexpected kind_whitelist type: %T", kindWhitelistInterface)
 				}
 				
-				// Calculate supported NIPs from enabled kinds using BadgerDB
+				// Calculate supported NIPs from enabled kinds using config
 				logging.Infof("DEBUG: About to calculate NIPs for enabled kinds: %v", enabledKinds)
-				supportedNIPs, err := store.GetSupportedNIPsFromKinds(enabledKinds)
+				supportedNIPs, err := config.GetSupportedNIPsFromKinds(enabledKinds)
 				if err != nil {
 					logging.Infof("Error calculating supported NIPs from kinds: %v", err)
 				} else {

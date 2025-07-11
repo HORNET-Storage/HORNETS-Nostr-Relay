@@ -20,6 +20,7 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -91,12 +92,6 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.StatsDatabase, err = statistics_gorm_sqlite.InitStore()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
-	}
-
-	// Initialize kind-to-NIP mappings
-	err = store.InitializeKindToNIPMappings()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize kind-to-NIP mappings: %v", err)
 	}
 
 	return store, nil
