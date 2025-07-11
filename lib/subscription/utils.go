@@ -10,8 +10,8 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
-	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
@@ -40,8 +40,8 @@ func normalizePubkey(pubkey string) (hex string, npub string, err error) {
 // getRelayMode reads the current relay mode from configuration
 func (m *SubscriptionManager) getRelayMode() string {
 	// Load allowed users settings from config to get current mode
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		logging.Infof("[DEBUG] Warning: could not load allowed_users settings: %v", err)
 		return "unknown"
 	}

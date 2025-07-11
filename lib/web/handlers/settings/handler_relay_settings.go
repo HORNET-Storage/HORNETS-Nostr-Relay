@@ -16,6 +16,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -304,13 +305,13 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	if eventFilteringInterface, exists := settings["event_filtering"]; exists {
 		eventFilteringUpdated = true
 		logging.Info("Event filtering settings updated, will recalculate supported NIPs...")
-		
+
 		// Extract kind_whitelist from event_filtering
 		if eventFilteringMap, ok := eventFilteringInterface.(map[string]interface{}); ok {
 			if kindWhitelistInterface, exists := eventFilteringMap["kind_whitelist"]; exists {
 				// kind_whitelist is a slice/array, not a map
 				var enabledKinds []string
-				
+
 				// Handle both slice and interface slice formats
 				switch kindWhitelist := kindWhitelistInterface.(type) {
 				case []string:
@@ -324,7 +325,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 				default:
 					logging.Infof("DEBUG: Unexpected kind_whitelist type: %T", kindWhitelistInterface)
 				}
-				
+
 				// Calculate supported NIPs from enabled kinds using config
 				logging.Infof("DEBUG: About to calculate NIPs for enabled kinds: %v", enabledKinds)
 				supportedNIPs, err := config.GetSupportedNIPsFromKinds(enabledKinds)
@@ -341,7 +342,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 						relayMap["supported_nips"] = supportedNIPs
 						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
 					}
-					
+
 					// Also update viper directly to ensure it's saved to config.yaml
 					viper.Set("relay.supported_nips", supportedNIPs)
 					logging.Infof("Updated viper relay.supported_nips: %v", supportedNIPs)
@@ -366,9 +367,33 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// If allowed_users settings were updated, trigger event regeneration
+	// Refresh the cached configuration
+	if err := config.RefreshConfig(); err != nil {
+		logging.Infof("Warning: Failed to refresh config cache: %v", err)
+		// Don't fail the request, just log the warning
+	}
+
+	// If allowed_users settings were updated, update access control and trigger event regeneration
 	if allowedUsersUpdated {
-		logging.Info("Allowed users settings updated, triggering event regeneration...")
+		logging.Info("Allowed users settings updated, updating access control and triggering event regeneration...")
+
+		// Update the access control settings immediately
+		if allowedUsersInterface, ok := settings["allowed_users"].(map[string]interface{}); ok {
+			var newAllowedUsersSettings types.AllowedUsersSettings
+
+			// Marshal to JSON and back to properly convert types
+			jsonData, err := json.Marshal(allowedUsersInterface)
+			if err == nil {
+				if err := json.Unmarshal(jsonData, &newAllowedUsersSettings); err == nil {
+					// Update the global access control
+					if err := websocket.UpdateAccessControlSettings(&newAllowedUsersSettings); err != nil {
+						logging.Infof("Warning: Failed to update access control settings: %v", err)
+					} else {
+						logging.Info("Access control settings updated successfully")
+					}
+				}
+			}
+		}
 
 		// Schedule batch update of kind 11888 events after a short delay
 		// This allows for multiple rapid setting changes to be batched together
@@ -480,6 +505,12 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save setting",
 		})
+	}
+
+	// Refresh the cached configuration
+	if err := config.RefreshConfig(); err != nil {
+		logging.Infof("Warning: Failed to refresh config cache: %v", err)
+		// Don't fail the request, just log the warning
 	}
 
 	return c.JSON(fiber.Map{

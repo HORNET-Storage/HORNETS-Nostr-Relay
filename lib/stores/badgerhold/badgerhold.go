@@ -376,7 +376,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		authorsAsInterface := make([]interface{}, len(filter.Authors))
 		for i, author := range filter.Authors {
 			authorsAsInterface[i] = author
-			logging.Infof("Searching for authors: " + author)
 		}
 
 		if first {
