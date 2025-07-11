@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -298,6 +299,57 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		logging.Info("Relay settings updated, will regenerate kind 10411 event...")
 	}
 
+	// Check if event_filtering settings are being updated (affects kind_whitelist and supported_nips)
+	eventFilteringUpdated := false
+	if eventFilteringInterface, exists := settings["event_filtering"]; exists {
+		eventFilteringUpdated = true
+		logging.Info("Event filtering settings updated, will recalculate supported NIPs...")
+		
+		// Extract kind_whitelist from event_filtering
+		if eventFilteringMap, ok := eventFilteringInterface.(map[string]interface{}); ok {
+			if kindWhitelistInterface, exists := eventFilteringMap["kind_whitelist"]; exists {
+				// kind_whitelist is a slice/array, not a map
+				var enabledKinds []string
+				
+				// Handle both slice and interface slice formats
+				switch kindWhitelist := kindWhitelistInterface.(type) {
+				case []string:
+					enabledKinds = kindWhitelist
+				case []interface{}:
+					for _, kind := range kindWhitelist {
+						if kindStr, ok := kind.(string); ok {
+							enabledKinds = append(enabledKinds, kindStr)
+						}
+					}
+				default:
+					logging.Infof("DEBUG: Unexpected kind_whitelist type: %T", kindWhitelistInterface)
+				}
+				
+				// Calculate supported NIPs from enabled kinds using BadgerDB
+				logging.Infof("DEBUG: About to calculate NIPs for enabled kinds: %v", enabledKinds)
+				supportedNIPs, err := store.GetSupportedNIPsFromKinds(enabledKinds)
+				if err != nil {
+					logging.Infof("Error calculating supported NIPs from kinds: %v", err)
+				} else {
+					logging.Infof("DEBUG: Successfully calculated supported NIPs: %v", supportedNIPs)
+					// Update supported_nips in relay settings (create relay section if it doesn't exist)
+					if _, exists := settings["relay"]; !exists {
+						settings["relay"] = make(map[string]interface{})
+						logging.Infof("DEBUG: Created relay section in settings")
+					}
+					if relayMap, ok := settings["relay"].(map[string]interface{}); ok {
+						relayMap["supported_nips"] = supportedNIPs
+						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
+					}
+					
+					// Also update viper directly to ensure it's saved to config.yaml
+					viper.Set("relay.supported_nips", supportedNIPs)
+					logging.Infof("Updated viper relay.supported_nips: %v", supportedNIPs)
+				}
+			}
+		}
+	}
+
 	// Update each setting
 	for key, value := range settings {
 		logging.Infof("Setting %s = %v (type: %T)", key, value, value)
@@ -323,18 +375,26 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		subscription.ScheduleBatchUpdateAfter(5 * time.Second)
 	}
 
-	// If either allowed_users or relay settings were updated, regenerate kind 10411 event
-	if allowedUsersUpdated || relaySettingsUpdated {
+	// If either allowed_users, relay settings, or event filtering were updated, regenerate kind 10411 event
+	if allowedUsersUpdated || relaySettingsUpdated || eventFilteringUpdated {
 		// Regenerate kind 10411 event immediately in a goroutine
 		if store != nil {
 			go func() {
 				var reason string
-				if allowedUsersUpdated && relaySettingsUpdated {
-					reason = "subscription tier and relay settings changes"
-				} else if allowedUsersUpdated {
-					reason = "subscription tier changes"
+				var reasons []string
+				if allowedUsersUpdated {
+					reasons = append(reasons, "subscription tier")
+				}
+				if relaySettingsUpdated {
+					reasons = append(reasons, "relay settings")
+				}
+				if eventFilteringUpdated {
+					reasons = append(reasons, "event filtering")
+				}
+				if len(reasons) > 0 {
+					reason = strings.Join(reasons, " and ") + " changes"
 				} else {
-					reason = "relay settings changes"
+					reason = "settings changes"
 				}
 
 				logging.Infof("Regenerating kind 10411 event due to %s...", reason)

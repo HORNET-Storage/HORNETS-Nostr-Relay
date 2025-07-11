@@ -36,6 +36,7 @@ demo-config.json
 /temp-*
 
 /memory-bank
+/panel-source
 .clinerules
 # Demo binaries
 hornet-demo-generator

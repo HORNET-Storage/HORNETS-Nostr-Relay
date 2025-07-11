@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip19"
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
@@ -179,12 +180,33 @@ func handleRelayInfoRequests(c *fiber.Ctx) error {
 }
 
 func GetRelayInfo() NIP11RelayInfo {
+	// Format contact as "email | npub"
+	var contact string
+	email := viper.GetString("relay.contact")
+	publicKeyHex := viper.GetString("relay.public_key")
+	
+	if email != "" && publicKeyHex != "" {
+		// Convert hex public key to npub format
+		if npub, err := nip19.EncodePublicKey(publicKeyHex); err == nil {
+			contact = fmt.Sprintf("%s | %s", email, npub)
+		} else {
+			contact = email // fallback to just email if conversion fails
+		}
+	} else if email != "" {
+		contact = email
+	} else if publicKeyHex != "" {
+		// Convert hex public key to npub format
+		if npub, err := nip19.EncodePublicKey(publicKeyHex); err == nil {
+			contact = npub
+		}
+	}
+
 	// These values are set in main.go init() for backward compatibility
 	relayInfo := NIP11RelayInfo{
 		Name:          viper.GetString("relay.name"),
 		Description:   viper.GetString("relay.description"),
-		Pubkey:        viper.GetString("relay.public_key"),
-		Contact:       viper.GetString("relay.contact"),
+		Pubkey:        publicKeyHex, // Keep for internal use, excluded from JSON
+		Contact:       contact,
 		Icon:          viper.GetString("relay.icon"),
 		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
 		Software:      viper.GetString("relay.software"),

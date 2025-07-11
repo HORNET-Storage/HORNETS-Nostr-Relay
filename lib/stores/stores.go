@@ -70,6 +70,11 @@ type Store interface {
 	AllocateBitcoinAddress(npub string) (*types.Address, error)
 	SaveAddress(addr *types.Address) error
 	AllocateAddress() (*types.Address, error)
+
+	// NIP Mapping
+	GetNIPForKind(kind int) (int, error)
+	GetSupportedNIPsFromKinds(kinds []string) ([]int, error)
+	AddKindToNIPMapping(kind int, nip int) error
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool, temp bool) (*types.DagData, error) {
