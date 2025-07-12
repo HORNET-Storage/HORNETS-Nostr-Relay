@@ -53,13 +53,12 @@ func NewSubscriptionManager(
 	relayDHTKey string,
 	tiers []types.SubscriptionTier,
 ) *SubscriptionManager {
-	logging.Infof("Initializing SubscriptionManager with %d tiers", len(tiers))
 
 	// Log each tier in detail for debugging
-	for i, tier := range tiers {
-		logging.Infof("DEBUG: Initial tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
-			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
-	}
+	// for i, tier := range tiers {
+	// 	logging.Infof("DEBUG: Initial tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
+	// 		i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
+	// }
 
 	// Validate tiers data
 	validTiers := make([]types.SubscriptionTier, 0)
@@ -69,8 +68,8 @@ func NewSubscriptionManager(
 			continue
 		}
 		validTiers = append(validTiers, tier)
-		logging.Infof("Validated tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
-			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
+		// logging.Infof("Validated tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d, Unlimited=%t",
+		// 	i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats, tier.Unlimited)
 	}
 
 	logging.Infof("SubscriptionManager initialized with %d valid tiers (from %d total)", len(validTiers), len(tiers))

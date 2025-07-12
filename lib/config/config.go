@@ -9,10 +9,23 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
+)
+
+var (
+	// Cache the configuration after first load
+	cachedConfig    atomic.Value // stores *types.Config
+	configLoadOnce  sync.Once
+	configLoadError error
+
+	// Only protect write operations
+	writeMutex sync.Mutex
 )
 
 // InitConfig initializes the global viper configuration
@@ -49,10 +62,330 @@ func InitConfig() error {
 		}
 	}
 
+	// Load initial configuration into cache
+	if err := reloadConfigCache(); err != nil {
+		return fmt.Errorf("failed to load initial config: %w", err)
+	}
+
+	// Watch for config file changes
+	viper.WatchConfig()
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		log.Printf("Config file changed: %s", e.Name)
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+
+		if err := reloadConfigCache(); err != nil {
+			log.Printf("Error reloading config cache after file change: %v", err)
+		} else {
+			log.Printf("Config cache refreshed after file change")
+		}
+	})
+
 	return nil
 }
 
-// setDefaults sets all default values
+// reloadConfigCache loads the configuration from viper into the cache
+func reloadConfigCache() error {
+	config := &types.Config{}
+	if err := viper.Unmarshal(config); err != nil {
+		return fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+	cachedConfig.Store(config)
+	return nil
+}
+
+// GetConfig returns the cached configuration struct
+// This is extremely fast as it only reads from atomic.Value
+func GetConfig() (*types.Config, error) {
+	// Try to get cached config
+	if cfg := cachedConfig.Load(); cfg != nil {
+		return cfg.(*types.Config), nil
+	}
+
+	// If not loaded yet, load it once
+	configLoadOnce.Do(func() {
+		configLoadError = reloadConfigCache()
+	})
+
+	if configLoadError != nil {
+		return nil, configLoadError
+	}
+
+	cfg := cachedConfig.Load()
+	if cfg == nil {
+		return nil, fmt.Errorf("configuration not loaded")
+	}
+
+	return cfg.(*types.Config), nil
+}
+
+// GetPort returns the calculated port for a service
+func GetPort(service string) int {
+	cfg, err := GetConfig()
+	if err != nil || cfg.Server.Port == 0 {
+		return 9000 // fallback
+	}
+
+	basePort := cfg.Server.Port
+	switch service {
+	case "hornets":
+		return basePort
+	case "nostr":
+		return basePort + 1
+	case "web":
+		return basePort + 2
+	default:
+		return basePort
+	}
+}
+
+// IsEnabled checks if a service/feature is enabled
+func IsEnabled(feature string) bool {
+	cfg, err := GetConfig()
+	if err != nil {
+		return false
+	}
+
+	switch feature {
+	case "demo":
+		return cfg.Server.Demo
+	case "web":
+		return cfg.Server.Web
+	case "nostr":
+		return cfg.Server.Nostr
+	case "hornets":
+		return cfg.Server.Hornets
+	default:
+		// For other features, we need to check viper
+		// This is rare, so the lock is acceptable
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+		return viper.GetBool(feature)
+	}
+}
+
+// GetDataDir returns the data directory path
+func GetDataDir() string {
+	cfg, err := GetConfig()
+	if err != nil || cfg.Server.DataPath == "" {
+		return "./data" // fallback
+	}
+	return cfg.Server.DataPath
+}
+
+// GetPath returns a path relative to the data directory
+func GetPath(subPath string) string {
+	return filepath.Join(GetDataDir(), subPath)
+}
+
+// SaveConfig saves the current configuration to file
+func SaveConfig() error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	err := viper.WriteConfig()
+	if err != nil {
+		return err
+	}
+
+	// Reload cache after save
+	return reloadConfigCache()
+}
+
+// UpdateConfig updates a configuration value and optionally saves it
+func UpdateConfig(key string, value interface{}, save bool) error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	viper.Set(key, value)
+
+	if save {
+		if err := viper.WriteConfig(); err != nil {
+			return err
+		}
+	}
+
+	// Reload cache after update
+	return reloadConfigCache()
+}
+
+// RefreshConfig forces a reload of the configuration cache
+// This should be called after external changes to the configuration (e.g., via web UI)
+func RefreshConfig() error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	return reloadConfigCache()
+}
+
+// GetAllowedUsersSettings returns the allowed users settings from cached config
+func GetAllowedUsersSettings() (*types.AllowedUsersSettings, error) {
+	cfg, err := GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	return &cfg.AllowedUsersSettings, nil
+}
+
+// GetExternalURL returns external service URLs
+func GetExternalURL(service string) string {
+	cfg, err := GetConfig()
+	if err != nil {
+		return ""
+	}
+
+	switch service {
+	case "ollama":
+		return cfg.ExternalServices.Ollama.URL
+	case "moderator":
+		return cfg.ExternalServices.Moderator.URL
+	case "wallet":
+		return cfg.ExternalServices.Wallet.URL
+	default:
+		return ""
+	}
+}
+
+// GenerateRandomAPIKey generates a random 32-byte hexadecimal key
+func GenerateRandomAPIKey() (string, error) {
+	bytes := make([]byte, 32) // 32 bytes = 256 bits
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// GetNIPMappings returns the current NIP mappings from configuration
+func GetNIPMappings() map[string]string {
+	// NIP mappings are stored separately in viper, not in the Config struct
+	// For read operations, we can safely read from viper with minimal locking
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	mappings := viper.GetStringMapString("nip_mappings")
+	if mappings == nil {
+		return make(map[string]string)
+	}
+	return mappings
+}
+
+// UpdateNIPMapping updates or adds a single NIP mapping
+func UpdateNIPMapping(kind, nip string) error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	mappings := viper.GetStringMapString("nip_mappings")
+	if mappings == nil {
+		mappings = make(map[string]string)
+	}
+	mappings[kind] = nip
+	viper.Set("nip_mappings", mappings)
+
+	if err := viper.WriteConfig(); err != nil {
+		return err
+	}
+
+	// Reload cache after update
+	return reloadConfigCache()
+}
+
+// RemoveNIPMapping removes a NIP mapping for a specific kind
+func RemoveNIPMapping(kind string) error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	mappings := viper.GetStringMapString("nip_mappings")
+	if mappings == nil {
+		return nil // Nothing to remove
+	}
+	delete(mappings, kind)
+	viper.Set("nip_mappings", mappings)
+
+	if err := viper.WriteConfig(); err != nil {
+		return err
+	}
+
+	// Reload cache after update
+	return reloadConfigCache()
+}
+
+// GetNIPForKind returns the NIP number for a given kind
+func GetNIPForKind(kind int) (int, error) {
+	kindStr := strconv.Itoa(kind)
+	mappings := GetNIPMappings()
+
+	nipStr, exists := mappings[kindStr]
+	if !exists {
+		return 0, fmt.Errorf("no NIP mapping found for kind %d", kind)
+	}
+
+	nip, err := strconv.Atoi(nipStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid NIP number for kind %d: %v", kind, err)
+	}
+
+	return nip, nil
+}
+
+// GetSupportedNIPsFromKinds returns unique NIP numbers for given kinds
+func GetSupportedNIPsFromKinds(kinds []string) ([]int, error) {
+	nipSet := make(map[int]struct{})
+
+	// Always include system-critical NIPs
+	systemCriticalKinds := []int{555, 10411, 11888}
+	for _, kind := range systemCriticalKinds {
+		if nip, err := GetNIPForKind(kind); err == nil {
+			nipSet[nip] = struct{}{}
+		}
+	}
+
+	// Process user-configured kinds
+	for _, kindStr := range kinds {
+		// Remove "kind" prefix if present
+		kindStr = strings.TrimPrefix(kindStr, "kind")
+
+		kind, err := strconv.Atoi(kindStr)
+		if err != nil {
+			log.Printf("Warning: Invalid kind number '%s': %v", kindStr, err)
+			continue
+		}
+
+		nip, err := GetNIPForKind(kind)
+		if err != nil {
+			log.Printf("Warning: No NIP mapping found for kind %d: %v", kind, err)
+			continue
+		}
+
+		nipSet[nip] = struct{}{}
+	}
+
+	// Convert set to sorted slice
+	nips := make([]int, 0, len(nipSet))
+	for nip := range nipSet {
+		nips = append(nips, nip)
+	}
+	sort.Ints(nips)
+
+	return nips, nil
+}
+
+// AddKindToNIPMapping adds or updates a kind-to-NIP mapping
+func AddKindToNIPMapping(kind int, nip int) error {
+	kindStr := strconv.Itoa(kind)
+	nipStr := strconv.Itoa(nip)
+
+	err := UpdateNIPMapping(kindStr, nipStr)
+	if err != nil {
+		return fmt.Errorf("failed to add kind-to-NIP mapping: %v", err)
+	}
+
+	log.Printf("Added kind-to-NIP mapping: kind=%d, nip=%d", kind, nip)
+
+	return nil
+}
+
+// setDefaults sets all default values (same as original)
 func setDefaults() {
 	// Server defaults
 	viper.SetDefault("server.port", 9000)
@@ -108,8 +441,6 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.mode", "whitelist")
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
 	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002"})
-	// Note: media_definitions defaults removed to prevent field name conflicts
-	// The config.yaml file contains the complete media definitions
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -120,20 +451,20 @@ func setDefaults() {
 	viper.SetDefault("allowed_users.read_access.enabled", true)
 	viper.SetDefault("allowed_users.read_access.scope", "all_users")
 	viper.SetDefault("allowed_users.write_access.enabled", true)
-	viper.SetDefault("allowed_users.write_access.scope", "all_users") // Free mode allows all users to write
+	viper.SetDefault("allowed_users.write_access.scope", "all_users")
 	viper.SetDefault("allowed_users.last_updated", 0)
 
-	// Default free tier with 100MB monthly storage (matches working config)
+	// Default free tier with 100MB monthly storage
 	viper.SetDefault("allowed_users.tiers", []map[string]interface{}{
 		{
 			"name":                "Basic",
 			"price_sats":          0,
-			"monthly_limit_bytes": 104857600, // 100MB (1.048576e+08)
+			"monthly_limit_bytes": 104857600, // 100MB
 			"unlimited":           false,
 		},
 	})
 
-	// NIP mappings defaults - maps Nostr kinds to their corresponding NIP numbers
+	// NIP mappings defaults
 	viper.SetDefault("nip_mappings", map[string]string{
 		// NIP-01: Basic Protocol
 		"0": "1", // Profile metadata
@@ -208,209 +539,9 @@ func setDefaults() {
 		"10011": "51",  // Additional list type
 		"10022": "51",  // Additional list type
 		"9803":  "84",  // Additional highlight type
-		"22242": "42", // Client Authentication
+		"22242": "42",  // Client Authentication
 		"19841": "888", // Payment subscription
 		"19842": "888", // Payment subscription
 		"19843": "888", // Payment subscription
 	})
-}
-
-// GetConfig returns the configuration struct marshaled from viper
-func GetConfig() (*types.Config, error) {
-	config := &types.Config{}
-	if err := viper.Unmarshal(config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-	return config, nil
-}
-
-// GetPort returns the calculated port for a service
-func GetPort(service string) int {
-	basePort := viper.GetInt("server.port")
-	if basePort == 0 {
-		basePort = 9000
-	}
-
-	switch service {
-	case "hornets":
-		return basePort
-	case "nostr":
-		return basePort + 1
-	case "web":
-		return basePort + 2
-	default:
-		return basePort
-	}
-}
-
-// IsEnabled checks if a service/feature is enabled
-func IsEnabled(feature string) bool {
-	switch feature {
-	case "demo":
-		return viper.GetBool("server.demo")
-	case "web":
-		return viper.GetBool("server.web")
-	case "nostr":
-		return viper.GetBool("server.nostr")
-	case "hornets":
-		return viper.GetBool("server.hornets")
-	default:
-		return viper.GetBool(feature)
-	}
-}
-
-// GetDataDir returns the data directory path
-func GetDataDir() string {
-	return viper.GetString("server.data_path")
-}
-
-// GetPath returns a path relative to the data directory
-func GetPath(subPath string) string {
-	return filepath.Join(GetDataDir(), subPath)
-}
-
-// SaveConfig saves the current configuration to file
-func SaveConfig() error {
-	return viper.WriteConfig()
-}
-
-// UpdateConfig updates a configuration value and optionally saves it
-func UpdateConfig(key string, value interface{}, save bool) error {
-	viper.Set(key, value)
-	if save {
-		return SaveConfig()
-	}
-	return nil
-}
-
-// GetExternalURL returns external service URLs
-func GetExternalURL(service string) string {
-	switch service {
-	case "ollama":
-		return viper.GetString("external_services.ollama.url")
-	case "moderator":
-		return viper.GetString("external_services.moderator.url")
-	case "wallet":
-		return viper.GetString("external_services.wallet.url")
-	default:
-		return ""
-	}
-}
-
-// GenerateRandomAPIKey generates a random 32-byte hexadecimal key
-func GenerateRandomAPIKey() (string, error) {
-	bytes := make([]byte, 32) // 32 bytes = 256 bits
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-// GetNIPMappings returns the current NIP mappings from configuration
-func GetNIPMappings() map[string]string {
-	return viper.GetStringMapString("nip_mappings")
-}
-
-// UpdateNIPMapping updates or adds a single NIP mapping
-func UpdateNIPMapping(kind, nip string) error {
-	mappings := GetNIPMappings()
-	if mappings == nil {
-		mappings = make(map[string]string)
-	}
-	mappings[kind] = nip
-	viper.Set("nip_mappings", mappings)
-	return SaveConfig()
-}
-
-// RemoveNIPMapping removes a NIP mapping for a specific kind
-func RemoveNIPMapping(kind string) error {
-	mappings := GetNIPMappings()
-	if mappings == nil {
-		return nil // Nothing to remove
-	}
-	delete(mappings, kind)
-	viper.Set("nip_mappings", mappings)
-	return SaveConfig()
-}
-
-
-// GetNIPForKind returns the NIP number for a given kind by reading directly from config
-func GetNIPForKind(kind int) (int, error) {
-	kindStr := strconv.Itoa(kind)
-
-	// Read mappings directly from config
-	mappings := GetNIPMappings()
-	if len(mappings) == 0 {
-		return 0, fmt.Errorf("no NIP mappings found in configuration")
-	}
-
-	nipStr, exists := mappings[kindStr]
-	if !exists {
-		return 0, fmt.Errorf("no NIP mapping found for kind %d", kind)
-	}
-
-	nip, err := strconv.Atoi(nipStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid NIP number for kind %d: %v", kind, err)
-	}
-
-	return nip, nil
-}
-
-// GetSupportedNIPsFromKinds returns unique NIP numbers for given kinds
-func GetSupportedNIPsFromKinds(kinds []string) ([]int, error) {
-	nipSet := make(map[int]struct{})
-
-	// Always include system-critical NIPs
-	systemCriticalKinds := []int{555, 10411, 11888}
-	for _, kind := range systemCriticalKinds {
-		if nip, err := GetNIPForKind(kind); err == nil {
-			nipSet[nip] = struct{}{}
-		}
-	}
-
-	// Process user-configured kinds
-	for _, kindStr := range kinds {
-		// Remove "kind" prefix if present
-		kindStr = strings.TrimPrefix(kindStr, "kind")
-
-		kind, err := strconv.Atoi(kindStr)
-		if err != nil {
-			log.Printf("Warning: Invalid kind number '%s': %v", kindStr, err)
-			continue
-		}
-
-		nip, err := GetNIPForKind(kind)
-		if err != nil {
-			log.Printf("Warning: No NIP mapping found for kind %d: %v", kind, err)
-			continue
-		}
-
-		nipSet[nip] = struct{}{}
-	}
-
-	// Convert set to sorted slice
-	nips := make([]int, 0, len(nipSet))
-	for nip := range nipSet {
-		nips = append(nips, nip)
-	}
-	sort.Ints(nips)
-
-	return nips, nil
-}
-
-// AddKindToNIPMapping adds or updates a kind-to-NIP mapping
-func AddKindToNIPMapping(kind int, nip int) error {
-	kindStr := strconv.Itoa(kind)
-	nipStr := strconv.Itoa(nip)
-
-	err := UpdateNIPMapping(kindStr, nipStr)
-	if err != nil {
-		return fmt.Errorf("failed to add kind-to-NIP mapping: %v", err)
-	}
-
-	log.Printf("Added kind-to-NIP mapping: kind=%d, nip=%d", kind, nip)
-
-	return nil
 }

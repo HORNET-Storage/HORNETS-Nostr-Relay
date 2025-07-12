@@ -349,7 +349,6 @@ func (store *BadgerholdStore) StoreDag(dag *types.DagData, temp bool) error {
 func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
 	var results []types.NostrEvent
 
-	logging.Infof("\n\nSearching for events with filter")
 	jd, _ := json.Marshal(filter)
 	logging.Infof(string(jd))
 
@@ -360,7 +359,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		kindsAsInterface := make([]interface{}, len(filter.Kinds))
 		for i, kind := range filter.Kinds {
 			kindsAsInterface[i] = strconv.Itoa(kind)
-			logging.Infof("Searching for kinds: " + strconv.Itoa(kind))
 		}
 
 		if first {
@@ -375,7 +373,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		authorsAsInterface := make([]interface{}, len(filter.Authors))
 		for i, author := range filter.Authors {
 			authorsAsInterface[i] = author
-			logging.Infof("Searching for authors: " + author)
 		}
 
 		if first {
@@ -401,9 +398,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		for tagName, tagValues := range filter.Tags {
 			var tagEntries []types.TagEntry
 
-			//tagValues = append(tagValues, "c25aedfd38f9fed72b383f6eefaea9f21dd58ec2c9989e0cc275cb5296adec17:nestr")
-
-			logging.Infof("Searching for tag with values: " + tagName + "\n")
 			for _, v := range tagValues {
 				logging.Infof(v)
 			}
@@ -413,8 +407,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 			if err != nil && err != badgerhold.ErrNotFound {
 				return nil, fmt.Errorf("failed to query tag entries for %s: %w", tagName, err)
 			}
-
-			logging.Infof("Found %d tag entries from tags\n", len(tagEntries))
 
 			tempEventIDs := make(map[string]struct{})
 			for _, entry := range tagEntries {

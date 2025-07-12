@@ -77,7 +77,6 @@ func BuildServer(store stores.Store) *fiber.App {
 		defer removeListener(c)
 
 		challenge := getGlobalChallenge()
-		logging.Infof("Using global challenge for connection: %s", challenge)
 
 		// Initialize state with empty pubkey and current time for blocked check
 		state := &connectionState{
@@ -184,7 +183,7 @@ func GetRelayInfo() NIP11RelayInfo {
 	var contact string
 	email := viper.GetString("relay.contact")
 	publicKeyHex := viper.GetString("relay.public_key")
-	
+
 	if email != "" && publicKeyHex != "" {
 		// Convert hex public key to npub format
 		if npub, err := nip19.EncodePublicKey(publicKeyHex); err == nil {
@@ -317,8 +316,6 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 		return fmt.Errorf("read error: %w", err)
 	}
 
-	logging.Infof("Received raw message: %s", string(message))
-
 	// Special handling for AUTH messages
 	var rawArray []interface{}
 	if err := json.Unmarshal(message, &rawArray); err == nil {
@@ -388,67 +385,3 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 
 	return nil
 }
-
-// func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store stores.Store) error {
-// 	_, message, err := c.ReadMessage()
-// 	if err != nil {
-// 		return fmt.Errorf("read error: %w", err)
-// 	}
-
-// 	logging.Infof("Received raw message: %s", string(message))
-
-// 	// Special handling for AUTH messages since ParseMessage might not handle them correctly
-// 	var rawArray []interface{}
-// 	if err := json.Unmarshal(message, &rawArray); err == nil {
-// 		if len(rawArray) >= 2 {
-// 			if msgType, ok := rawArray[0].(string); ok && msgType == "AUTH" {
-// 				logging.Infof("Detected AUTH message")
-// 				if len(rawArray) == 2 {
-// 					logging.Infof("Initial AUTH challenge received")
-// 					return nil
-// 				} else if len(rawArray) == 3 {
-// 					if eventJSON, ok := rawArray[1].(map[string]interface{}); ok {
-// 						eventBytes, _ := json.Marshal(eventJSON)
-// 						var event nostr.Event // Create as value, not pointer
-// 						if err := json.Unmarshal(eventBytes, &event); err == nil {
-// 							authEnv := &nostr.AuthEnvelope{Event: event} // Use the value directly
-// 							handleAuthMessage(c, authEnv, challenge, state, store)
-// 							return nil
-// 						}
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	rawMessage := nostr.ParseMessage(message)
-
-// 	switch env := rawMessage.(type) {
-// 	case *nostr.EventEnvelope:
-// 		handleEventMessage(c, env)
-
-// 	case *nostr.ReqEnvelope:
-// 		handleReqMessage(c, env)
-
-// 	case *nostr.AuthEnvelope:
-// 		logging.Infof("Handling AUTH message")
-// 		handleAuthMessage(c, env, challenge, state, store)
-
-// 	case *nostr.CloseEnvelope:
-// 		handleCloseMessage(c, env)
-
-// 	case *nostr.CountEnvelope:
-// 		handleCountMessage(c, env, challenge)
-
-// 	default:
-// 		firstComma := bytes.Index(message, []byte{','})
-// 		if firstComma == -1 {
-// 			return nil
-// 		}
-// 		label := message[0:firstComma]
-
-// 		log.Println("Unknown message type: " + string(label))
-// 	}
-
-// 	return nil
-// }

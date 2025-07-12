@@ -9,6 +9,7 @@ import (
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -31,7 +32,7 @@ const (
 type RelayInfo struct {
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description,omitempty"`
-	Pubkey            string                 `json:"-"`                     // Exclude pubkey from JSON
+	Pubkey            string                 `json:"-"` // Exclude pubkey from JSON
 	Contact           string                 `json:"contact"`
 	Icon              string                 `json:"icon,omitempty"`
 	SupportedNIPs     []int                  `json:"supported_nips"`
@@ -64,10 +65,11 @@ func formatDataLimit(bytes int64, unlimited bool) string {
 
 func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, store stores.Store) error {
 	// Get subscription tiers from allowed_users.tiers
-	var allTiers []types.SubscriptionTier
-	if err := viper.UnmarshalKey("allowed_users.tiers", &allTiers); err != nil {
-		return fmt.Errorf("error getting subscription tiers from allowed_users.tiers: %v", err)
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
+		return fmt.Errorf("error getting allowed users settings: %v", err)
 	}
+	allTiers := allowedUsersSettings.Tiers
 
 	// Transform to relay info format, excluding free tier
 	var tiers []types.SubscriptionTier
@@ -158,11 +160,9 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 	}
 
 	// Print the event for verification
-	eventJSON, err := json.MarshalIndent(event, "", "  ")
+	_, err = json.MarshalIndent(event, "", "  ")
 	if err != nil {
 		logging.Infof("Error marshaling event for printing: %v", err)
-	} else {
-		logging.Infof("Created and stored kind 10411 event:\n%s", string(eventJSON))
 	}
 
 	logging.Info("Kind 10411 event created and stored successfully")
@@ -171,7 +171,6 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 
 func createAnyEvent(privateKey *secp256k1.PrivateKey, publicKey *secp256k1.PublicKey, kind int, content string, tags []nostr.Tag) (*nostr.Event, error) {
 	stringKey := hex.EncodeToString(schnorr.SerializePubKey(publicKey))
-	logging.Infof("Public Key: %s", stringKey)
 
 	event := &nostr.Event{
 		PubKey:    stringKey,

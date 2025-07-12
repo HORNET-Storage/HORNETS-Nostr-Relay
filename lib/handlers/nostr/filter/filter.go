@@ -177,6 +177,30 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		var combinedEvents []*nostr.Event
 		var missingEventIDs []string
 
+		// FIRST: Check access control BEFORE doing any searches
+		connPubkey := getAuthenticatedPubkey(data)
+
+		// Check read access permissions using the global access control system
+		accessControl := websocket.GetAccessControl()
+		if accessControl != nil {
+			// Only check access if we have a valid pubkey
+			if connPubkey == "" {
+				logging.Infof(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
+				write("NOTICE", "Read access denied: Authentication required")
+				return
+			}
+
+			// Check if user has read access
+			err := accessControl.CanRead(connPubkey)
+			if err != nil {
+				logging.Infof(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
+				write("NOTICE", "Read access denied: User not in allowed list")
+				return
+			}
+
+			logging.Infof(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
+		}
+
 		// Get global relay store for missing note retrieval
 		relayStore := sync.GetRelayStore()
 
@@ -275,7 +299,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// No verbose debug logging
 
 		// Get the authenticated pubkey for the current connection
-		connPubkey := getAuthenticatedPubkey(data)
+		connPubkey = getAuthenticatedPubkey(data)
 
 		// Get moderation mode from relay_settings (default to strict if not specified)
 		var isStrict bool = true // Default to strict mode
@@ -357,32 +381,8 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// No verbose debug logging
 
-		// Get the authenticated pubkey for the current connection
-		connPubkey = getAuthenticatedPubkey(data)
-
 		// Add detailed logging
 		addLogging(&request, connPubkey)
-
-		// Check read access permissions using the global access control system
-		accessControl := websocket.GetAccessControl()
-		if accessControl != nil {
-			// Only check access if we have a valid pubkey
-			if connPubkey == "" {
-				logging.Infof(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
-				write("NOTICE", "Read access denied: Authentication required")
-				return
-			}
-
-			// Check if user has read access
-			err := accessControl.CanRead(connPubkey)
-			if err != nil {
-				logging.Infof(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
-				write("NOTICE", "Read access denied: User not in allowed list")
-				return
-			}
-
-			logging.Infof(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
-		}
 
 		// Apply mute word filtering if the user is authenticated
 		if connPubkey != "" {

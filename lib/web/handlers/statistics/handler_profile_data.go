@@ -47,8 +47,6 @@ func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 		completeData[5-i] = types.TimeSeriesData{Month: formattedMonth}
 	}
 
-	logging.Infof("Complete list of months: %+v", completeData)
-
 	// Merge queried data with the complete list
 	dataMap := make(map[string]types.TimeSeriesData)
 	for _, d := range data {
@@ -61,6 +59,5 @@ func GetProfilesTimeSeriesData(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	logging.Infof("Fetched data for the last 6 months: %+v", completeData)
 	return c.JSON(completeData)
 }

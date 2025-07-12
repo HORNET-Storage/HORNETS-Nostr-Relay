@@ -4,11 +4,12 @@ import (
 	"strings"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 func GetAllowedUsersPaginated(c *fiber.Ctx, store stores.Store) error {
@@ -86,10 +87,8 @@ func AddAllowedUser(c *fiber.Ctx, store stores.Store) error {
 	// Update the user's kind 11888 event if we're in invite-only mode
 	// This ensures their storage allocation reflects their new tier immediately
 	go func() {
-		var allowedUsersSettings struct {
-			Mode string `json:"mode"`
-		}
-		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		allowedUsersSettings, err := config.GetAllowedUsersSettings()
+		if err != nil {
 			logging.Infof("Warning: Could not load allowed_users settings to check mode: %v", err)
 			return
 		}
@@ -159,9 +158,21 @@ func RemoveAllowedUser(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
+	// Clean up the user's kind 11888 subscription event
+	go func() {
+		logging.Infof("Cleaning up kind 11888 event for removed user: %s", req.Npub)
+
+		// Find and delete the user's kind 11888 event
+		if err := deleteUserSubscriptionEvent(req.Npub, store); err != nil {
+			logging.Infof("Warning: Failed to delete kind 11888 event for removed user %s: %v", req.Npub, err)
+		} else {
+			logging.Infof("Successfully deleted kind 11888 event for removed user %s", req.Npub)
+		}
+	}()
+
 	return c.JSON(fiber.Map{
 		"success": true,
-		"message": "User added to allowed users successfully",
+		"message": "User removed from allowed users successfully",
 	})
 }
 
@@ -252,4 +263,41 @@ func RemoveRelayOwner(c *fiber.Ctx, store stores.Store) error {
 		"success": true,
 		"message": "Relay owner removed successfully",
 	})
+}
+
+// deleteUserSubscriptionEvent finds and deletes the user's kind 11888 subscription event
+func deleteUserSubscriptionEvent(npub string, store stores.Store) error {
+	// Convert npub to hex format for querying
+	pubKey, err := signing.DeserializePublicKey(npub)
+	if err != nil {
+		return err
+	}
+
+	serializedPubKey, err := signing.SerializePublicKey(pubKey)
+	if err != nil {
+		return err
+	}
+
+	// Create a filter to find the user's kind 11888 events
+	filter := nostr.Filter{
+		Kinds:   []int{11888},
+		Authors: []string{*serializedPubKey},
+		Limit:   10, // Should only be one, but just in case
+	}
+
+	// Find the user's kind 11888 events
+	events, err := store.QueryEvents(filter)
+	if err != nil {
+		return err
+	}
+
+	// Delete all found kind 11888 events for this user
+	for _, event := range events {
+		logging.Infof("Found kind 11888 event to delete: %s", event.ID)
+		if err := store.DeleteEvent(event.ID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

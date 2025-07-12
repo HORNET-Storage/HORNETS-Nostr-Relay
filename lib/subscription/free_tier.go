@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
@@ -44,8 +44,8 @@ func InitDailyFreeSubscriptionRenewal() {
 // RefreshExpiredFreeTierSubscriptions finds and refreshes all expired free tier subscriptions
 func (m *SubscriptionManager) RefreshExpiredFreeTierSubscriptions() error {
 	// Load allowed users settings to check for free mode
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		logging.Infof("Error loading allowed users settings: %v", err)
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}

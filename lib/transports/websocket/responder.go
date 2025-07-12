@@ -11,11 +11,11 @@ import (
 
 func sendWebSocketMessage(ws *websocket.Conn, msg interface{}) error {
 	// msg is any of nostr.ClosedEnvelope, nostr.EOSEEnvelope, nostr.OKEnvelope, nostr.EventEnvelope, nostr.NoticeEnvelope
-	marshalledMsg, err := jsoniter.MarshalToString(msg)
+	_, err := jsoniter.MarshalToString(msg)
 	if err != nil {
 		logging.Infof("Couldn't ummarshall websocket message: %s", err)
 	}
-	logging.Infof("Websocket message: %s", marshalledMsg)
+	// logging.Infof("Websocket message: %s", marshalledMsg)
 	if err := ws.WriteJSON(msg); err != nil {
 		logging.Infof("Error sending message over WebSocket: %v", err)
 		return err
