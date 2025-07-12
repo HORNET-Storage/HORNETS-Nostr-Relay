@@ -60,12 +60,12 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 	}
 
 	// Step 3: Determine appropriate tier for new user
-	logging.Infof("DEBUG: AllowedUsersSettings mode: %s", settings.AllowedUsersSettings.Mode)
-	logging.Infof("DEBUG: Available tiers in settings: %d", len(settings.AllowedUsersSettings.Tiers))
-	for i, tier := range settings.AllowedUsersSettings.Tiers {
-		logging.Infof("DEBUG: Settings tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d",
-			i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats)
-	}
+	// logging.Infof("DEBUG: AllowedUsersSettings mode: %s", settings.AllowedUsersSettings.Mode)
+	// logging.Infof("DEBUG: Available tiers in settings: %d", len(settings.AllowedUsersSettings.Tiers))
+	// for i, tier := range settings.AllowedUsersSettings.Tiers {
+	// 	logging.Infof("DEBUG: Settings tier %d: Name='%s', MonthlyLimitBytes=%d, PriceSats=%d",
+	// 		i, tier.Name, tier.MonthlyLimitBytes, tier.PriceSats)
+	// }
 
 	tierLimit := m.findAppropriateTierForUser(npub, nil, &settings.AllowedUsersSettings)
 
@@ -108,9 +108,9 @@ func (m *SubscriptionManager) InitializeSubscriber(npub string, mode string) err
 			logging.Infof("Error creating NIP-88 event asynchronously for %s: %v", npub, err)
 		} else {
 			if tierLimit != nil {
-				logging.Infof("Successfully created NIP-88 event for subscriber %s with tier: %s", npub, tierLimit.Name)
+				// logging.Infof("Successfully created NIP-88 event for subscriber %s with tier: %s", npub, tierLimit.Name)
 			} else {
-				logging.Infof("Successfully created NIP-88 event for subscriber %s with no tier", npub)
+				// logging.Infof("Successfully created NIP-88 event for subscriber %s with no tier", npub)
 			}
 		}
 	}()
@@ -360,8 +360,8 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 	}
 
 	// Load allowed users settings to check last update timestamp
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		logging.Infof("Error loading allowed users settings: %v", err)
 		return event, nil // Return original event if we can't get settings
 	}
@@ -390,7 +390,7 @@ func (m *SubscriptionManager) CheckAndUpdateSubscriptionEvent(event *nostr.Event
 		}
 	}
 
-	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, &allowedUsersSettings)
+	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, allowedUsersSettings)
 
 	if expectedTier == nil {
 		// User should not have access in current mode
@@ -459,8 +459,8 @@ func (m *SubscriptionManager) UpdateUserSubscriptionFromDatabase(npub string) er
 	logging.Infof("Updating kind 11888 event for npub %s (looking up tier from database)", npub)
 
 	// Load allowed users settings to get tier configuration
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
 
@@ -563,8 +563,8 @@ func (m *SubscriptionManager) UpdateNpubSubscriptionEvent(npub, tierName string)
 	logging.Infof("Updating kind 11888 event for npub %s with tier %s", npub, tierName)
 
 	// Load allowed users settings to get tier configuration
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
 
@@ -619,8 +619,8 @@ func (m *SubscriptionManager) updatePaidSubscriberRecord(
 	storageInfo *StorageInfo,
 ) {
 	// Load allowed users settings to check if this is a free tier
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		logging.Infof("Error loading allowed users settings: %v", err)
 		return
 	}

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
@@ -57,8 +57,8 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 	logging.Infof("Starting batch update of all kind 11888 subscription events")
 
 	// Get the current allowed users settings
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
 
@@ -129,16 +129,16 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 	}
 
 	// Get current allowed users settings
-	var allowedUsersSettings types.AllowedUsersSettings
-	if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+	allowedUsersSettings, err := config.GetAllowedUsersSettings()
+	if err != nil {
 		return fmt.Errorf("failed to load allowed users settings: %v", err)
 	}
 
 	currentMode := strings.ToLower(allowedUsersSettings.Mode)
-	
+
 	// Check if user should be cleaned up in only-me or invite-only modes
 	if currentMode == "only-me" || currentMode == "invite-only" {
-		shouldDelete, err := m.shouldDeleteUserEvent(pubkey, currentMode, &allowedUsersSettings)
+		shouldDelete, err := m.shouldDeleteUserEvent(pubkey, currentMode, allowedUsersSettings)
 		if err != nil {
 			logging.Infof("Error checking if user %s should be deleted: %v", pubkey, err)
 			// Continue with normal processing if we can't determine
@@ -201,10 +201,10 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 		}
 	}
 
-	logging.Infof("DEBUG processSingleSubscriptionEvent: pubkey=%s, currentRelayMode=%s, expectedRelayMode=%s, activeTier=%s, isTransition=%v",
-		pubkey, currentRelayMode, expectedRelayMode, activeTier, isTransition)
+	// logging.Infof("DEBUG processSingleSubscriptionEvent: pubkey=%s, currentRelayMode=%s, expectedRelayMode=%s, activeTier=%s, isTransition=%v",
+	// 	pubkey, currentRelayMode, expectedRelayMode, activeTier, isTransition)
 
-	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, &allowedUsersSettings)
+	expectedTier := m.findAppropriateTierForUser(pubkey, currentTierObj, allowedUsersSettings)
 
 	if expectedTier != nil {
 		logging.Infof("DEBUG: Expected tier for %s: Name=%s, Bytes=%d", pubkey, expectedTier.Name, expectedTier.MonthlyLimitBytes)
@@ -224,9 +224,19 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 
 		// Special handling for free-to-paid transitions
 		if isTransition && isFreeMode(currentRelayMode) && !isFreeMode(expectedRelayMode) {
-			// Keep current allocation until cycle ends
-			logging.Infof("Free-to-paid transition for %s: keeping current allocation until cycle ends", pubkey)
-			expectedBytes = storageInfo.TotalBytes
+			// For subscription mode, cut off free access immediately
+			if expectedRelayMode == "subscription" {
+				logging.Infof("Free-to-subscription transition for %s: cutting off free access immediately", pubkey)
+				expectedBytes = 0 // Set to 0 until they pay
+				if storageInfo.TotalBytes != expectedBytes {
+					storageInfo.TotalBytes = expectedBytes
+					needsUpdate = true
+				}
+			} else {
+				// Keep current allocation until cycle ends for other paid modes
+				logging.Infof("Free-to-paid transition for %s: keeping current allocation until cycle ends", pubkey)
+				expectedBytes = storageInfo.TotalBytes
+			}
 		} else if storageInfo.TotalBytes != expectedBytes {
 			// For all other cases, update immediately
 			logging.Infof("Updating storage limit for %s from %d to %d bytes", pubkey, storageInfo.TotalBytes, expectedBytes)
@@ -234,15 +244,27 @@ func (m *SubscriptionManager) processSingleSubscriptionEvent(event *nostr.Event)
 			needsUpdate = true
 		}
 
-		// Update tier if it changed
-		if activeTier != expectedTier.Name {
+		// Update tier if it changed (but not for subscription mode transitions where we reset the tier)
+		if isTransition && isFreeMode(currentRelayMode) && expectedRelayMode == "subscription" {
+			// For subscription mode, reset tier to empty until they pay
+			if activeTier != "" {
+				logging.Infof("Resetting tier for %s to empty in subscription mode", pubkey)
+				activeTier = ""
+				needsUpdate = true
+			}
+		} else if activeTier != expectedTier.Name {
 			logging.Infof("Updating tier for %s from '%s' to '%s'", pubkey, activeTier, expectedTier.Name)
 			activeTier = expectedTier.Name
 			needsUpdate = true
 		}
 
-		// Update status if needed
-		if status == "inactive" && expectedBytes > 0 {
+		// Update status - set to inactive for subscription mode transitions
+		if isTransition && isFreeMode(currentRelayMode) && expectedRelayMode == "subscription" {
+			if status != "inactive" {
+				logging.Infof("Setting subscription status to inactive for %s in subscription mode", pubkey)
+				needsUpdate = true
+			}
+		} else if status == "inactive" && expectedBytes > 0 {
 			logging.Infof("Activating subscription for %s", pubkey)
 			needsUpdate = true
 		}
@@ -429,14 +451,14 @@ func (m *SubscriptionManager) shouldDeleteUserEvent(pubkey string, mode string, 
 			return true, nil
 		}
 		return false, nil
-		
+
 	case "invite-only":
 		// Check if user is in the allowed users list
 		if !m.isUserInAllowedLists(pubkey) {
 			return true, nil
 		}
 		return false, nil
-		
+
 	default:
 		// For other modes, don't delete
 		return false, nil
@@ -515,9 +537,18 @@ func (m *SubscriptionManager) applyModeTransitionRules(
 
 	// Handle free-to-paid transitions
 	if isFreeMode(oldMode) && !isFreeMode(newMode) {
-		// Keep current allocation until cycle ends
-		logging.Infof("Free-to-paid transition: preserving current allocation until cycle ends")
-		// Storage update will be handled in the main function
+		// For transition to subscription mode, cut off free access immediately
+		if newMode == "subscription" {
+			logging.Infof("Free-to-subscription transition: cutting off free access immediately for %s", pubkey)
+			storageInfo.TotalBytes = 0
+			storageInfo.IsUnlimited = false
+			*activeTier = ""
+			needsUpdate = true
+		} else {
+			// Keep current allocation until cycle ends for other paid modes
+			logging.Infof("Free-to-paid transition: preserving current allocation until cycle ends")
+			// Storage update will be handled in the main function
+		}
 	}
 
 	// Handle paid-to-free transitions

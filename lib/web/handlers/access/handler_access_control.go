@@ -4,12 +4,12 @@ import (
 	"strings"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 )
 
 func GetAllowedUsersPaginated(c *fiber.Ctx, store stores.Store) error {
@@ -87,10 +87,8 @@ func AddAllowedUser(c *fiber.Ctx, store stores.Store) error {
 	// Update the user's kind 11888 event if we're in invite-only mode
 	// This ensures their storage allocation reflects their new tier immediately
 	go func() {
-		var allowedUsersSettings struct {
-			Mode string `json:"mode"`
-		}
-		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		allowedUsersSettings, err := config.GetAllowedUsersSettings()
+		if err != nil {
 			logging.Infof("Warning: Could not load allowed_users settings to check mode: %v", err)
 			return
 		}
