@@ -119,8 +119,8 @@ func (m *SubscriptionManager) getSubscriptionStatus(activeTier string) string {
 func (m *SubscriptionManager) findAppropriateTierForUser(pubkey string, currentTier *types.SubscriptionTier, allowedUsersSettings *types.AllowedUsersSettings) *types.SubscriptionTier {
 	mode := strings.ToLower(allowedUsersSettings.Mode)
 
-	logging.Infof("DEBUG: findAppropriateTierForUser called with mode='%s', pubkey='%s'", mode, pubkey)
-	logging.Infof("DEBUG: Available tiers in findAppropriateTierForUser: %d", len(allowedUsersSettings.Tiers))
+	// logging.Infof("DEBUG: findAppropriateTierForUser called with mode='%s', pubkey='%s'", mode, pubkey)
+	// logging.Infof("DEBUG: Available tiers in findAppropriateTierForUser: %d", len(allowedUsersSettings.Tiers))
 
 	switch mode {
 	case "public", "free":

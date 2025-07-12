@@ -54,18 +54,27 @@ func UpdateAccessControlSettings(settings *types.AllowedUsersSettings) error {
 	accessControlMutex.Lock()
 	defer accessControlMutex.Unlock()
 
+	logging.Infof("UpdateAccessControlSettings called - Mode: %s, Read: %s, Write: %s",
+		settings.Mode, settings.Read, settings.Write)
+
 	if globalAccessControl == nil {
+		logging.Infof("Warning: globalAccessControl is nil, cannot update settings")
 		return nil // Not initialized yet
 	}
 
 	// Validate settings
 	if err := globalAccessControl.ValidateSettings(settings); err != nil {
+		logging.Infof("Settings validation failed: %v", err)
 		return err
 	}
+
+	logging.Infof("After validation - Mode: %s, Read: %s, Write: %s",
+		settings.Mode, settings.Read, settings.Write)
 
 	// Update settings
 	globalAccessControl.UpdateSettings(settings)
 
-	logging.Infof("Access control settings updated to %s mode", settings.Mode)
+	logging.Infof("Access control settings successfully updated to %s mode with Read: %s, Write: %s",
+		settings.Mode, settings.Read, settings.Write)
 	return nil
 }

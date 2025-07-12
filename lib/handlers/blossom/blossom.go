@@ -29,7 +29,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Protected endpoint - requires NIP-98 auth for uploads
 	app.Put("/blossom/upload", middleware.NIP98Middleware(), s.UploadBlobHandler())
 
-	logging.Info("Blossom file storage routes initialized with NIP-98 authentication")
+	// logging.Info("Blossom file storage routes initialized with NIP-98 authentication")
 }
 
 // GetBlobHandler returns the handler for getting blobs

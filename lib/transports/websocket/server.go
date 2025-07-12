@@ -77,7 +77,6 @@ func BuildServer(store stores.Store) *fiber.App {
 		defer removeListener(c)
 
 		challenge := getGlobalChallenge()
-		logging.Infof("Using global challenge for connection: %s", challenge)
 
 		// Initialize state with empty pubkey and current time for blocked check
 		state := &connectionState{

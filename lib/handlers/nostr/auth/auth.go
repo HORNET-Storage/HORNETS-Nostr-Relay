@@ -150,7 +150,7 @@ func BuildAuthHandler(store stores.Store) func(read lib_nostr.KindReader, write 
 					logging.Infof("Warning: Bitcoin address allocation failed for subscriber %s: %v", pubkey, err)
 				}
 			} else {
-				logging.Infof("Successfully initialized subscriber %s", pubkey)
+				// logging.Infof("Successfully initialized subscriber %s", pubkey)
 			}
 		}(request.Event.PubKey, currentMode)
 

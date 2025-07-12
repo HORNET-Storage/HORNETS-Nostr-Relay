@@ -312,11 +312,7 @@ func main() {
 		}
 	} else {
 		logging.Info("Image moderation system is disabled")
-	} // Initialize the global subscription manager
-	logging.Info("Initializing global subscription manager...")
-
-	// Initialize the global subscription manager
-	logging.Info("Initializing global subscription manager...")
+	}
 
 	// Initialize subscription manager with tiers from allowed_users
 	subscription.InitGlobalManager(

@@ -84,7 +84,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		err := accessControl.CanRead(env.Event.PubKey)
 		if err != nil {
 			logging.Infof("Read access denied for pubkey: %s - %v", env.Event.PubKey, err)
-			
+
 			// Get current settings to provide appropriate error message
 			settings := accessControl.GetSettings()
 			if settings != nil {
@@ -99,7 +99,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 				case "only-me":
 					errorMsg = "restricted: This relay is private and only accessible to the owner."
 				case "subscription":
-					errorMsg = "restricted: This relay requires a paid subscription. Visit the relay website to subscribe."
+					errorMsg = "restricted: This relay requires a paid subscription. Go to the subscription page to subscribe."
 				default:
 					errorMsg = "restricted: Authentication failed - access denied."
 				}
@@ -148,7 +148,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 				logging.Infof("Warning: Bitcoin address allocation failed for subscriber %s: %v", pubkey, err)
 			}
 		} else {
-			logging.Infof("Successfully initialized subscriber %s", pubkey)
+			// logging.Infof("Successfully initialized subscriber %s", pubkey)
 		}
 	}(env.Event.PubKey, currentMode)
 
