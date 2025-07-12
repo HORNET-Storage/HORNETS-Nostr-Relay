@@ -41,8 +41,8 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 	filterType := c.Query("filter", "all") // all, unread, user
 	pubkey := c.Query("pubkey", "")
 
-	logging.Infof("Processing request with filter: %s, pubkey: %s, page: %d, limit: %d",
-		filterType, pubkey, page, limit)
+	// logging.Infof("Processing request with filter: %s, pubkey: %s, page: %d, limit: %d",
+	// 	filterType, pubkey, page, limit)
 
 	var notifications []lib.PaymentNotification
 	var metadata *lib.PaginationMetadata
@@ -50,7 +50,7 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 
 	switch filterType {
 	case "unread":
-		logging.Infof("Fetching unread notifications with page: %d, limit: %d", page, limit)
+		// logging.Infof("Fetching unread notifications with page: %d, limit: %d", page, limit)
 		notifications, metadata, fetchErr = store.GetStatsStore().GetUnreadPaymentNotifications(page, limit)
 		if fetchErr != nil {
 			logging.Infof("Error fetching unread notifications: %v", fetchErr)
@@ -58,14 +58,14 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 				"error": "Failed to fetch notifications: " + fetchErr.Error(),
 			})
 		}
-		logging.Infof("Raw result from GetUnreadPaymentNotifications: %+v", notifications)
+		// logging.Infof("Raw result from GetUnreadPaymentNotifications: %+v", notifications)
 
 		// Return 204 No Content status with no body when there are no unread notifications
 		if len(notifications) == 0 {
 			logging.Info("No unread notifications found, returning 204 No Content")
 			return c.Status(fiber.StatusNoContent).Send(nil)
 		}
-		logging.Infof("Found %d unread notifications", len(notifications))
+		// logging.Infof("Found %d unread notifications", len(notifications))
 	case "user":
 		if pubkey == "" {
 			logging.Info("Missing pubkey parameter for user filter, returning 400 Bad Request")
@@ -73,7 +73,7 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 				"error": "Pubkey parameter is required for user filter",
 			})
 		}
-		logging.Infof("Fetching notifications for user: %s with page: %d, limit: %d", pubkey, page, limit)
+		// logging.Infof("Fetching notifications for user: %s with page: %d, limit: %d", pubkey, page, limit)
 		notifications, metadata, fetchErr = store.GetStatsStore().GetUserPaymentNotifications(pubkey, page, limit)
 		if fetchErr != nil {
 			logging.Infof("Error fetching user notifications: %v", fetchErr)
@@ -82,7 +82,7 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 			})
 		}
 	default: // "all"
-		logging.Infof("Fetching all notifications with page: %d, limit: %d", page, limit)
+		// logging.Infof("Fetching all notifications with page: %d, limit: %d", page, limit)
 		notifications, metadata, fetchErr = store.GetStatsStore().GetAllPaymentNotifications(page, limit)
 		if fetchErr != nil {
 			logging.Infof("Error fetching all notifications: %v", fetchErr)
@@ -90,11 +90,11 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 				"error": "Failed to fetch notifications: " + fetchErr.Error(),
 			})
 		}
-		logging.Infof("Raw result from GetAllPaymentNotifications: %+v", notifications)
+		// logging.Infof("Raw result from GetAllPaymentNotifications: %+v", notifications)
 
 		// Detailed logging of database result
-		logging.Infof("Result data type: %T", notifications)
-		logging.Infof("Database response type: %+v", fetchErr)
+		// logging.Infof("Result data type: %T", notifications)
+		// logging.Infof("Database response type: %+v", fetchErr)
 
 		// Inspect database connection
 		if store.GetStatsStore() == nil {
@@ -106,11 +106,11 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 
 	// Log detailed notification information
 	if len(notifications) > 0 {
-		logging.Infof("Retrieved %d notifications", len(notifications))
-		for i, n := range notifications {
-			logging.Infof("Notification %d: ID=%d, PubKey=%s, TxID=%s, Amount=%d, IsRead=%v",
-				i+1, n.ID, n.PubKey, n.TxID, n.Amount, n.IsRead)
-		}
+		// logging.Infof("Retrieved %d notifications", len(notifications))
+		// for i, n := range notifications {
+		// 	logging.Infof("Notification %d: ID=%d, PubKey=%s, TxID=%s, Amount=%d, IsRead=%v",
+		// 		i+1, n.ID, n.PubKey, n.TxID, n.Amount, n.IsRead)
+		// }
 	} else {
 		logging.Info("No notifications found")
 	}
@@ -125,8 +125,8 @@ func GetPaymentNotifications(c *fiber.Ctx, store stores.Store) error {
 		"pagination":    metadata,
 	}
 
-	logging.Infof("Sending response with %d notifications", len(notifications))
-	logging.Infof("Response data: %+v", responseData)
+	// logging.Infof("Sending response with %d notifications", len(notifications))
+	// logging.Infof("Response data: %+v", responseData)
 
 	resp := c.JSON(responseData)
 	logging.Infof("Response status: %d", c.Response().StatusCode())

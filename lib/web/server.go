@@ -100,6 +100,43 @@ func StartServer(store stores.Store) error {
 	})
 
 	// ================================
+	// WALLET PROXY ROUTES (MUST BE BEFORE /api/wallet ROUTES)
+	// ================================
+
+	// Public wallet authentication routes (no authentication required)
+	app.Get("/api/wallet-proxy/challenge", func(c *fiber.Ctx) error {
+		return wallet.HandleChallenge(c)
+	})
+
+	app.Post("/api/wallet-proxy/verify", func(c *fiber.Ctx) error {
+		return wallet.HandleVerify(c)
+	})
+
+	// Protected wallet operation routes (JWT required)
+	walletProxySecured := app.Group("/api/wallet-proxy")
+
+	if !config.IsEnabled("demo") {
+		walletProxySecured.Use(func(c *fiber.Ctx) error {
+			return middleware.JwtMiddleware(c, store)
+		})
+		logging.Info("JWT authentication enabled for protected wallet proxy routes")
+	} else {
+		logging.Warn("Running in demo mode - protected wallet proxy routes are UNSECURED!")
+	}
+
+	walletProxySecured.Get("/panel-health", func(c *fiber.Ctx) error {
+		return wallet.HandlePanelHealth(c)
+	})
+
+	walletProxySecured.Post("/calculate-tx-size", func(c *fiber.Ctx) error {
+		return wallet.HandleCalculateTxSize(c)
+	})
+
+	walletProxySecured.Post("/transaction", func(c *fiber.Ctx) error {
+		return wallet.HandleTransaction(c)
+	})
+
+	// ================================
 	// WALLET API ROUTES
 	// ================================
 
