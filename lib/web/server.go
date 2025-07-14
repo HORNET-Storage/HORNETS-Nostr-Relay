@@ -238,6 +238,11 @@ func StartServer(store stores.Store) error {
 		return handlers.HandleGetPaidSubscriberProfiles(c, store)
 	})
 
+	// Profiles route
+	secured.Post("/profiles", func(c *fiber.Ctx) error {
+		return handlers.HandleGetProfiles(c, store)
+	})
+
 	secured.Post("/refresh-token", func(c *fiber.Ctx) error {
 		return auth.RefreshToken(c)
 	})
