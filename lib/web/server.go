@@ -58,6 +58,17 @@ func StartServer(store stores.Store) error {
 		AllowMethods: "GET, POST, DELETE, PUT, OPTIONS",
 	}))
 
+	// Disable compression for static assets to prevent ngrok issues
+	app.Use(func(c *fiber.Ctx) error {
+		// Set headers to prevent compression for JS/CSS files
+		if strings.Contains(c.Path(), ".js") || strings.Contains(c.Path(), ".css") {
+			c.Set("Cache-Control", "no-transform")
+			c.Set("Content-Encoding", "identity")
+			c.Set("Accept-Encoding", "identity")
+		}
+		return c.Next()
+	})
+
 	// Request logging middleware
 	app.Use(func(c *fiber.Ctx) error {
 		logging.Debug("HTTP Request", map[string]interface{}{
