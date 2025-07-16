@@ -414,7 +414,7 @@ func setDefaults() {
 	viper.SetDefault("relay.name", "HORNETS")
 	viper.SetDefault("relay.description", "HORNETS relay, the home of GitNestr")
 	viper.SetDefault("relay.contact", "support@hornets.net")
-	viper.SetDefault("relay.icon", "")
+	viper.SetDefault("relay.icon", "http://localhost:9002/logo-dark-192.png")
 	viper.SetDefault("relay.software", "HORNETS")
 	viper.SetDefault("relay.version", "0.0.1")
 	viper.SetDefault("relay.service_tag", "hornet-storage-service")
