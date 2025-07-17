@@ -75,7 +75,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 		// Continue processing as normal, don't block due to errors
 	} else if isBlocked {
 		logging.Infof("Blocked pubkey attempted connection: %s", env.Event.PubKey)
-		write("OK", env.Event.ID, false, "Relay connection rejected: Pubkey is blocked")
+		write("OK", env.Event.ID, false, "restricted: This pubkey has been blocked from this relay.")
 		return
 	}
 
@@ -83,8 +83,30 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	if accessControl := GetAccessControl(); accessControl != nil {
 		err := accessControl.CanRead(env.Event.PubKey)
 		if err != nil {
-			logging.Infof("Read access denied for pubkey: %s", env.Event.PubKey)
-			write("OK", env.Event.ID, false, "Authentication rejected: Read access denied")
+			logging.Infof("Read access denied for pubkey: %s - %v", env.Event.PubKey, err)
+
+			// Get current settings to provide appropriate error message
+			settings := accessControl.GetSettings()
+			if settings != nil {
+				var errorMsg string
+				switch settings.Mode {
+				case "invite-only":
+					if settings.Read == "allowed_users" {
+						errorMsg = "restricted: This relay is invite-only. Contact the relay administrator to request access."
+					} else {
+						errorMsg = "restricted: Authentication required for this relay."
+					}
+				case "only-me":
+					errorMsg = "restricted: This relay is private and only accessible to the owner."
+				case "subscription":
+					errorMsg = "restricted: This relay requires a paid subscription. Go to the subscription page to subscribe."
+				default:
+					errorMsg = "restricted: Authentication failed - access denied."
+				}
+				write("OK", env.Event.ID, false, errorMsg)
+			} else {
+				write("OK", env.Event.ID, false, "restricted: Authentication failed - access denied.")
+			}
 			return
 		}
 	}
@@ -126,7 +148,7 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 				logging.Infof("Warning: Bitcoin address allocation failed for subscriber %s: %v", pubkey, err)
 			}
 		} else {
-			logging.Infof("Successfully initialized subscriber %s", pubkey)
+			// logging.Infof("Successfully initialized subscriber %s", pubkey)
 		}
 	}(env.Event.PubKey, currentMode)
 

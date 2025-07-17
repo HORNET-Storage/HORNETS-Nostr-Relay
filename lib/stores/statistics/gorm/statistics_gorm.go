@@ -525,8 +525,6 @@ func (store *GormStatisticsStore) FetchKindData() ([]types.AggregatedKindData, e
 		return nil, err
 	}
 
-	logging.Infof("Stats DB kinds: %+v", kinds)
-
 	aggregatedData := make(map[int]types.AggregatedKindData)
 
 	// Aggregate the data by kind number
@@ -821,8 +819,6 @@ func (store *GormStatisticsStore) FetchProfilesTimeSeriesData(startDate, endDate
 		DHTKey    int    `gorm:"column:dht"`
 		Both      int    `gorm:"column:both"`
 	}
-
-	logging.Infof("FetchProfilesTimeSeriesData: startDate=%s, endDate=%s", startDate, endDate)
 
 	// First, let's make sure we include all months in our range, even if there's no data for a month
 	// Then calculate the cumulative totals for each month

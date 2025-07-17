@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
@@ -515,8 +515,8 @@ func (m *SubscriptionManager) processHighTierPayment(
 func (m *SubscriptionManager) findMatchingTier(amountSats int64) (*types.SubscriptionTier, error) {
 	if len(m.subscriptionTiers) == 0 {
 		// Reload tiers from allowed_users settings
-		var allowedUsersSettings types.AllowedUsersSettings
-		if err := viper.UnmarshalKey("allowed_users", &allowedUsersSettings); err != nil {
+		allowedUsersSettings, err := config.GetAllowedUsersSettings()
+		if err != nil {
 			return nil, fmt.Errorf("no tiers available and failed to load allowed users settings: %v", err)
 		}
 		m.subscriptionTiers = allowedUsersSettings.Tiers

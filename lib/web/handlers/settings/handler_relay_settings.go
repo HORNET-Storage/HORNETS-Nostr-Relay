@@ -16,6 +16,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
 
@@ -26,68 +27,58 @@ func GetSettings(c *fiber.Ctx) error {
 	// Return the entire config as JSON
 	settings := viper.AllSettings()
 
-	// Log the complete settings structure being sent to frontend
-	logging.Infof("=== SETTINGS RESPONSE START ===")
-	logging.Infof("Settings structure being sent to frontend:")
-
 	// Log each major section
-	if subscriptions, ok := settings["subscriptions"]; ok {
-		logging.Infof("subscriptions: %+v", subscriptions)
+	if _, ok := settings["subscriptions"]; ok {
+		// logging.Infof("subscriptions: %+v", subscriptions)
 	} else {
 		logging.Infof("subscriptions: NOT FOUND")
 	}
 
-	if allowedUsers, ok := settings["allowed_users"]; ok {
-		logging.Infof("allowed_users: %+v", allowedUsers)
+	if _, ok := settings["allowed_users"]; ok {
+		// logging.Infof("allowed_users: %+v", allowedUsers)
 	} else {
 		logging.Infof("allowed_users: NOT FOUND")
 	}
 
-	if eventFiltering, ok := settings["event_filtering"]; ok {
-		logging.Infof("event_filtering: %+v", eventFiltering)
+	if _, ok := settings["event_filtering"]; ok {
+		// logging.Infof("event_filtering: %+v", eventFiltering)
 	} else {
 		logging.Infof("event_filtering: NOT FOUND")
 	}
 
-	if contentFiltering, ok := settings["content_filtering"]; ok {
-		logging.Infof("content_filtering: %+v", contentFiltering)
+	if _, ok := settings["content_filtering"]; ok {
+		// logging.Infof("content_filtering: %+v", contentFiltering)
 	} else {
 		logging.Infof("content_filtering: NOT FOUND")
 	}
 
-	if relay, ok := settings["relay"]; ok {
-		logging.Infof("relay: %+v", relay)
+	if _, ok := settings["relay"]; ok {
+		// logging.Infof("relay: %+v", relay)
 	} else {
 		logging.Infof("relay: NOT FOUND")
 	}
 
-	if server, ok := settings["server"]; ok {
-		logging.Infof("server: %+v", server)
+	if _, ok := settings["server"]; ok {
+		// logging.Infof("server: %+v", server)
 	} else {
 		logging.Infof("server: NOT FOUND")
 	}
 
-	if externalServices, ok := settings["external_services"]; ok {
-		logging.Infof("external_services: %+v", externalServices)
+	if _, ok := settings["external_services"]; ok {
+		// logging.Infof("external_services: %+v", externalServices)
 	} else {
 		logging.Infof("external_services: NOT FOUND")
 	}
 
-	if logger, ok := settings["logging"]; ok {
-		logging.Infof("logging: %+v", logger)
+	if _, ok := settings["logging"]; ok {
+		// logging.Infof("logging: %+v", logger)
 	} else {
 		logging.Info("logging: NOT FOUND")
 	}
 
-	logging.Infof("Total settings keys: %d", len(settings))
-	logging.Infof("All top-level keys: %v", getKeys(settings))
-	logging.Infof("=== SETTINGS RESPONSE END ===")
-
 	response := fiber.Map{
 		"settings": settings,
 	}
-
-	logging.Infof("Final response structure: %+v", response)
 
 	return c.JSON(response)
 }
@@ -224,9 +215,6 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	logging.Infof("=== UPDATE SETTINGS REQUEST START ===")
-	logging.Infof("Raw request data: %+v", data)
-
 	// Extract settings from the request
 	settings, ok := data["settings"].(map[string]interface{})
 	if !ok {
@@ -235,9 +223,6 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 			"error": "Settings data expected",
 		})
 	}
-
-	logging.Infof("Extracted settings from request: %+v", settings)
-	logging.Infof("Settings keys being updated: %v", getKeys(settings))
 
 	// NORMALIZATION: Ensure proper data types before saving
 	normalizeDataTypes(settings)
@@ -303,14 +288,13 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	eventFilteringUpdated := false
 	if eventFilteringInterface, exists := settings["event_filtering"]; exists {
 		eventFilteringUpdated = true
-		logging.Info("Event filtering settings updated, will recalculate supported NIPs...")
-		
+
 		// Extract kind_whitelist from event_filtering
 		if eventFilteringMap, ok := eventFilteringInterface.(map[string]interface{}); ok {
 			if kindWhitelistInterface, exists := eventFilteringMap["kind_whitelist"]; exists {
 				// kind_whitelist is a slice/array, not a map
 				var enabledKinds []string
-				
+
 				// Handle both slice and interface slice formats
 				switch kindWhitelist := kindWhitelistInterface.(type) {
 				case []string:
@@ -324,14 +308,12 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 				default:
 					logging.Infof("DEBUG: Unexpected kind_whitelist type: %T", kindWhitelistInterface)
 				}
-				
+
 				// Calculate supported NIPs from enabled kinds using config
-				logging.Infof("DEBUG: About to calculate NIPs for enabled kinds: %v", enabledKinds)
 				supportedNIPs, err := config.GetSupportedNIPsFromKinds(enabledKinds)
 				if err != nil {
 					logging.Infof("Error calculating supported NIPs from kinds: %v", err)
 				} else {
-					logging.Infof("DEBUG: Successfully calculated supported NIPs: %v", supportedNIPs)
 					// Update supported_nips in relay settings (create relay section if it doesn't exist)
 					if _, exists := settings["relay"]; !exists {
 						settings["relay"] = make(map[string]interface{})
@@ -341,10 +323,9 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 						relayMap["supported_nips"] = supportedNIPs
 						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
 					}
-					
+
 					// Also update viper directly to ensure it's saved to config.yaml
 					viper.Set("relay.supported_nips", supportedNIPs)
-					logging.Infof("Updated viper relay.supported_nips: %v", supportedNIPs)
 				}
 			}
 		}
@@ -356,8 +337,6 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		viper.Set(key, value)
 	}
 
-	logging.Infof("=== UPDATE SETTINGS REQUEST END ===")
-
 	// Save the configuration
 	if err := viper.WriteConfig(); err != nil {
 		logging.Infof("Error writing config: %v", err)
@@ -366,9 +345,44 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// If allowed_users settings were updated, trigger event regeneration
+	// Refresh the cached configuration
+	if err := config.RefreshConfig(); err != nil {
+		logging.Infof("Warning: Failed to refresh config cache: %v", err)
+		// Don't fail the request, just log the warning
+	}
+
+	// If allowed_users settings were updated, update access control and trigger event regeneration
 	if allowedUsersUpdated {
-		logging.Info("Allowed users settings updated, triggering event regeneration...")
+		logging.Info("Allowed users settings updated, updating access control and triggering event regeneration...")
+
+		// Update the access control settings immediately
+		if allowedUsersInterface, ok := settings["allowed_users"].(map[string]interface{}); ok {
+			logging.Infof("Updating access control from settings: %+v", allowedUsersInterface)
+
+			var newAllowedUsersSettings types.AllowedUsersSettings
+
+			// Marshal to JSON and back to properly convert types
+			jsonData, err := json.Marshal(allowedUsersInterface)
+			if err == nil {
+				if err := json.Unmarshal(jsonData, &newAllowedUsersSettings); err == nil {
+					logging.Infof("Parsed settings - Mode: %s, Read: %s, Write: %s",
+						newAllowedUsersSettings.Mode, newAllowedUsersSettings.Read, newAllowedUsersSettings.Write)
+
+					// Update the global access control
+					if err := websocket.UpdateAccessControlSettings(&newAllowedUsersSettings); err != nil {
+						logging.Infof("Warning: Failed to update access control settings: %v", err)
+					} else {
+						logging.Info("Access control settings updated successfully")
+					}
+				} else {
+					logging.Infof("Error unmarshaling allowed users settings: %v", err)
+				}
+			} else {
+				logging.Infof("Error marshaling allowed users settings: %v", err)
+			}
+		} else {
+			logging.Info("No allowed_users settings found in update")
+		}
 
 		// Schedule batch update of kind 11888 events after a short delay
 		// This allows for multiple rapid setting changes to be batched together
@@ -480,6 +494,12 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save setting",
 		})
+	}
+
+	// Refresh the cached configuration
+	if err := config.RefreshConfig(); err != nil {
+		logging.Infof("Warning: Failed to refresh config cache: %v", err)
+		// Don't fail the request, just log the warning
 	}
 
 	return c.JSON(fiber.Map{

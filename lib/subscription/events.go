@@ -163,7 +163,6 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	expirationDate time.Time,
 	storageInfo *StorageInfo,
 ) error {
-	logging.Infof("Checking for existing NIP-88 event for subscriber %s", subscriber.Npub)
 
 	// Check for existing event
 	existingEvents, err := m.store.QueryEvents(nostr.Filter{
@@ -179,7 +178,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 	}
 
 	if len(existingEvents) > 0 {
-		logging.Infof("NIP-88 event already exists for subscriber %s, skipping creation", subscriber.Npub)
+
 		return nil
 	}
 

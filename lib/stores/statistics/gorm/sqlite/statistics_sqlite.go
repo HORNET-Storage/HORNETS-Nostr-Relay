@@ -85,8 +85,5 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	store.DB.Exec("PRAGMA cache_size = -32000")           // Use a 32MB page cache (negative means KB)
 	store.DB.Exec("PRAGMA temp_store = MEMORY")           // Store temporary tables in memory
 
-	// Log successful initialization with detailed settings
-	logging.Infof("SQLite database initialized with optimized concurrency settings")
-
 	return store, nil
 }
