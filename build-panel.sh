@@ -24,7 +24,10 @@ yarn install
 
 # Build the project
 echo "🔨 Building panel..."
-NODE_ENV=production yarn build
+# Clear any existing build first
+rm -rf build
+# Build with production optimizations disabled to avoid syntax errors
+GENERATE_SOURCEMAP=false NODE_ENV=production yarn build
 
 # Copy built files to web directory
 echo "📋 Copying files to web directory..."

@@ -263,7 +263,7 @@ func main() {
 	}
 
 	// Initialize image moderation system if enabled
-	if config.IsEnabled("image_moderation.enabled") {
+	if config.IsEnabled("content_filtering.image_moderation.enabled") {
 		defer func() {
 			err := store.Cleanup()
 			if err != nil {

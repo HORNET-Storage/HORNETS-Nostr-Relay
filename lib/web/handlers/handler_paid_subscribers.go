@@ -90,10 +90,10 @@ func HandleGetPaidSubscriberProfiles(c *fiber.Ctx, store stores.Store) error {
 
 		logging.Infof("Returning %d profiles with pictures", len(profiles))
 		// Log the response structure to help with panel-side implementation
-		if len(profiles) > 0 {
-			exampleJSON, _ := json.MarshalIndent(profiles[0], "", "  ")
-			logging.Infof("Example profile response structure: %s", exampleJSON)
-		}
+		// if len(profiles) > 0 {
+		// 	exampleJSON, _ := json.MarshalIndent(profiles[0], "", "  ")
+		// 	logging.Infof("Example profile response structure: %s", exampleJSON)
+		// }
 		return c.JSON(profiles)
 	}
 

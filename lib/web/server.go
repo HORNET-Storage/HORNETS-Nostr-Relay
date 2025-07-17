@@ -58,6 +58,17 @@ func StartServer(store stores.Store) error {
 		AllowMethods: "GET, POST, DELETE, PUT, OPTIONS",
 	}))
 
+	// Disable compression for static assets to prevent ngrok issues
+	app.Use(func(c *fiber.Ctx) error {
+		// Set headers to prevent compression for JS/CSS files
+		if strings.Contains(c.Path(), ".js") || strings.Contains(c.Path(), ".css") {
+			c.Set("Cache-Control", "no-transform")
+			c.Set("Content-Encoding", "identity")
+			c.Set("Accept-Encoding", "identity")
+		}
+		return c.Next()
+	})
+
 	// Request logging middleware
 	app.Use(func(c *fiber.Ctx) error {
 		logging.Debug("HTTP Request", map[string]interface{}{
@@ -97,6 +108,43 @@ func StartServer(store stores.Store) error {
 
 	app.Post("/logout", func(c *fiber.Ctx) error {
 		return auth.LogoutUser(c, store)
+	})
+
+	// ================================
+	// WALLET PROXY ROUTES (MUST BE BEFORE /api/wallet ROUTES)
+	// ================================
+
+	// Public wallet authentication routes (no authentication required)
+	app.Get("/api/wallet-proxy/challenge", func(c *fiber.Ctx) error {
+		return wallet.HandleChallenge(c)
+	})
+
+	app.Post("/api/wallet-proxy/verify", func(c *fiber.Ctx) error {
+		return wallet.HandleVerify(c)
+	})
+
+	// Protected wallet operation routes (JWT required)
+	walletProxySecured := app.Group("/api/wallet-proxy")
+
+	if !config.IsEnabled("demo") {
+		walletProxySecured.Use(func(c *fiber.Ctx) error {
+			return middleware.JwtMiddleware(c, store)
+		})
+		logging.Info("JWT authentication enabled for protected wallet proxy routes")
+	} else {
+		logging.Warn("Running in demo mode - protected wallet proxy routes are UNSECURED!")
+	}
+
+	walletProxySecured.Get("/panel-health", func(c *fiber.Ctx) error {
+		return wallet.HandlePanelHealth(c)
+	})
+
+	walletProxySecured.Post("/calculate-tx-size", func(c *fiber.Ctx) error {
+		return wallet.HandleCalculateTxSize(c)
+	})
+
+	walletProxySecured.Post("/transaction", func(c *fiber.Ctx) error {
+		return wallet.HandleTransaction(c)
 	})
 
 	// ================================
@@ -199,6 +247,11 @@ func StartServer(store stores.Store) error {
 	// Auth routes
 	secured.Get("/paid-subscriber-profiles", func(c *fiber.Ctx) error {
 		return handlers.HandleGetPaidSubscriberProfiles(c, store)
+	})
+
+	// Profiles route
+	secured.Post("/profiles", func(c *fiber.Ctx) error {
+		return handlers.HandleGetProfiles(c, store)
 	})
 
 	secured.Post("/refresh-token", func(c *fiber.Ctx) error {
