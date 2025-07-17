@@ -76,21 +76,12 @@ func (s *ModerationService) ModerateURL(mediaURL string) (*ModerationResponse, e
 	// 2. Send the URL directly to the API (depends on API capability)
 
 	// We'll implement option 1 here, as it's more reliable
-	// Download the media file
-	imagePath, err := s.downloadImage(mediaURL)
+	// Download the media file with retry logic (3 attempts)
+	imagePath, err := s.downloadImageWithRetry(mediaURL, 3)
 	if err != nil {
-		// If download fails, allow the content to avoid false positives
-		// but log the error
-		logging.Infof("Warning: Failed to download image for moderation: %v\n", err)
-		return &ModerationResponse{
-			Decision:       string(DecisionAllow),
-			Explanation:    "Failed to download image for moderation",
-			ContentLevel:   0,
-			Confidence:     0.0,
-			Category:       "error",
-			ProcessingTime: 0.0,
-			ModerationMode: s.Mode,
-		}, nil
+		// If download fails after all retries, return error instead of allowing
+		// This ensures proper moderation instead of false positives
+		return nil, fmt.Errorf("failed to download image for moderation after retries: %w", err)
 	}
 	defer os.Remove(imagePath) // Clean up the temporary file
 
@@ -180,7 +171,7 @@ func (s *ModerationService) ModerateFile(filePath string) (*ModerationResponse, 
 	logging.Infof("Request body size: %d bytes", requestBody.Len())
 
 	// Create and send the request
-	requestURL := fmt.Sprintf("%s/moderate?moderation_mode=%s&threshold=%f",
+	requestURL := fmt.Sprintf("%s?moderation_mode=%s&threshold=%f",
 		s.APIEndpoint, s.Mode, s.Threshold)
 
 	req, err := http.NewRequest("POST", requestURL, &requestBody)
@@ -212,6 +203,34 @@ func (s *ModerationService) ModerateFile(filePath string) (*ModerationResponse, 
 	}
 
 	return &result, nil
+}
+
+// downloadImageWithRetry downloads media with retry logic and exponential backoff
+func (s *ModerationService) downloadImageWithRetry(mediaURL string, maxRetries int) (string, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		logging.Infof("Attempting to download image (attempt %d/%d): %s", attempt, maxRetries, mediaURL)
+
+		imagePath, err := s.downloadImage(mediaURL)
+		if err == nil {
+			logging.Infof("Successfully downloaded image on attempt %d: %s", attempt, mediaURL)
+			return imagePath, nil
+		}
+
+		lastErr = err
+		logging.Infof("Download attempt %d failed: %v", attempt, err)
+
+		// Don't wait after the last attempt
+		if attempt < maxRetries {
+			// Exponential backoff: 1s, 2s, 4s, etc.
+			backoffDuration := time.Duration(1<<(attempt-1)) * time.Second
+			logging.Infof("Waiting %v before retry...", backoffDuration)
+			time.Sleep(backoffDuration)
+		}
+	}
+
+	return "", fmt.Errorf("failed to download image after %d attempts, last error: %w", maxRetries, lastErr)
 }
 
 // downloadMedia downloads media (image or video) from a URL to a temporary file
@@ -400,20 +419,12 @@ func (s *ModerationService) ModerateDisputeURL(mediaURL string, disputeReason st
 		}, nil
 	}
 
-	// Download the media file
-	imagePath, err := s.downloadImage(mediaURL)
+	// Download the media file with retry logic (3 attempts)
+	imagePath, err := s.downloadImageWithRetry(mediaURL, 3)
 	if err != nil {
-		// If download fails, allow the content to avoid false positives
-		logging.Infof("Warning: Failed to download image for dispute moderation: %v\n", err)
-		return &ModerationResponse{
-			Decision:       string(DecisionAllow),
-			Explanation:    "Failed to download image for dispute moderation",
-			ContentLevel:   0,
-			Confidence:     0.0,
-			Category:       "error",
-			ProcessingTime: 0.0,
-			ModerationMode: s.Mode,
-		}, nil
+		// If download fails after all retries, return error instead of allowing
+		// This ensures proper moderation instead of false positives
+		return nil, fmt.Errorf("failed to download image for dispute moderation after retries: %w", err)
 	}
 	defer os.Remove(imagePath) // Clean up the temporary file
 
@@ -510,7 +521,7 @@ func (s *ModerationService) ModerateDisputeFile(filePath string, disputeReason s
 	logging.Infof("Dispute moderation request body size: %d bytes", requestBody.Len())
 
 	// Create and send the request
-	requestURL := fmt.Sprintf("%s/moderate_dispute?moderation_mode=%s&threshold=%f", s.APIEndpoint, s.Mode, s.Threshold)
+	requestURL := fmt.Sprintf("%s_dispute?moderation_mode=%s&threshold=%f", s.APIEndpoint, s.Mode, s.Threshold)
 
 	req, err := http.NewRequest("POST", requestURL, &requestBody)
 	if err != nil {
