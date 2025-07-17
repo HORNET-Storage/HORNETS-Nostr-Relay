@@ -433,7 +433,7 @@ func setDefaults() {
 	viper.SetDefault("content_filtering.image_moderation.enabled", true)
 	viper.SetDefault("content_filtering.image_moderation.mode", "full")
 	viper.SetDefault("content_filtering.image_moderation.threshold", 0.4)
-	viper.SetDefault("content_filtering.image_moderation.timeout_seconds", 60)
+	viper.SetDefault("content_filtering.image_moderation.timeout_seconds", 600)
 	viper.SetDefault("content_filtering.image_moderation.check_interval_seconds", 30)
 	viper.SetDefault("content_filtering.image_moderation.concurrency", 5)
 

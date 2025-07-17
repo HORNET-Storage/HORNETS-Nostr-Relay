@@ -331,21 +331,26 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	// Update each setting
+	// Update each setting using thread-safe config functions
 	for key, value := range settings {
 		logging.Infof("Setting %s = %v (type: %T)", key, value, value)
-		viper.Set(key, value)
+		if err := config.UpdateConfig(key, value, false); err != nil {
+			logging.Infof("Error updating config key %s: %v", key, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("Failed to update setting %s", key),
+			})
+		}
 	}
 
-	// Save the configuration
-	if err := viper.WriteConfig(); err != nil {
-		logging.Infof("Error writing config: %v", err)
+	// Save the configuration using thread-safe function
+	if err := config.SaveConfig(); err != nil {
+		logging.Infof("Error saving config: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save settings",
 		})
 	}
 
-	// Refresh the cached configuration
+	// Config is already refreshed by SaveConfig(), so we can remove this
 	if err := config.RefreshConfig(); err != nil {
 		logging.Infof("Warning: Failed to refresh config cache: %v", err)
 		// Don't fail the request, just log the warning
@@ -485,12 +490,9 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 		})
 	}
 
-	// Update the setting
-	viper.Set(key, value)
-
-	// Save the configuration
-	if err := viper.WriteConfig(); err != nil {
-		logging.Infof("Error writing config: %v", err)
+	// Update the setting using thread-safe config function
+	if err := config.UpdateConfig(key, value, true); err != nil {
+		logging.Infof("Error updating config: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to save setting",
 		})
