@@ -46,22 +46,22 @@ Official Go programming language environment. Download from:
 ✅ **GCC (GNU Compiler Collection)**
 Required for building C-based dependencies via `cgo`.
 
-**Platform-specific installation:**
+----
 
-* **Ubuntu/Debian Linux**
+#### If On **Linux or Debian** Then Run:
 
   ```bash
   sudo apt update
   sudo apt install build-essential
   ```
 
-* **macOS**
+#### If On **macOS** Then Run:
 
   ```bash
   xcode-select --install
   ```
 
-* **Windows**
+#### If On **Windows** Then Run:
   Recommended: [MSYS2](https://www.msys2.org/)
 
   ```bash
@@ -72,7 +72,7 @@ Required for building C-based dependencies via `cgo`.
 
 ---
 
-### 🚀 **Building from Source**
+### 🚀 **Building Relay from Source**
 
 After cloning the repository:
 
@@ -81,18 +81,52 @@ git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
 cd HORNETS-Nostr-Relay
 ```
 
-Use the provided build scripts:
+#### If On **Linux or macOS** Then Run:
 
-#### On **Linux/macOS**
-
+*Run this script found in the main directory:*
 ```bash
 ./build.sh
 ```
 
-#### On **Windows**
+#### If On **Windows** Then Run:
 
+*Run this script found in the main directory:*
 ```powershell
 ./build.bat
+```
+
+The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
+
+---
+
+### 🚀 **Building Panel from Source**
+
+#### On **Linux or macOS** When Needing to Pull Latest Panel:
+
+*Run this script found in the main directory:*
+```bash
+./build-panel.sh
+```
+
+#### On **Windows** When Needing to Pull Latest Panel:
+
+*Run this script found in the main directory:*
+```powershell
+./build-panel.bat
+```
+
+#### On **Linux or macOS** When Editing Panel in /panel-source (Hot Reload Dev Mode):
+
+*Run this script found in the main directory:*
+```bash
+./build-panel-devmode.sh
+```
+
+#### On **Windows** When Editing Panel in /panel-source (Hot Reload Dev Mode):
+
+*Run this script found in the main directory:*
+```powershell
+./build-panel-devmode.bat
 ```
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
