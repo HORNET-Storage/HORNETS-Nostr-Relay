@@ -1,23 +1,33 @@
 #!/bin/bash
 
 # Development Mode Build Script for HORNETS-Relay-Panel
-# This script builds the panel from local source without pulling from remote
+# This script builds the panel from local source
+# If panel-source doesn't exist, it clones from GitHub
 
 set -e
 
 echo "🚀 Building HORNETS-Relay-Panel (Development Mode)..."
-echo "📁 Using local panel source at: ./panel-source"
+echo ""
 
 # Check if local panel-source exists
 if [ ! -d "panel-source" ]; then
-    echo "❌ Error: Local panel-source directory not found!"
-    echo "   Expected path: $(pwd)/panel-source"
+    echo "📦 Local panel-source directory not found!"
+    echo "📥 Creating panel-source and cloning from GitHub..."
     echo ""
-    echo "   To set up local development:"
-    echo "   1. Clone the panel repo: git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-source"
-    echo "   2. Make your changes in ./panel-source"
-    echo "   3. Run this script to build and deploy"
-    exit 1
+    
+    # Clone the panel repository
+    git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-source
+    if [ $? -ne 0 ]; then
+        echo "❌ Error: Failed to clone panel repository!"
+        echo "   Please check your internet connection and git installation."
+        exit 1
+    fi
+    
+    echo "✅ Successfully cloned panel repository!"
+    echo ""
+else
+    echo "📁 Using existing local panel source..."
+    echo ""
 fi
 
 # Navigate to panel source directory
@@ -50,7 +60,8 @@ rm -rf web/*
 # Copy built files
 cp -r panel-source/build/* web/
 
-echo "✅ Panel built and deployed successfully from local source!"
+echo ""
+echo "✅ Panel built and deployed successfully!"
 echo "🌐 The panel is now available at your relay's root URL"
 echo ""
 echo "📝 Development workflow:"
