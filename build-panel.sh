@@ -32,7 +32,11 @@ GENERATE_SOURCEMAP=false NODE_ENV=production yarn build
 # Copy built files to web directory
 echo "📋 Copying files to web directory..."
 cd ..
+# Create web directory if it doesn't exist
+mkdir -p web
+# Clear any existing files
 rm -rf web/*
+# Copy built files
 cp -r panel-source/build/* web/
 
 echo "✅ Panel built and deployed successfully!"
