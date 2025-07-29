@@ -21,6 +21,7 @@ import (
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -68,7 +69,7 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.Ctx = context.Background()
 
 	store.DatabasePath = basepath
-	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("temp"))
+	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), "temp")
 
 	options := badgerhold.DefaultOptions
 	options.Encoder = cborEncode
@@ -496,6 +497,12 @@ func toInterfaceSlice[T any](items []T) []interface{} {
 func postFilterEvents(events []*nostr.Event, filter nostr.Filter) []*nostr.Event {
 	var filtered []*nostr.Event
 
+	// Parse search query if present
+	var searchQuery search.SearchQuery
+	if filter.Search != "" {
+		searchQuery = search.ParseSearchQuery(filter.Search)
+	}
+
 	for _, event := range events {
 		// Match event ID (if specified)
 		if len(filter.IDs) > 0 && !contains(filter.IDs, event.ID) {
@@ -517,7 +524,7 @@ func postFilterEvents(events []*nostr.Event, filter nostr.Filter) []*nostr.Event
 		}
 
 		// Match search term (if specified)
-		if filter.Search != "" && !strings.Contains(strings.ToLower(event.Content), strings.ToLower(filter.Search)) {
+		if searchQuery.Text != "" && !strings.Contains(strings.ToLower(event.Content), strings.ToLower(searchQuery.Text)) {
 			continue
 		}
 
@@ -699,6 +706,12 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		}
 	}
 
+	// Update search index for text events
+	if err := store.UpdateSearchIndex(ev); err != nil {
+		// Log the error but don't fail the operation
+		logging.Infof("Failed to update search index for event %s: %v\n", ev.ID, err)
+	}
+
 	// Check for images that need moderation
 	// Extract image URLs from the event using our image extractor
 	imageURLs := ExtractImageURLsFromEvent(ev)
@@ -742,6 +755,12 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 			// Log the error but don't fail the operation
 			logging.Infof("Failed to delete event from statistics: %v\n", err)
 		}
+	}
+
+	// Remove from search index
+	if err := store.RemoveFromSearchIndex(eventID); err != nil {
+		// Log the error but don't fail the operation
+		logging.Infof("Failed to remove event %s from search index: %v\n", eventID, err)
 	}
 
 	return nil
