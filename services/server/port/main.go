@@ -41,6 +41,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1808"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
@@ -452,6 +453,7 @@ func main() {
 		logging.Info("Using specific stream handlers because Mode set to 'whitelist'")
 		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
 		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
+		nostr.RegisterHandler("kind/1808", kind1808.BuildKind1808Handler(store))
 		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 		nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
 		nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))

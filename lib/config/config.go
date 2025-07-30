@@ -440,7 +440,7 @@ func setDefaults() {
 	// Event filtering defaults
 	viper.SetDefault("event_filtering.mode", "whitelist")
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
