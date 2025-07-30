@@ -413,16 +413,16 @@ func StartServer(store stores.Store) error {
 		Root:   http.Dir("./web"),
 		Browse: false,
 		Index:  "index.html",
-		// Only serve static files, don't catch API routes
+		// Only serve static files, don't catch API routes or blossom routes
 		Next: func(c *fiber.Ctx) bool {
-			return strings.HasPrefix(c.Path(), "/api/")
+			return strings.HasPrefix(c.Path(), "/api/") || strings.HasPrefix(c.Path(), "/blossom/")
 		},
 	}))
 
-	// Catch-all for non-API routes only
+	// Catch-all for non-API and non-blossom routes only
 	app.Use(func(c *fiber.Ctx) error {
-		// Don't interfere with API routes
-		if strings.HasPrefix(c.Path(), "/api/") {
+		// Don't interfere with API routes or blossom routes
+		if strings.HasPrefix(c.Path(), "/api/") || strings.HasPrefix(c.Path(), "/blossom/") {
 			return c.Next()
 		}
 		return c.SendFile("./web/index.html")
