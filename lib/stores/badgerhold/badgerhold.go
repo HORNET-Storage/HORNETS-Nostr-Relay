@@ -385,10 +385,10 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 	}
 
 	if filter.Since != nil {
-		query = query.And("CreatedAt").Ge(filter.Since.Time())
+		query = query.And("CreatedAt").Ge(*filter.Since)
 	}
 	if filter.Until != nil {
-		query = query.And("CreatedAt").Le(filter.Until.Time())
+		query = query.And("CreatedAt").Le(*filter.Until)
 	}
 
 	if len(filter.Tags) > 0 {
