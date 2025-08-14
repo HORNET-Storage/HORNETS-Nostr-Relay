@@ -20,8 +20,8 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
@@ -30,7 +30,6 @@ import (
 	"github.com/timshannon/badgerhold/v4"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 )
 
 const (
@@ -706,35 +705,39 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		}
 	}
 
-	// Update search index for text events
+  // Update search index for text events
 	if err := store.UpdateSearchIndex(ev); err != nil {
 		// Log the error but don't fail the operation
 		logging.Infof("Failed to update search index for event %s: %v\n", ev.ID, err)
 	}
 
-	// Check for images that need moderation
-	// Extract image URLs from the event using our image extractor
-	imageURLs := ExtractImageURLsFromEvent(ev)
-	if len(imageURLs) > 0 {
-		// Check if we should bypass moderation for exclusive mode
-		if ac := websocket.GetAccessControl(); ac != nil {
-			if settings := ac.GetSettings(); settings != nil && strings.ToLower(settings.Mode) == "exclusive" {
-				logging.Infof("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
-				// Skip moderation entirely for exclusive mode
+	// Check for images that need moderation - only if image moderation is enabled
+	if cfg, err := config.GetConfig(); err != nil {
+		logging.Infof("Failed to get config for image moderation check: %v", err)
+	} else if cfg.ContentFiltering.ImageModeration.Enabled {
+		// Extract image URLs from the event using our image extractor
+		imageURLs := ExtractImageURLsFromEvent(ev)
+		if len(imageURLs) > 0 {
+			// Check if we should bypass moderation for exclusive mode
+			if ac := websocket.GetAccessControl(); ac != nil {
+				if settings := ac.GetSettings(); settings != nil && strings.ToLower(settings.Mode) == "exclusive" {
+					logging.Infof("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
+					// Skip moderation entirely for exclusive mode
+				} else {
+					// Continue with moderation for free and paid modes
+					logging.Infof("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
+					err = store.AddToPendingModeration(ev.ID, imageURLs)
+					if err != nil {
+						logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
+					}
+				}
 			} else {
-				// Continue with moderation for free and paid modes
-				logging.Infof("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
+				// Fallback to current behavior if access control not available
+				logging.Infof("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
 				err = store.AddToPendingModeration(ev.ID, imageURLs)
 				if err != nil {
 					logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
 				}
-			}
-		} else {
-			// Fallback to current behavior if access control not available
-			logging.Infof("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
-			err = store.AddToPendingModeration(ev.ID, imageURLs)
-			if err != nil {
-				logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
 			}
 		}
 	}
