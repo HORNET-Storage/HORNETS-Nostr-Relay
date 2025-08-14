@@ -41,7 +41,6 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1808"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
@@ -52,6 +51,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16630"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1808"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1984"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19841"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
@@ -411,9 +411,6 @@ func main() {
 	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
 	query.AddQueryHandler(host, store)
 
-	// Use config filtering mode instead of loading from nostr utils
-	filteringMode := viper.GetString("event_filtering.mode")
-
 	logging.Infof("Host started with id: %s\n", host.ID())
 	logging.Infof("Host started with address: %s\n", host.Addrs())
 
@@ -444,47 +441,49 @@ func main() {
 		logging.Infof("Created relay store: %+v", relayStore)
 	}
 
-	// Register Our Nostr Stream Handlers
-	switch filteringMode {
-	case "blacklist":
-		logging.Info("Using universal stream handler because Mode set to 'blacklist'")
-		nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
-	case "whitelist":
-		logging.Info("Using specific stream handlers because Mode set to 'whitelist'")
-		nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
-		nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
-		nostr.RegisterHandler("kind/1808", kind1808.BuildKind1808Handler(store))
-		nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
-		nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
-		nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
-		nostr.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
-		nostr.RegisterHandler("kind/8", kind8.BuildKind8Handler(store))
-		nostr.RegisterHandler("kind/1984", kind1984.BuildKind1984Handler(store))
-		nostr.RegisterHandler("kind/9735", kind9735.BuildKind9735Handler(store))
-		nostr.RegisterHandler("kind/9372", kind9372.BuildKind9372Handler(store))
-		nostr.RegisterHandler("kind/9373", kind9373.BuildKind9373Handler(store))
-		nostr.RegisterHandler("kind/9802", kind9802.BuildKind9802Handler(store))
-		nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
-		nostr.RegisterHandler("kind/10001", kind10001.BuildKind10001Handler(store))
-		nostr.RegisterHandler("kind/10002", kind10002.BuildKind10002Handler(store))
-		nostr.RegisterHandler("kind/11011", kind11011.BuildKind11011Handler(store))
-		nostr.RegisterHandler("kind/22242", auth.BuildAuthHandler(store))
-		nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
-		nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
-		nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
-		nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
-		nostr.RegisterHandler("kind/30078", kind30078.BuildKind30078Handler(store))
-		nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
-		nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
-		nostr.RegisterHandler("kind/16630", kind16630.BuildKind16630Handler(store))
-		nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))
-		nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
-		nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
-		nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
-		nostr.RegisterHandler("kind/117", kind117.BuildKind117Handler(store))
-		nostr.RegisterHandler("kind/1063", kind1063.BuildKind1063Handler(store))
-	default:
-		logging.Fatalf("Unknown settings mode: %s, exiting", filteringMode)
+	// Register All Nostr Stream Handlers
+	// Always register all specific handlers for registered kinds
+	logging.Info("Registering all specific kind handlers...")
+	nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
+	nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
+	nostr.RegisterHandler("kind/1808", kind1808.BuildKind1808Handler(store))
+	nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
+	nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
+	nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
+	nostr.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
+	nostr.RegisterHandler("kind/8", kind8.BuildKind8Handler(store))
+	nostr.RegisterHandler("kind/1984", kind1984.BuildKind1984Handler(store))
+	nostr.RegisterHandler("kind/9735", kind9735.BuildKind9735Handler(store))
+	nostr.RegisterHandler("kind/9372", kind9372.BuildKind9372Handler(store))
+	nostr.RegisterHandler("kind/9373", kind9373.BuildKind9373Handler(store))
+	nostr.RegisterHandler("kind/9802", kind9802.BuildKind9802Handler(store))
+	nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
+	nostr.RegisterHandler("kind/10001", kind10001.BuildKind10001Handler(store))
+	nostr.RegisterHandler("kind/10002", kind10002.BuildKind10002Handler(store))
+	nostr.RegisterHandler("kind/11011", kind11011.BuildKind11011Handler(store))
+	nostr.RegisterHandler("kind/22242", auth.BuildAuthHandler(store))
+	nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
+	nostr.RegisterHandler("kind/30008", kind30008.BuildKind30008Handler(store))
+	nostr.RegisterHandler("kind/30009", kind30009.BuildKind30009Handler(store))
+	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
+	nostr.RegisterHandler("kind/30078", kind30078.BuildKind30078Handler(store))
+	nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
+	nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
+	nostr.RegisterHandler("kind/16630", kind16630.BuildKind16630Handler(store))
+	nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))
+	nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
+	nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
+	nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
+	nostr.RegisterHandler("kind/117", kind117.BuildKind117Handler(store))
+	nostr.RegisterHandler("kind/1063", kind1063.BuildKind1063Handler(store))
+
+	// Always register universal handler for unregistered kinds
+	nostr.RegisterHandler("universal", universal.BuildUniversalHandler(store))
+
+	if viper.GetBool("event_filtering.allow_unregistered_kinds") {
+		logging.Info("Universal handler registered for unregistered kinds (allow_unregistered_kinds=true)")
+	} else {
+		logging.Info("Universal handler registered but unregistered kinds are disabled (allow_unregistered_kinds=false)")
 	}
 
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))

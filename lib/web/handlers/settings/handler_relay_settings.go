@@ -284,13 +284,63 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		logging.Info("Relay settings updated, will regenerate kind 10411 event...")
 	}
 
-	// Check if event_filtering settings are being updated (affects kind_whitelist and supported_nips)
+	// Check if event_filtering settings are being updated (affects kind_whitelist, allow_unregistered_kinds, registered_kinds and supported_nips)
 	eventFilteringUpdated := false
 	if eventFilteringInterface, exists := settings["event_filtering"]; exists {
 		eventFilteringUpdated = true
 
-		// Extract kind_whitelist from event_filtering
+		// Extract event_filtering settings
 		if eventFilteringMap, ok := eventFilteringInterface.(map[string]interface{}); ok {
+			// Handle allow_unregistered_kinds field
+			if allowUnregisteredInterface, exists := eventFilteringMap["allow_unregistered_kinds"]; exists {
+				// Ensure it's a boolean
+				switch v := allowUnregisteredInterface.(type) {
+				case bool:
+					logging.Infof("Allow unregistered kinds set to: %v", v)
+				default:
+					logging.Infof("WARNING: allow_unregistered_kinds should be boolean, got %T", allowUnregisteredInterface)
+				}
+			}
+
+			// Handle registered_kinds field
+			if registeredKindsInterface, exists := eventFilteringMap["registered_kinds"]; exists {
+				var registeredKinds []int
+
+				// Handle both slice and interface slice formats
+				switch kinds := registeredKindsInterface.(type) {
+				case []int:
+					registeredKinds = kinds
+				case []interface{}:
+					for _, kind := range kinds {
+						switch k := kind.(type) {
+						case int:
+							registeredKinds = append(registeredKinds, k)
+						case float64:
+							// JSON numbers come as float64
+							registeredKinds = append(registeredKinds, int(k))
+						case string:
+							// Try to parse string to int
+							if kindInt, err := strconv.Atoi(k); err == nil {
+								registeredKinds = append(registeredKinds, kindInt)
+							} else {
+								logging.Infof("WARNING: Could not parse registered kind '%s' to int: %v", k, err)
+							}
+						default:
+							logging.Infof("WARNING: Unexpected registered kind type %T: %v", k, k)
+						}
+					}
+				default:
+					logging.Infof("WARNING: Unexpected registered_kinds type: %T", registeredKindsInterface)
+				}
+
+				// Update the registered_kinds in the map
+				if len(registeredKinds) > 0 {
+					eventFilteringMap["registered_kinds"] = registeredKinds
+					logging.Infof("Normalized registered_kinds to integers: %v", registeredKinds)
+				}
+			}
+
+			// Handle kind_whitelist
 			if kindWhitelistInterface, exists := eventFilteringMap["kind_whitelist"]; exists {
 				// kind_whitelist is a slice/array, not a map
 				var enabledKinds []string

@@ -47,43 +47,40 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 		}
 	}
 
-	if viper.GetString("event_filtering.mode") == "blacklist" {
-		handleBlacklistModeEvent(c, env)
-	} else {
-		handleWhitelistModeEvent(c, env)
-	}
-}
-
-func handleBlacklistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
-	handler := lib_nostr.GetHandler("universal")
-
-	logging.Info("handled by blacklist mode.")
-
-	read := func() ([]byte, error) {
-		return json.Marshal(env)
-	}
-
-	write := func(messageType string, params ...interface{}) {
-		response := lib_nostr.BuildResponse(messageType, params)
-		if len(response) > 0 {
-			handleIncomingMessage(c, response)
-		}
-	}
-
-	if handler != nil {
-		notifyListeners(&env.Event)
-
-		handler(read, write)
-	} else {
-		write("OK", env.Event.ID, false, "Universal handler not supported")
-	}
-}
-
-func handleWhitelistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	// Try to get specific handler for this kind
 	handler := lib_nostr.GetHandler(fmt.Sprintf("kind/%d", env.Kind))
-	logging.Info("handled by whitelist mode.")
+
+	if handler != nil {
+		// We have a specific handler for this registered kind
+		// Check if it's allowed by the whitelist
+		if !lib_nostr.IsKindAllowed(env.Kind) {
+			logging.Infof("Rejected event: kind %d not in whitelist", env.Kind)
+			write("OK", env.Event.ID, false, fmt.Sprintf("Kind %d not allowed", env.Kind))
+			return
+		}
+		// Use the specific handler
+		handleEventWithHandler(c, env, handler)
+	} else {
+		// No specific handler - this is an unregistered kind
+		if viper.GetBool("event_filtering.allow_unregistered_kinds") {
+			// Use universal handler for unregistered kinds
+			universalHandler := lib_nostr.GetHandler("universal")
+			if universalHandler != nil {
+				logging.Infof("Handling unregistered kind %d with universal handler", env.Kind)
+				handleEventWithHandler(c, env, universalHandler)
+			} else {
+				write("OK", env.Event.ID, false, "Universal handler not available")
+			}
+		} else {
+			logging.Infof("Rejected unregistered kind %d (allow_unregistered_kinds=false)", env.Kind)
+			write("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
+		}
+	}
+}
+
+// handleEventWithHandler processes an event with the given handler
+func handleEventWithHandler(c *websocket.Conn, env *nostr.EventEnvelope, handler func(lib_nostr.KindReader, lib_nostr.KindWriter)) {
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 	read := func() ([]byte, error) {
 		return json.Marshal(env)
@@ -96,11 +93,6 @@ func handleWhitelistModeEvent(c *websocket.Conn, env *nostr.EventEnvelope) {
 		}
 	}
 
-	if handler != nil {
-		notifyListeners(&env.Event)
-
-		handler(read, write)
-	} else {
-		write("OK", env.Event.ID, false, "Kind not supported")
-	}
+	notifyListeners(&env.Event)
+	handler(read, write)
 }

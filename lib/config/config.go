@@ -438,7 +438,20 @@ func setDefaults() {
 	viper.SetDefault("content_filtering.image_moderation.concurrency", 5)
 
 	// Event filtering defaults
-	viper.SetDefault("event_filtering.mode", "whitelist")
+	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
+	viper.SetDefault("event_filtering.registered_kinds", []int{
+		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
+		117, 1063, 1808, 1984, // Special kinds (NO 1060 handler)
+		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
+		10000, 10001, 10002, 10010, // List kinds
+		10411,        // Relay info kind (NO 10011 or 10022 handlers)
+		11011,        // Relay list kind
+		16629, 16630, // Ephemeral kinds
+		19841, 19842, 19843, // Subscription kinds
+		22242,               // Auth kind
+		30000, 30008, 30009, // Parameterized replaceable kinds
+		30023, 30078, 30079, // Long-form content kinds
+	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
 	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
