@@ -20,13 +20,13 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
-
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/timshannon/badgerhold/v4"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
@@ -705,7 +705,7 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		}
 	}
 
-  // Update search index for text events
+	// Update search index for text events
 	if err := store.UpdateSearchIndex(ev); err != nil {
 		// Log the error but don't fail the operation
 		logging.Infof("Failed to update search index for event %s: %v\n", ev.ID, err)
