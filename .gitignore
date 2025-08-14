@@ -45,3 +45,9 @@ hornet-storage-demo
 config.yaml
 
 settings.local.json
+
+# Test databases
+test-db/
+test-db-*/
+./test-db
+./test-db-*

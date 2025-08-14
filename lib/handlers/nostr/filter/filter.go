@@ -15,6 +15,7 @@ import (
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
 )
 
 // getAuthenticatedPubkey attempts to extract the authenticated pubkey from request data
@@ -204,7 +205,15 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Get global relay store for missing note retrieval
 		relayStore := sync.GetRelayStore()
 
+		// Parse search extensions if any filter has a search
+		var searchQueries []search.SearchQuery
 		for _, filter := range request.Filters {
+			if filter.Search != "" {
+				searchQuery := search.ParseSearchQuery(filter.Search)
+				searchQueries = append(searchQueries, searchQuery)
+				logging.Infof(ColorCyan+"[SEARCH] Parsed query: text='%s', extensions=%v"+ColorReset, searchQuery.Text, searchQuery.Extensions)
+			}
+
 			events, err := store.QueryEvents(filter)
 			if err != nil {
 				logging.Infof("Error querying events for filter: %v", err)
@@ -230,6 +239,16 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// No debug logging for database results
 
 			combinedEvents = append(combinedEvents, events...)
+		}
+
+		// Check if any search query has include:spam extension
+		includeSpam := false
+		for _, sq := range searchQueries {
+			if sq.IsSpamIncluded() {
+				includeSpam = true
+				logging.Infof(ColorYellow + "[SEARCH] include:spam extension detected - will include blocked/pending events" + ColorReset)
+				break
+			}
 		}
 
 		// Attempt to retrieve missing events via DHT (with timeout protection)
@@ -317,9 +336,9 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		var pendingCount int
 		var pendingAllowedCount int
 
-		// Always apply moderation filtering
+		// Always apply moderation filtering (unless include:spam is present)
 		for _, event := range uniqueEvents {
-			// First check if event is blocked (blocked events are always filtered out)
+			// First check if event is blocked (blocked events are normally filtered out)
 			isBlocked, err := store.IsEventBlocked(event.ID)
 			if err != nil {
 				logging.Infof("Error checking if event %s is blocked: %v", event.ID, err)
@@ -332,8 +351,15 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				logging.Infof(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
 					event.ID, event.Kind, event.PubKey)
 				blockedCount++
-				// Skip this event - it's blocked for moderation reasons
-				continue
+
+				// If include:spam is present, include even blocked events
+				if includeSpam {
+					logging.Infof(ColorYellow+"[SEARCH] Including blocked event %s due to include:spam"+ColorReset, event.ID)
+					filteredEvents = append(filteredEvents, event)
+				} else {
+					// Skip this event - it's blocked for moderation reasons
+					continue
+				}
 			}
 
 			// Then check if event is pending moderation
@@ -341,34 +367,47 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			if err != nil {
 				logging.Infof("Error checking if event %s is pending moderation: %v", event.ID, err)
 				// If there's an error, assume not pending
-				filteredEvents = append(filteredEvents, event)
+				if !isBlocked { // Only add if not already added as blocked
+					filteredEvents = append(filteredEvents, event)
+				}
 				continue
 			}
 
 			if isPending {
 				pendingCount++
 
-				// Handle based on moderation mode
-				if !isStrict {
-					// Passive mode: include all pending events
-					logging.Infof(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
-					filteredEvents = append(filteredEvents, event)
-					pendingAllowedCount++
-				} else if connPubkey != "" && connPubkey == event.PubKey {
-					// Strict mode: only include if requester is author
-					logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
-						event.ID, connPubkey)
-					filteredEvents = append(filteredEvents, event)
+				// If include:spam is present, always include pending events
+				if includeSpam {
+					logging.Infof(ColorYellow+"[SEARCH] Including pending event %s due to include:spam"+ColorReset, event.ID)
+					if !isBlocked { // Only add if not already added as blocked
+						filteredEvents = append(filteredEvents, event)
+					}
 					pendingAllowedCount++
 				} else {
-					// Strict mode: exclude if requester is not author
-					logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
-					// Skip this event in strict mode if requester is not the author
-					continue
+					// Handle based on moderation mode
+					if !isStrict {
+						// Passive mode: include all pending events
+						logging.Infof(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
+						filteredEvents = append(filteredEvents, event)
+						pendingAllowedCount++
+					} else if connPubkey != "" && connPubkey == event.PubKey {
+						// Strict mode: only include if requester is author
+						logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
+							event.ID, connPubkey)
+						filteredEvents = append(filteredEvents, event)
+						pendingAllowedCount++
+					} else {
+						// Strict mode: exclude if requester is not author
+						logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
+						// Skip this event in strict mode if requester is not the author
+						continue
+					}
 				}
 			} else {
 				// Not blocked or pending, add to filtered events
-				filteredEvents = append(filteredEvents, event)
+				if !isBlocked { // Only add if not already added as blocked
+					filteredEvents = append(filteredEvents, event)
+				}
 			}
 		}
 

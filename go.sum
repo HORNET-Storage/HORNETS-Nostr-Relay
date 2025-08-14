@@ -12,8 +12,6 @@ filippo.io/edwards25519 v1.0.0-rc.1 h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmG
 filippo.io/edwards25519 v1.0.0-rc.1/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7eHn5EwJns=
 git.apache.org/thrift.git v0.0.0-20180902110319-2566ecd5d999/go.mod h1:fPE2ZNJGynbRyZ4dJvy6G277gSllfV2HJqblrnkyeyg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.3 h1:tLlmNsWLXBWcoZzRh/BC08sKvNnVrXAjb3g/LhnA/JU=
-github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.3/go.mod h1:6D9s+1RWxsJLcB1Na+7fOYwqSedyrERbYGs2RSgs3q0=
 github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.5 h1:4CLWHpz+/aNx/HnLeSIiLKOBzRqj3uRwK/yJiW14zVw=
 github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.5/go.mod h1:6D9s+1RWxsJLcB1Na+7fOYwqSedyrERbYGs2RSgs3q0=
 github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250703232705-f3817d7d33e2 h1:eFD/mrm/ObWuByQUuWcTzAPSbkYCCXvSz+v5g7xm5Uc=

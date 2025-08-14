@@ -99,12 +99,13 @@ type ImageModerationConfig struct {
 
 // EventFilteringConfig holds event filtering configuration
 type EventFilteringConfig struct {
-	Mode             string                     `mapstructure:"mode"`
-	ModerationMode   string                     `mapstructure:"moderation_mode"`
-	KindWhitelist    []string                   `mapstructure:"kind_whitelist"`
-	MediaDefinitions map[string]MediaDefinition `mapstructure:"media_definitions"`
-	DynamicKinds     DynamicKindsConfig         `mapstructure:"dynamic_kinds"`
-	Protocols        ProtocolsConfig            `mapstructure:"protocols"`
+	AllowUnregisteredKinds bool                       `mapstructure:"allow_unregistered_kinds"`
+	RegisteredKinds        []int                      `mapstructure:"registered_kinds"`
+	ModerationMode         string                     `mapstructure:"moderation_mode"`
+	KindWhitelist          []string                   `mapstructure:"kind_whitelist"`
+	MediaDefinitions       map[string]MediaDefinition `mapstructure:"media_definitions"`
+	DynamicKinds           DynamicKindsConfig         `mapstructure:"dynamic_kinds"`
+	Protocols              ProtocolsConfig            `mapstructure:"protocols"`
 }
 
 // MediaDefinition holds configuration for a specific media type

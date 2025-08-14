@@ -2,8 +2,6 @@ module github.com/HORNET-Storage/hornet-storage
 
 go 1.22.1
 
-replace github.com/HORNET-Storage/go-hornet-storage-lib => ../go-hornet-storage-lib
-
 require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.5
 	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250703232705-f3817d7d33e2
@@ -172,7 +170,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/golang-jwt/jwt/v4 v4.5.0
-	github.com/google/uuid v1.6.0
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.2 // indirect
 	github.com/ipfs/go-cid v0.4.1
 	github.com/klauspost/compress v1.17.10 // indirect

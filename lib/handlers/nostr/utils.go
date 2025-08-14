@@ -157,16 +157,37 @@ func IsKindAllowed(kind int) bool {
 		return false
 	}
 
-	// Format the kind number to match the whitelist format
-	kindStr := fmt.Sprintf("kind%d", kind)
-
-	if len(settings.EventFiltering.KindWhitelist) > 0 {
-		if !contains(settings.EventFiltering.KindWhitelist, kindStr) {
-			return false
+	// Check if this is a registered kind
+	if IsRegisteredKind(kind) {
+		// For registered kinds, check if it's in the whitelist
+		kindStr := fmt.Sprintf("kind%d", kind)
+		if len(settings.EventFiltering.KindWhitelist) > 0 {
+			return contains(settings.EventFiltering.KindWhitelist, kindStr)
 		}
+		// If whitelist is empty, no registered kinds are allowed
+		return false
+	} else {
+		// For unregistered kinds, check AllowUnregisteredKinds flag
+		return settings.EventFiltering.AllowUnregisteredKinds
+	}
+}
+
+// IsRegisteredKind checks if a kind number has a registered handler
+func IsRegisteredKind(kind int) bool {
+	// Get the list of registered kinds from config
+	settings, err := config.GetConfig()
+	if err != nil {
+		// If we can't get config, fall back to false
+		return false
 	}
 
-	return true
+	// Check if this kind is in the registered kinds list
+	for _, k := range settings.EventFiltering.RegisteredKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(list []string, item string) bool {

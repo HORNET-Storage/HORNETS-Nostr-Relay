@@ -20,7 +20,7 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -68,7 +68,7 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.Ctx = context.Background()
 
 	store.DatabasePath = basepath
-	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), fmt.Sprintf("temp"))
+	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), "temp")
 
 	options := badgerhold.DefaultOptions
 	options.Encoder = cborEncode
@@ -384,10 +384,10 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 	}
 
 	if filter.Since != nil {
-		query = query.And("CreatedAt").Ge(filter.Since.Time())
+		query = query.And("CreatedAt").Ge(*filter.Since)
 	}
 	if filter.Until != nil {
-		query = query.And("CreatedAt").Le(filter.Until.Time())
+		query = query.And("CreatedAt").Le(*filter.Until)
 	}
 
 	if len(filter.Tags) > 0 {
@@ -496,6 +496,12 @@ func toInterfaceSlice[T any](items []T) []interface{} {
 func postFilterEvents(events []*nostr.Event, filter nostr.Filter) []*nostr.Event {
 	var filtered []*nostr.Event
 
+	// Parse search query if present
+	var searchQuery search.SearchQuery
+	if filter.Search != "" {
+		searchQuery = search.ParseSearchQuery(filter.Search)
+	}
+
 	for _, event := range events {
 		// Match event ID (if specified)
 		if len(filter.IDs) > 0 && !contains(filter.IDs, event.ID) {
@@ -517,7 +523,7 @@ func postFilterEvents(events []*nostr.Event, filter nostr.Filter) []*nostr.Event
 		}
 
 		// Match search term (if specified)
-		if filter.Search != "" && !strings.Contains(strings.ToLower(event.Content), strings.ToLower(filter.Search)) {
+		if searchQuery.Text != "" && !strings.Contains(strings.ToLower(event.Content), strings.ToLower(searchQuery.Text)) {
 			continue
 		}
 
@@ -699,6 +705,12 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		}
 	}
 
+  // Update search index for text events
+	if err := store.UpdateSearchIndex(ev); err != nil {
+		// Log the error but don't fail the operation
+		logging.Infof("Failed to update search index for event %s: %v\n", ev.ID, err)
+	}
+
 	// Check for images that need moderation - only if image moderation is enabled
 	if cfg, err := config.GetConfig(); err != nil {
 		logging.Infof("Failed to get config for image moderation check: %v", err)
@@ -706,10 +718,26 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 		// Extract image URLs from the event using our image extractor
 		imageURLs := ExtractImageURLsFromEvent(ev)
 		if len(imageURLs) > 0 {
-			logging.Infof("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
-			err = store.AddToPendingModeration(ev.ID, imageURLs)
-			if err != nil {
-				logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
+			// Check if we should bypass moderation for exclusive mode
+			if ac := websocket.GetAccessControl(); ac != nil {
+				if settings := ac.GetSettings(); settings != nil && strings.ToLower(settings.Mode) == "exclusive" {
+					logging.Infof("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
+					// Skip moderation entirely for exclusive mode
+				} else {
+					// Continue with moderation for free and paid modes
+					logging.Infof("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
+					err = store.AddToPendingModeration(ev.ID, imageURLs)
+					if err != nil {
+						logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
+					}
+				}
+			} else {
+				// Fallback to current behavior if access control not available
+				logging.Infof("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
+				err = store.AddToPendingModeration(ev.ID, imageURLs)
+				if err != nil {
+					logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
+				}
 			}
 		}
 	}
@@ -730,6 +758,12 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 			// Log the error but don't fail the operation
 			logging.Infof("Failed to delete event from statistics: %v\n", err)
 		}
+	}
+
+	// Remove from search index
+	if err := store.RemoveFromSearchIndex(eventID); err != nil {
+		// Log the error but don't fail the operation
+		logging.Infof("Failed to remove event %s from search index: %v\n", eventID, err)
 	}
 
 	return nil
