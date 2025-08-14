@@ -2,8 +2,10 @@ module github.com/HORNET-Storage/hornet-storage
 
 go 1.22.1
 
+replace github.com/HORNET-Storage/go-hornet-storage-lib => ../go-hornet-storage-lib
+
 require (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.3
+	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.5
 	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250703232705-f3817d7d33e2
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f

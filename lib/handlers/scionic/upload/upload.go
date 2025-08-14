@@ -123,9 +123,7 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		dag.ApplyTransmissionPacket(packet)
-
-		err = dag.Verify()
+		err = dag.ApplyAndVerifyTransmissionPacket(packet)
 		if err != nil {
 			write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
 			return
@@ -147,38 +145,32 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			Signature: message.Signature,
 		}
 
-		for {
-			message, err := read()
-			if err != nil {
-				write(lib_stream.BuildErrorMessage("Failed to recieve upload message in time", nil))
-				return
-			}
+		if dag.Leafs[dag.Root].LeafCount > 0 {
+			for {
+				message, err := read()
+				if err != nil {
+					write(lib_stream.BuildErrorMessage("Failed to recieve upload message in time", nil))
+					return
+				}
 
-			packet := merkle_dag.TransmissionPacketFromSerializable(&message.Packet)
+				packet := merkle_dag.TransmissionPacketFromSerializable(&message.Packet)
 
-			err = packet.Leaf.VerifyLeaf()
-			if err != nil {
-				write(lib_stream.BuildErrorMessage("Failed to verify leaf", err))
-				return
-			}
+				err = dag.ApplyAndVerifyTransmissionPacket(packet)
+				if err != nil {
+					write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
+					return
+				}
 
-			dag.ApplyTransmissionPacket(packet)
+				err = write(lib_stream.BuildResponseMessage(true))
+				if err != nil {
+					write(lib_stream.BuildErrorMessage("Failed to write response to stream", err))
+					break
+				}
 
-			err = dag.Verify()
-			if err != nil {
-				write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
-				return
-			}
-
-			err = write(lib_stream.BuildResponseMessage(true))
-			if err != nil {
-				write(lib_stream.BuildErrorMessage("Failed to write response to stream", err))
-				break
-			}
-
-			if len(dag.Leafs) >= (dag.Leafs[dag.Root].LeafCount + 1) {
-				logging.Infof("All leaves receieved")
-				break
+				if len(dag.Leafs) >= (dag.Leafs[dag.Root].LeafCount + 1) {
+					logging.Infof("All leaves receieved")
+					break
+				}
 			}
 		}
 
