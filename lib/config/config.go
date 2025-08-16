@@ -557,4 +557,194 @@ func setDefaults() {
 		"19842": "888", // Payment subscription
 		"19843": "888", // Payment subscription
 	})
+
+	// Push notification defaults
+	viper.SetDefault("push_notifications.enabled", false)
+
+	// APNs Configuration defaults
+	viper.SetDefault("push_notifications.apns.enabled", false)
+	viper.SetDefault("push_notifications.apns.key_id", "")
+	viper.SetDefault("push_notifications.apns.team_id", "")
+	viper.SetDefault("push_notifications.apns.bundle_id", "")
+	viper.SetDefault("push_notifications.apns.key_path", "")
+	viper.SetDefault("push_notifications.apns.production", false)
+
+	// FCM Configuration defaults
+	viper.SetDefault("push_notifications.fcm.enabled", false)
+	viper.SetDefault("push_notifications.fcm.project_id", "")
+	viper.SetDefault("push_notifications.fcm.credentials_path", "")
+
+	// Service Configuration defaults
+	viper.SetDefault("push_notifications.service.queue_size", 1000)
+	viper.SetDefault("push_notifications.service.worker_count", 10)
+	viper.SetDefault("push_notifications.service.batch_size", 100)
+	viper.SetDefault("push_notifications.service.retry_attempts", 3)
+	viper.SetDefault("push_notifications.service.retry_delay", "5s")
+}
+
+// GetAllSettingsAsMap returns all configuration settings as a map
+// This is a thread-safe alternative to viper.AllSettings() which can cause
+// concurrent map read/write errors when viper.WatchConfig() is enabled
+func GetAllSettingsAsMap() (map[string]interface{}, error) {
+	// Get the cached config struct
+	cfg, err := GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// Manually build the settings map using the original viper key structure
+	// This ensures compatibility with existing code that expects specific key names
+	settings := make(map[string]interface{})
+
+	// Server settings
+	settings["server"] = map[string]interface{}{
+		"port":         cfg.Server.Port,
+		"bind_address": cfg.Server.BindAddress,
+		"upnp":         cfg.Server.UPNP,
+		"nostr":        cfg.Server.Nostr,
+		"hornets":      cfg.Server.Hornets,
+		"web":          cfg.Server.Web,
+		"demo":         cfg.Server.Demo,
+		"data_path":    cfg.Server.DataPath,
+	}
+
+	// External services settings
+	settings["external_services"] = map[string]interface{}{
+		"ollama": map[string]interface{}{
+			"url":     cfg.ExternalServices.Ollama.URL,
+			"model":   cfg.ExternalServices.Ollama.Model,
+			"timeout": cfg.ExternalServices.Ollama.Timeout,
+		},
+		"moderator": map[string]interface{}{
+			"url": cfg.ExternalServices.Moderator.URL,
+		},
+		"wallet": map[string]interface{}{
+			"url":  cfg.ExternalServices.Wallet.URL,
+			"key":  cfg.ExternalServices.Wallet.Key,
+			"name": cfg.ExternalServices.Wallet.Name,
+		},
+	}
+
+	// Logging settings
+	settings["logging"] = map[string]interface{}{
+		"level":  cfg.Logging.Level,
+		"format": cfg.Logging.Format,
+		"output": cfg.Logging.Output,
+		"path":   cfg.Logging.Path,
+	}
+
+	// Relay settings
+	settings["relay"] = map[string]interface{}{
+		"name":           cfg.Relay.Name,
+		"description":    cfg.Relay.Description,
+		"contact":        cfg.Relay.Contact,
+		"icon":           cfg.Relay.Icon,
+		"software":       cfg.Relay.Software,
+		"version":        cfg.Relay.Version,
+		"service_tag":    cfg.Relay.ServiceTag,
+		"supported_nips": cfg.Relay.SupportedNIPs,
+		"secret_key":     cfg.Relay.SecretKey,
+		"private_key":    cfg.Relay.PrivateKey,
+		"dht_key":        cfg.Relay.DHTKey,
+	}
+
+	// Content filtering settings
+	settings["content_filtering"] = map[string]interface{}{
+		"text_filter": map[string]interface{}{
+			"enabled":                cfg.ContentFiltering.TextFilter.Enabled,
+			"cache_size":             cfg.ContentFiltering.TextFilter.CacheSize,
+			"cache_ttl_seconds":      cfg.ContentFiltering.TextFilter.CacheTTLSeconds,
+			"full_text_search_kinds": cfg.ContentFiltering.TextFilter.FullTextSearchKinds,
+		},
+		"image_moderation": map[string]interface{}{
+			"enabled":                cfg.ContentFiltering.ImageModeration.Enabled,
+			"mode":                   cfg.ContentFiltering.ImageModeration.Mode,
+			"threshold":              cfg.ContentFiltering.ImageModeration.Threshold,
+			"timeout_seconds":        cfg.ContentFiltering.ImageModeration.TimeoutSeconds,
+			"check_interval_seconds": cfg.ContentFiltering.ImageModeration.CheckIntervalSeconds,
+			"concurrency":            cfg.ContentFiltering.ImageModeration.Concurrency,
+		},
+	}
+
+	// Event filtering settings
+	settings["event_filtering"] = map[string]interface{}{
+		"allow_unregistered_kinds": cfg.EventFiltering.AllowUnregisteredKinds,
+		"registered_kinds":         cfg.EventFiltering.RegisteredKinds,
+		"moderation_mode":          cfg.EventFiltering.ModerationMode,
+		"kind_whitelist":           cfg.EventFiltering.KindWhitelist,
+		"media_definitions":        cfg.EventFiltering.MediaDefinitions,
+		"dynamic_kinds": map[string]interface{}{
+			"enabled":       cfg.EventFiltering.DynamicKinds.Enabled,
+			"allowed_kinds": cfg.EventFiltering.DynamicKinds.AllowedKinds,
+		},
+		"protocols": map[string]interface{}{
+			"enabled":           cfg.EventFiltering.Protocols.Enabled,
+			"allowed_protocols": cfg.EventFiltering.Protocols.AllowedProtocols,
+		},
+	}
+
+	// Allowed users settings
+	settings["allowed_users"] = map[string]interface{}{
+		"mode":         cfg.AllowedUsersSettings.Mode,
+		"read":         cfg.AllowedUsersSettings.Read,
+		"write":        cfg.AllowedUsersSettings.Write,
+		"tiers":        cfg.AllowedUsersSettings.Tiers,
+		"last_updated": cfg.AllowedUsersSettings.LastUpdated,
+	}
+
+	// Push notifications settings
+	settings["push_notifications"] = map[string]interface{}{
+		"enabled": cfg.PushNotifications.Enabled,
+		"apns": map[string]interface{}{
+			"enabled":    cfg.PushNotifications.APNS.Enabled,
+			"key_id":     cfg.PushNotifications.APNS.KeyID,
+			"team_id":    cfg.PushNotifications.APNS.TeamID,
+			"bundle_id":  cfg.PushNotifications.APNS.BundleID,
+			"key_path":   cfg.PushNotifications.APNS.KeyPath,
+			"production": cfg.PushNotifications.APNS.Production,
+		},
+		"fcm": map[string]interface{}{
+			"enabled":          cfg.PushNotifications.FCM.Enabled,
+			"project_id":       cfg.PushNotifications.FCM.ProjectID,
+			"credentials_path": cfg.PushNotifications.FCM.CredentialsPath,
+		},
+		"service": map[string]interface{}{
+			"queue_size":     cfg.PushNotifications.Service.QueueSize,
+			"worker_count":   cfg.PushNotifications.Service.WorkerCount,
+			"batch_size":     cfg.PushNotifications.Service.BatchSize,
+			"retry_attempts": cfg.PushNotifications.Service.RetryAttempts,
+			"retry_delay":    cfg.PushNotifications.Service.RetryDelay,
+		},
+	}
+
+	// Add NIP mappings separately as they're not in the Config struct
+	settings["nip_mappings"] = GetNIPMappings()
+
+	// Note: There is no "subscriptions" section in the config - this was likely an old/unused key
+	// that the frontend was checking for but doesn't exist in the actual configuration
+
+	return settings, nil
+}
+
+// GetSettingValue returns a specific setting value by key path (e.g., "relay.name")
+// This is a thread-safe alternative to viper.Get()
+func GetSettingValue(key string) (interface{}, error) {
+	settings, err := GetAllSettingsAsMap()
+	if err != nil {
+		return nil, err
+	}
+
+	// Navigate through nested keys
+	keys := strings.Split(key, ".")
+	var value interface{} = settings
+
+	for _, k := range keys {
+		if m, ok := value.(map[string]interface{}); ok {
+			value = m[k]
+		} else {
+			return nil, fmt.Errorf("key not found: %s", key)
+		}
+	}
+
+	return value, nil
 }

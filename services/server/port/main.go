@@ -14,6 +14,7 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/services/push"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 
@@ -366,8 +367,16 @@ func main() {
 		} else {
 			logging.Info("Global access control initialized successfully")
 		}
+
+		// Initialize push notification service
+		logging.Info("Initializing push notification service...")
+		if err := push.InitGlobalPushService(statsStore); err != nil {
+			logging.Errorf("Failed to initialize push notification service: %v", err)
+		} else {
+			logging.Info("Push notification service initialized successfully")
+		}
 	} else {
-		logging.Warn("Warning: Statistics store not available, access control not initialized")
+		logging.Warn("Warning: Statistics store not available, access control and push notifications not initialized")
 	}
 
 	// Create and store kind 10411 event
@@ -566,6 +575,9 @@ func main() {
 
 	go func() {
 		<-sigs
+
+		// Cleanup push notification service
+		push.StopGlobalPushService()
 
 		store.Cleanup()
 

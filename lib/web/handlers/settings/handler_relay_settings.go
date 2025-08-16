@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
@@ -18,63 +17,31 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
+	"github.com/HORNET-Storage/hornet-storage/services/push"
 )
 
 // GetSettings returns the entire configuration
 func GetSettings(c *fiber.Ctx) error {
 	logging.Info("Get settings request received")
 
-	// Return the entire config as JSON
-	settings := viper.AllSettings()
-
-	// Log each major section
-	if _, ok := settings["subscriptions"]; ok {
-		// logging.Infof("subscriptions: %+v", subscriptions)
-	} else {
-		logging.Infof("subscriptions: NOT FOUND")
+	// Use the new thread-safe helper function to get all settings
+	// This avoids the concurrent map read/write error from viper.AllSettings()
+	settings, err := config.GetAllSettingsAsMap()
+	if err != nil {
+		logging.Infof("Error getting settings: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve configuration",
+		})
 	}
 
-	if _, ok := settings["allowed_users"]; ok {
-		// logging.Infof("allowed_users: %+v", allowedUsers)
-	} else {
-		logging.Infof("allowed_users: NOT FOUND")
-	}
-
-	if _, ok := settings["event_filtering"]; ok {
-		// logging.Infof("event_filtering: %+v", eventFiltering)
-	} else {
-		logging.Infof("event_filtering: NOT FOUND")
-	}
-
-	if _, ok := settings["content_filtering"]; ok {
-		// logging.Infof("content_filtering: %+v", contentFiltering)
-	} else {
-		logging.Infof("content_filtering: NOT FOUND")
-	}
-
-	if _, ok := settings["relay"]; ok {
-		// logging.Infof("relay: %+v", relay)
-	} else {
-		logging.Infof("relay: NOT FOUND")
-	}
-
-	if _, ok := settings["server"]; ok {
-		// logging.Infof("server: %+v", server)
-	} else {
-		logging.Infof("server: NOT FOUND")
-	}
-
-	if _, ok := settings["external_services"]; ok {
-		// logging.Infof("external_services: %+v", externalServices)
-	} else {
-		logging.Infof("external_services: NOT FOUND")
-	}
-
-	if _, ok := settings["logging"]; ok {
-		// logging.Infof("logging: %+v", logger)
-	} else {
-		logging.Info("logging: NOT FOUND")
-	}
+	// Log successful configuration sections retrieval
+	logging.Infof("Successfully retrieved configuration sections: %v", func() []string {
+		var sections []string
+		for key := range settings {
+			sections = append(sections, key)
+		}
+		return sections
+	}())
 
 	response := fiber.Map{
 		"settings": settings,
@@ -374,11 +341,18 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
 					}
 
-					// Also update viper directly to ensure it's saved to config.yaml
-					viper.Set("relay.supported_nips", supportedNIPs)
+					// Note: The supportedNIPs will be saved through the config.UpdateConfig call below
+					// We don't need to call viper.Set directly anymore
 				}
 			}
 		}
+	}
+
+	// Check if push notification settings are being updated
+	pushNotificationsUpdated := false
+	if _, exists := settings["push_notifications"]; exists {
+		pushNotificationsUpdated = true
+		logging.Info("Push notification settings updated, will reload push service...")
 	}
 
 	// Update each setting using thread-safe config functions
@@ -468,8 +442,14 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 
 				logging.Infof("Regenerating kind 10411 event due to %s...", reason)
 
-				// Get the private and public keys from viper (same way as main.go does)
-				serializedPrivateKey := viper.GetString("relay.private_key")
+				// Get the private and public keys from config (thread-safe)
+				cfg, err := config.GetConfig()
+				if err != nil {
+					logging.Infof("Error getting config: %v", err)
+					return
+				}
+
+				serializedPrivateKey := cfg.Relay.PrivateKey
 				if len(serializedPrivateKey) <= 0 {
 					logging.Infof("Error: No private key found in configuration")
 					return
@@ -494,6 +474,21 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
+	// If push notification settings were updated, reload the push service
+	if pushNotificationsUpdated {
+		logging.Info("Reloading push notification service with new configuration...")
+
+		// Reload the service with new configuration
+		statsStore := store.GetStatsStore()
+		if err := push.ReloadGlobalPushService(statsStore); err != nil {
+			logging.Infof("Warning: Failed to reload push notification service: %v", err)
+			// Don't fail the request, just log the warning
+			// The service will pick up the new config on next restart
+		} else {
+			logging.Info("Push notification service reloaded successfully")
+		}
+	}
+
 	logging.Info("Settings updated successfully")
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -510,7 +505,14 @@ func GetSettingValue(c *fiber.Ctx) error {
 		})
 	}
 
-	value := viper.Get(key)
+	// Use the thread-safe helper function to get a specific setting value
+	value, err := config.GetSettingValue(key)
+	if err != nil {
+		logging.Infof("Error getting setting value for key %s: %v", key, err)
+		// Return nil value instead of error for missing keys (backward compatibility)
+		value = nil
+	}
+
 	return c.JSON(fiber.Map{
 		"key":   key,
 		"value": value,

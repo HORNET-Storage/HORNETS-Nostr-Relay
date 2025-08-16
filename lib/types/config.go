@@ -10,6 +10,7 @@ type Config struct {
 	ContentFiltering     ContentFilteringConfig `mapstructure:"content_filtering"`
 	EventFiltering       EventFilteringConfig   `mapstructure:"event_filtering"`
 	AllowedUsersSettings AllowedUsersSettings   `mapstructure:"allowed_users"`
+	PushNotifications    PushNotificationConfig `mapstructure:"push_notifications"`
 }
 
 // ServerConfig holds server-related configuration

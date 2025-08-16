@@ -21,6 +21,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/bitcoin"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/moderation"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/push"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/settings"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/wallet"
@@ -405,6 +406,16 @@ func StartServer(store stores.Store) error {
 	secured.Delete("/admin/owner", func(c *fiber.Ctx) error {
 		return access.RemoveRelayOwner(c, store)
 	})
+
+	// ================================
+	// PUSH NOTIFICATION ROUTES
+	// ================================
+
+	secured.Post("/push/register", push.RegisterDeviceHandler(store))
+
+	secured.Post("/push/unregister", push.UnregisterDeviceHandler(store))
+
+	secured.Post("/push/test", push.TestNotificationHandler(store))
 
 	// ================================
 	// STATIC FILE SERVING
