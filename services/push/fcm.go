@@ -22,11 +22,23 @@ type MockFCMClient struct {
 // SendNotification mock implementation
 func (m *MockFCMClient) SendNotification(deviceToken string, message *PushMessage) error {
 	// Simulate sending notification
-	logging.Infof("Mock FCM: Would send notification to %s: %s - %s", deviceToken, message.Title, message.Body)
+	// Show partial token for privacy
+	tokenDisplay := deviceToken
+	if len(deviceToken) > 16 {
+		tokenDisplay = deviceToken[:8] + "..." + deviceToken[len(deviceToken)-8:]
+	}
+
+	logging.Warn("🤖 Mock FCM Notification (NOT SENT)", map[string]interface{}{
+		"device_token": tokenDisplay,
+		"title":        message.Title,
+		"body":         message.Body,
+		"note":         "This is a MOCK - no actual notification was sent to the device",
+		"help":         "To enable real notifications, configure FCM credentials in config.yaml",
+	})
 
 	// Log the full message for debugging
 	messageJSON, _ := json.MarshalIndent(message, "", "  ")
-	logging.Debugf("Mock FCM message payload: %s", string(messageJSON))
+	logging.Debugf("Mock FCM full payload: %s", string(messageJSON))
 
 	return nil
 }

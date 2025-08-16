@@ -176,6 +176,30 @@ func StartServer(store stores.Store) error {
 	})
 
 	// ================================
+	// PUSH NOTIFICATION ROUTES (NIP-98 AUTH)
+	// ================================
+	// NOTE: These MUST be defined before the secured /api group to avoid JWT middleware
+
+	pushRoutes := app.Group("/api/push")
+
+	// Add basic request logging for push routes
+	pushRoutes.Use(func(c *fiber.Ctx) error {
+		logging.Info("Push route accessed", map[string]interface{}{
+			"method": c.Method(),
+			"path":   c.Path(),
+			"url":    c.OriginalURL(),
+		})
+		return c.Next()
+	})
+
+	// Apply NIP-98 authentication middleware for push routes
+	pushRoutes.Use(middleware.NIP98Middleware())
+
+	pushRoutes.Post("/register", push.RegisterDeviceHandler(store))
+	pushRoutes.Post("/unregister", push.UnregisterDeviceHandler(store))
+	pushRoutes.Post("/test", push.TestNotificationHandler(store))
+
+	// ================================
 	// SECURED API ROUTES
 	// ================================
 
@@ -406,16 +430,6 @@ func StartServer(store stores.Store) error {
 	secured.Delete("/admin/owner", func(c *fiber.Ctx) error {
 		return access.RemoveRelayOwner(c, store)
 	})
-
-	// ================================
-	// PUSH NOTIFICATION ROUTES
-	// ================================
-
-	secured.Post("/push/register", push.RegisterDeviceHandler(store))
-
-	secured.Post("/push/unregister", push.UnregisterDeviceHandler(store))
-
-	secured.Post("/push/test", push.TestNotificationHandler(store))
 
 	// ================================
 	// STATIC FILE SERVING

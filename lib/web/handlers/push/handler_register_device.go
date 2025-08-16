@@ -16,6 +16,17 @@ type RegisterDeviceRequest struct {
 // RegisterDeviceHandler handles push device registration
 func RegisterDeviceHandler(store stores.Store) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		logging.Info("RegisterDeviceHandler called", map[string]interface{}{
+			"method": c.Method(),
+			"path":   c.Path(),
+			"url":    c.OriginalURL(),
+			"headers": map[string]string{
+				"authorization": c.Get("Authorization"),
+				"content-type":  c.Get("Content-Type"),
+				"user-agent":    c.Get("User-Agent"),
+			},
+		})
+
 		// Get authenticated pubkey from NIP-98 middleware
 		pubkey, err := middleware.GetNIP98Pubkey(c)
 		if err != nil {
@@ -24,6 +35,10 @@ func RegisterDeviceHandler(store stores.Store) fiber.Handler {
 				"error": "Authentication required",
 			})
 		}
+
+		logging.Info("NIP-98 pubkey extracted successfully", map[string]interface{}{
+			"pubkey": pubkey,
+		})
 
 		// Parse request body
 		var req RegisterDeviceRequest
