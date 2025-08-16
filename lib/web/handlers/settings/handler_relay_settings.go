@@ -34,6 +34,9 @@ func GetSettings(c *fiber.Ctx) error {
 		})
 	}
 
+	// Clean prefixed keys before sending to frontend
+	cleanSettingsForFrontend(settings)
+
 	// Log successful configuration sections retrieval
 	logging.Infof("Successfully retrieved configuration sections: %v", func() []string {
 		var sections []string
@@ -193,6 +196,13 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 
 	// NORMALIZATION: Ensure proper data types before saving
 	normalizeDataTypes(settings)
+
+	// Log the incoming settings for debugging
+	logging.Infof("Received settings: %+v", settings)
+
+	// CLEANUP: Convert incoming prefixed data to clean structure
+	convertToCleanStructure(settings)
+	logging.Infof("After cleanup: %+v", settings)
 
 	// Check if allowed_users settings are being updated (affects subscription tiers)
 	allowedUsersUpdated := false
@@ -561,4 +571,87 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 		"key":     key,
 		"value":   value,
 	})
+}
+
+// cleanSettingsForFrontend removes prefixed keys before sending to frontend
+func cleanSettingsForFrontend(settings map[string]interface{}) {
+	for _, sectionValue := range settings {
+		if sectionMap, ok := sectionValue.(map[string]interface{}); ok {
+			for subSectionName, subSectionValue := range sectionMap {
+				if subSectionMap, ok := subSectionValue.(map[string]interface{}); ok {
+					removePrefixedKeys(subSectionMap, subSectionName)
+				}
+			}
+		}
+	}
+}
+
+// convertToCleanStructure converts incoming prefixed data to clean structure
+func convertToCleanStructure(settings map[string]interface{}) {
+	for _, sectionValue := range settings {
+		if sectionMap, ok := sectionValue.(map[string]interface{}); ok {
+			for subSectionName, subSectionValue := range sectionMap {
+				if subSectionMap, ok := subSectionValue.(map[string]interface{}); ok {
+					convertPrefixedToClean(subSectionMap, subSectionName)
+				}
+			}
+		}
+	}
+}
+
+// removePrefixedKeys removes all prefixed keys, keeping only clean ones
+func removePrefixedKeys(m map[string]interface{}, sectionName string) {
+	var prefix string
+	if sectionName == "text_filter" {
+		prefix = "content_filter_"
+	} else {
+		prefix = sectionName + "_"
+	}
+
+	keysToDelete := []string{}
+	for key := range m {
+		if strings.HasPrefix(key, prefix) {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+
+	for _, key := range keysToDelete {
+		delete(m, key)
+	}
+}
+
+// convertPrefixedToClean converts prefixed keys to clean ones and removes prefixed versions
+func convertPrefixedToClean(m map[string]interface{}, sectionName string) {
+	var prefix string
+	if sectionName == "text_filter" {
+		prefix = "content_filter_"
+	} else {
+		prefix = sectionName + "_"
+	}
+
+	conversions := make(map[string]interface{})
+	keysToDelete := []string{}
+
+	// Find prefixed keys and prepare clean versions
+	for key, value := range m {
+		if strings.HasPrefix(key, prefix) {
+			cleanKey := strings.TrimPrefix(key, prefix)
+			// Only add if clean key doesn't already exist
+			if _, exists := m[cleanKey]; !exists {
+				conversions[cleanKey] = value
+				logging.Infof("Converting %s -> %s", key, cleanKey)
+			}
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+
+	// Add clean keys
+	for cleanKey, value := range conversions {
+		m[cleanKey] = value
+	}
+
+	// Remove prefixed keys
+	for _, key := range keysToDelete {
+		delete(m, key)
+	}
 }
