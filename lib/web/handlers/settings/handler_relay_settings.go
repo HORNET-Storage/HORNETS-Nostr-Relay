@@ -382,15 +382,12 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
-	// Update each setting using thread-safe config functions
-	for key, value := range settings {
-		logging.Infof("Setting %s = %v (type: %T)", key, value, value)
-		if err := config.UpdateConfig(key, value, false); err != nil {
-			logging.Infof("Error updating config key %s: %v", key, err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": fmt.Sprintf("Failed to update setting %s", key),
-			})
-		}
+	// Recursively update each setting to avoid overwriting entire sections
+	if err := updateSettingsRecursively(settings, ""); err != nil {
+		logging.Infof("Error updating settings: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to update settings",
+		})
 	}
 
 	// Save the configuration using thread-safe function
@@ -643,4 +640,26 @@ func convertPrefixedToClean(m map[string]interface{}, sectionName string) {
 	for _, key := range keysToDelete {
 		delete(m, key)
 	}
+}
+
+// updateSettingsRecursively walks the settings map and updates viper keys
+func updateSettingsRecursively(settings map[string]interface{}, prefix string) error {
+	for key, value := range settings {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		if subMap, ok := value.(map[string]interface{}); ok {
+			if err := updateSettingsRecursively(subMap, fullKey); err != nil {
+				return err
+			}
+		} else {
+			logging.Infof("Setting %s = %v (type: %T)", fullKey, value, value)
+			if err := config.UpdateConfig(fullKey, value, false); err != nil {
+				return fmt.Errorf("failed to update config key %s: %w", fullKey, err)
+			}
+		}
+	}
+	return nil
 }
