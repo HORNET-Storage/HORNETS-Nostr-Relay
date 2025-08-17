@@ -641,7 +641,6 @@ func convertPrefixedToClean(m map[string]interface{}, sectionName string) {
 		delete(m, key)
 	}
 }
-
 // updateSettingsRecursively walks the settings map and updates viper keys
 func updateSettingsRecursively(settings map[string]interface{}, prefix string) error {
 	for key, value := range settings {
