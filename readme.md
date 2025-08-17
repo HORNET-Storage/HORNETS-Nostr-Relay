@@ -117,6 +117,8 @@ The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created i
 
 #### On **Linux or macOS** When Editing Panel in /panel-source (Hot Reload Dev Mode):
 
+**Disclaimer:** The `build-panel.sh` script will now check for updates to the panel source before re-cloning. This means you can now edit the panel code in the `panel-source` directory and then run the `build-panel.sh` script to rebuild the panel without losing your changes.
+
 *Run this script found in the main directory:*
 ```bash
 ./build-panel-devmode.sh
