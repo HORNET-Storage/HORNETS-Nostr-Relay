@@ -374,18 +374,9 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 				if err != nil {
 					logging.Infof("Error calculating supported NIPs from kinds: %v", err)
 				} else {
-					// Update supported_nips in relay settings (create relay section if it doesn't exist)
-					if _, exists := settings["relay"]; !exists {
-						settings["relay"] = make(map[string]interface{})
-						logging.Infof("DEBUG: Created relay section in settings")
-					}
-					if relayMap, ok := settings["relay"].(map[string]interface{}); ok {
-						relayMap["supported_nips"] = supportedNIPs
-						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
-					}
-
-					// Also update viper directly to ensure it's saved to config.yaml
+					// Update supported_nips directly in viper to avoid overwriting other relay settings
 					viper.Set("relay.supported_nips", supportedNIPs)
+					logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
 				}
 			}
 		}
