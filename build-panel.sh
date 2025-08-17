@@ -7,13 +7,31 @@ set -e
 
 echo "🚀 Building HORNETS-Relay-Panel..."
 
-# Remove old panel source to get latest changes
-echo "🔄 Removing old panel source..."
-rm -rf panel-source
+# Check if panel-source directory exists and is a git repository
+if [ -d "panel-source/.git" ]; then
+  echo "🔄 Checking for panel updates..."
+  cd panel-source
+  git fetch
+  LOCAL=$(git rev-parse @)
+  REMOTE=$(git rev-parse @{u})
 
-# Clone fresh copy from local path
-echo "📥 Cloning latest panel source..."
-git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-source
+  if [ "$LOCAL" = "$REMOTE" ]; then
+    echo "✅ Panel is up to date."
+    cd ..
+  else
+    echo "📥 Pulling latest panel source..."
+    git pull
+    cd ..
+  fi
+else
+  # Remove old panel source to get latest changes
+  echo "🔄 Removing old panel source..."
+  rm -rf panel-source
+
+  # Clone fresh copy from local path
+  echo "📥 Cloning latest panel source..."
+  git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-source
+fi
 
 # Navigate to panel source directory
 cd panel-source
