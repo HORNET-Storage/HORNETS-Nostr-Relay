@@ -441,7 +441,7 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
-		117, 1063, 1808, 1984, // Special kinds (NO 1060 handler)
+		117, 1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
 		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds
 		10411,        // Relay info kind (NO 10011 or 10022 handlers)
@@ -453,7 +453,7 @@ func setDefaults() {
 		30023, 30078, 30079, // Long-form content kinds
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
