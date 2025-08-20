@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
@@ -27,6 +28,10 @@ var (
 
 	// Only protect write operations
 	writeMutex sync.Mutex
+
+	// Debounce timer for config file changes
+	debounceTimer *time.Timer
+	debounceMutex sync.Mutex
 )
 
 // InitConfig initializes the global viper configuration
@@ -72,18 +77,30 @@ func InitConfig() error {
 		return fmt.Errorf("failed to load initial config: %w", err)
 	}
 
-	// Watch for config file changes
+	// Watch for config file changes with debouncing
 	viper.WatchConfig()
 	viper.OnConfigChange(func(e fsnotify.Event) {
-		log.Printf("Config file changed: %s", e.Name)
-		writeMutex.Lock()
-		defer writeMutex.Unlock()
+		// Debounce file changes to avoid reading partial writes on slower machines
+		debounceMutex.Lock()
+		defer debounceMutex.Unlock()
 
-		if err := reloadConfigCache(); err != nil {
-			log.Printf("Error reloading config cache after file change: %v", err)
-		} else {
-			log.Printf("Config cache refreshed after file change")
+		// Cancel any existing timer
+		if debounceTimer != nil {
+			debounceTimer.Stop()
 		}
+
+		// Set a new timer to reload config after 500ms of no changes
+		debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
+			log.Printf("Config file changed (debounced): %s", e.Name)
+			writeMutex.Lock()
+			defer writeMutex.Unlock()
+
+			if err := reloadConfigCache(); err != nil {
+				log.Printf("Error reloading config cache after file change: %v", err)
+			} else {
+				log.Printf("Config cache refreshed after file change")
+			}
+		})
 	})
 
 	return nil

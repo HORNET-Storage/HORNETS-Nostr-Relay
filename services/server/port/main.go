@@ -146,6 +146,9 @@ func main() {
 		"wallet_key_exists":  len(viper.GetString("external_services.wallet.key")) > 0,
 	})
 
+	// Track if we need to save config at the end
+	configNeedsSave := false
+
 	if len(serializedPrivateKey) <= 0 {
 		newKey, err := signing.GeneratePrivateKey()
 		if err != nil {
@@ -172,12 +175,10 @@ func main() {
 				viper.Set("relay.public_key", serializedPublicKey)
 			}
 
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Fatal("Failed to save configuration", map[string]interface{}{
-					"error": err,
-				})
-			}
+			// Use UpdateConfig with save=false for all changes during startup
+			config.UpdateConfig("relay.private_key", *key, true)
+			config.UpdateConfig("relay.public_key", *serializedPublicKey, true)
+			configNeedsSave = true
 
 			logging.Info("Generated new server keys", map[string]interface{}{
 				"private_key": serializedPrivateKey,
@@ -193,14 +194,9 @@ func main() {
 		if err != nil {
 			logging.Errorf("Failed to generate DHT key: %v", err)
 		} else {
-			viper.Set("relay.dht_key", dhtKey)
-
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Fatal("Failed to save configuration", map[string]interface{}{
-					"error": err,
-				})
-			}
+			// Use UpdateConfig with save=false
+			config.UpdateConfig("relay.dht_key", dhtKey, true)
+			configNeedsSave = true
 
 			logging.Info("Generated new server DHT key", map[string]interface{}{
 				"dht_key": dhtKey,
@@ -216,14 +212,9 @@ func main() {
 		if err != nil {
 			logging.Errorf("Failed to generate wallet API key: %v", err)
 		} else {
-			viper.Set("external_services.wallet.key", newAPIKey)
-
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Fatal("Failed to save configuration", map[string]interface{}{
-					"error": err,
-				})
-			}
+			// Use UpdateConfig with save=false
+			config.UpdateConfig("external_services.wallet.key", newAPIKey, true)
+			configNeedsSave = true
 
 			logging.Info("Generated new wallet API key", map[string]interface{}{
 				"wallet_api_key": newAPIKey,
@@ -243,23 +234,34 @@ func main() {
 	} else {
 		currentPublicKey := viper.GetString("relay.public_key")
 
-		// Only save config if the public key has actually changed
+		// Only update if the public key has actually changed
 		if currentPublicKey != *serializedPublicKey {
-			viper.Set("relay.public_key", *serializedPublicKey)
+			// Use UpdateConfig with save=false
+			config.UpdateConfig("relay.public_key", *serializedPublicKey, true)
+			configNeedsSave = true
 
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Errorf("Failed to save updated public key to config: %v", err)
-			} else {
-				logging.Info("Updated public key in configuration (derived from private key)", map[string]interface{}{
-					"public_key": *serializedPublicKey,
-				})
-			}
+			logging.Info("Updated public key in configuration (derived from private key)", map[string]interface{}{
+				"public_key": *serializedPublicKey,
+			})
 		} else {
 			logging.Info("Public key already matches derived key, no config update needed", map[string]interface{}{
 				"public_key": *serializedPublicKey,
 			})
 		}
+	}
+
+	// Save config ONCE if any changes were made during startup
+	// Use UpdateConfig with a dummy key to trigger the save
+	if configNeedsSave {
+		logging.Info("Saving startup configuration changes...")
+		// Force a save by updating a timestamp
+		err = config.UpdateConfig("startup_initialized", time.Now().Unix(), true)
+		if err != nil {
+			logging.Fatal("Failed to save startup configuration", map[string]interface{}{
+				"error": err,
+			})
+		}
+		logging.Info("Startup configuration saved successfully")
 	}
 
 	port := config.GetPort("hornets")
