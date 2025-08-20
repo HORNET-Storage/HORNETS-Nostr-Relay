@@ -30,9 +30,6 @@ var (
 
 // InitConfig initializes the global viper configuration
 func InitConfig() error {
-	// Set defaults
-	setDefaults()
-
 	// Configuration file settings
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -48,7 +45,9 @@ func InitConfig() error {
 	// Try to read config file
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Config file not found, create default
+			// Config file not found, set defaults and create it
+			fmt.Println("No config.yaml found, creating default configuration...")
+			setDefaults()
 			if err := viper.WriteConfigAs("config.yaml"); err != nil {
 				return fmt.Errorf("failed to create default config: %w", err)
 			}
@@ -60,6 +59,9 @@ func InitConfig() error {
 		} else {
 			return fmt.Errorf("error reading config file: %w", err)
 		}
+	} else {
+		// Config file exists, don't override with defaults
+		fmt.Println("Using existing config.yaml - preserving user configurations")
 	}
 
 	// Load initial configuration into cache
