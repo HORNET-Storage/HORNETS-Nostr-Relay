@@ -455,8 +455,10 @@ func main() {
 		for _, addr := range host.Addrs() {
 			libp2pAddrs = append(libp2pAddrs, addr.String())
 		}
-		viper.Set("LibP2PID", host.ID().String())
-		viper.Set("LibP2PAddrs", libp2pAddrs)
+		// Use UpdateConfig with save=false for runtime-only values
+		// This prevents them from being persisted to config.yaml
+		config.UpdateConfig("LibP2PID", host.ID().String(), false)
+		config.UpdateConfig("LibP2PAddrs", libp2pAddrs, false)
 		selfRelay := ws.GetRelayInfo()
 		logging.Infof("Self Relay: %+v\n", selfRelay)
 
