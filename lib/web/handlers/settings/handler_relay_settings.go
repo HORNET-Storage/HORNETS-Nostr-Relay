@@ -365,31 +365,14 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		logging.Info("Push notification settings updated, will reload push service...")
 	}
 
-	// Update each setting using thread-safe config functions
-	// Use save=true on the last setting to persist all changes at once
-	settingKeys := make([]string, 0, len(settings))
-	for key := range settings {
-		settingKeys = append(settingKeys, key)
-	}
-
-	for i, key := range settingKeys {
-		value := settings[key]
-		// Save on the last setting to persist all changes together
-		shouldSave := (i == len(settingKeys)-1)
-
-		logging.Infof("Setting %s = %v (type: %T, save: %v)", key, value, value, shouldSave)
-		if err := config.UpdateConfig(key, value, shouldSave); err != nil {
-			logging.Infof("Error updating config key %s: %v", key, err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": fmt.Sprintf("Failed to update setting %s", key),
-			})
-		}
-	}
-
-	// Config is already refreshed by SaveConfig(), so we can remove this
-	if err := config.RefreshConfig(); err != nil {
-		logging.Infof("Warning: Failed to refresh config cache: %v", err)
-		// Don't fail the request, just log the warning
+	// Use the new intelligent update function that only saves changed values
+	// This prevents overwriting unchanged configuration
+	logging.Info("Applying configuration changes intelligently...")
+	if err := config.UpdateMultipleSections(settings); err != nil {
+		logging.Infof("Error updating configuration: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to update settings: %v", err),
+		})
 	}
 
 	// If allowed_users settings were updated, update access control and trigger event regeneration

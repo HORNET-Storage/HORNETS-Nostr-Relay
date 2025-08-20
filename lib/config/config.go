@@ -198,10 +198,19 @@ func SaveConfig() error {
 }
 
 // UpdateConfig updates a configuration value and optionally saves it
+// Now with change detection to avoid unnecessary writes
 func UpdateConfig(key string, value interface{}, save bool) error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
+	// Check if the value actually changed
+	currentValue := viper.Get(key)
+	if isConfigValueEqual(currentValue, value) {
+		log.Printf("No change for %s, skipping update", key)
+		return nil
+	}
+
+	log.Printf("Updating %s: %v -> %v", key, currentValue, value)
 	viper.Set(key, value)
 
 	if save {
@@ -212,6 +221,122 @@ func UpdateConfig(key string, value interface{}, save bool) error {
 
 	// Reload cache after update
 	return reloadConfigCache()
+}
+
+// UpdateMultipleSections updates multiple configuration sections intelligently
+// Only saves once at the end, and only if there were changes
+func UpdateMultipleSections(settings map[string]interface{}) error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	hasChanges := false
+
+	// Process each section
+	for sectionName, sectionValue := range settings {
+		sectionMap, ok := sectionValue.(map[string]interface{})
+		if !ok {
+			// Handle simple top-level values
+			currentValue := viper.Get(sectionName)
+			if !isConfigValueEqual(currentValue, sectionValue) {
+				log.Printf("Updating %s: %v -> %v", sectionName, currentValue, sectionValue)
+				viper.Set(sectionName, sectionValue)
+				hasChanges = true
+			}
+			continue
+		}
+
+		// Process section fields
+		log.Printf("Processing section: %s", sectionName)
+		for fieldName, fieldValue := range sectionMap {
+			fullKey := sectionName + "." + fieldName
+
+			// Handle nested sections
+			if nestedMap, ok := fieldValue.(map[string]interface{}); ok {
+				for nestedField, nestedValue := range nestedMap {
+					nestedKey := fullKey + "." + nestedField
+					currentValue := viper.Get(nestedKey)
+					if !isConfigValueEqual(currentValue, nestedValue) {
+						log.Printf("  Updating %s: %v -> %v", nestedKey, currentValue, nestedValue)
+						viper.Set(nestedKey, nestedValue)
+						hasChanges = true
+					}
+				}
+			} else {
+				currentValue := viper.Get(fullKey)
+				if !isConfigValueEqual(currentValue, fieldValue) {
+					log.Printf("  Updating %s: %v -> %v", fullKey, currentValue, fieldValue)
+					viper.Set(fullKey, fieldValue)
+					hasChanges = true
+				}
+			}
+		}
+	}
+
+	// Only save if there were changes
+	if hasChanges {
+		log.Println("Saving configuration changes...")
+		if err := viper.WriteConfig(); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		// Reload cache after save
+		if err := reloadConfigCache(); err != nil {
+			return fmt.Errorf("failed to reload cache: %w", err)
+		}
+
+		log.Println("Configuration saved successfully")
+	} else {
+		log.Println("No configuration changes detected, skipping save")
+	}
+
+	return nil
+}
+
+// isConfigValueEqual compares two configuration values for equality
+// Handles type normalization for JSON numbers (float64 vs int)
+func isConfigValueEqual(a, b interface{}) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Normalize and compare
+	normalizedA := normalizeConfigValue(a)
+	normalizedB := normalizeConfigValue(b)
+
+	// Use string comparison as a simple but effective equality check
+	return fmt.Sprintf("%v", normalizedA) == fmt.Sprintf("%v", normalizedB)
+}
+
+// normalizeConfigValue ensures consistent types for comparison
+func normalizeConfigValue(v interface{}) interface{} {
+	switch val := v.(type) {
+	case float64:
+		// JSON numbers come as float64, convert to int if whole number
+		if val == float64(int(val)) {
+			return int(val)
+		}
+		return val
+	case []interface{}:
+		// Normalize array elements
+		normalized := make([]interface{}, len(val))
+		for i, item := range val {
+			normalized[i] = normalizeConfigValue(item)
+		}
+		return normalized
+	case map[string]interface{}:
+		// Normalize map values
+		normalized := make(map[string]interface{})
+		for k, v := range val {
+			normalized[k] = normalizeConfigValue(v)
+		}
+		return normalized
+	default:
+		return v
+	}
 }
 
 // RefreshConfig forces a reload of the configuration cache
