@@ -342,6 +342,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 					logging.Infof("Error calculating supported NIPs from kinds: %v", err)
 				} else {
 					// Update supported_nips in relay settings (create relay section if it doesn't exist)
+					// This is safer than direct viper.Set which can pollute in-memory config
 					if _, exists := settings["relay"]; !exists {
 						settings["relay"] = make(map[string]interface{})
 						logging.Infof("DEBUG: Created relay section in settings")
@@ -351,8 +352,8 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
 					}
 
-					// Note: The supportedNIPs will be saved through the config.UpdateConfig call below
-					// We don't need to call viper.Set directly anymore
+					// Note: The supportedNIPs will be saved through the UpdateMultipleSections call below
+					// We avoid viper.Set to prevent config pollution that caused overwrites
 				}
 			}
 		}
