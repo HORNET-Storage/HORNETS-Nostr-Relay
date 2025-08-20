@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/gofiber/fiber/v2"
@@ -85,8 +86,8 @@ func UpdateWalletBalance(c *fiber.Ctx, store stores.Store) error {
 	if expectedWalletName == "" {
 		logging.Infof("No wallet name configured, using wallet name from request: %s", walletName)
 		// Update the config with the wallet name from the request
-		viper.Set("wallet.name", walletName)
-		if err := viper.WriteConfig(); err != nil {
+		// Use UpdateConfig with save=true since this is a legitimate config update
+		if err := config.UpdateConfig("wallet.name", walletName, true); err != nil {
 			logging.Infof("Warning: Failed to write wallet name to config: %v", err)
 			// Continue processing even if writing to config fails
 		}
