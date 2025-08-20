@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -42,12 +43,14 @@ func InitConfig() error {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
+	// Set defaults (will check internally if config exists)
+	setDefaults()
+
 	// Try to read config file
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Config file not found, set defaults and create it
+			// Config file not found, create it with defaults
 			fmt.Println("No config.yaml found, creating default configuration...")
-			setDefaults()
 			if err := viper.WriteConfigAs("config.yaml"); err != nil {
 				return fmt.Errorf("failed to create default config: %w", err)
 			}
@@ -60,7 +63,7 @@ func InitConfig() error {
 			return fmt.Errorf("error reading config file: %w", err)
 		}
 	} else {
-		// Config file exists, don't override with defaults
+		// Config file exists
 		fmt.Println("Using existing config.yaml - preserving user configurations")
 	}
 
@@ -387,8 +390,17 @@ func AddKindToNIPMapping(kind int, nip int) error {
 	return nil
 }
 
-// setDefaults sets all default values (same as original)
+// setDefaults sets all default values only if config doesn't exist
 func setDefaults() {
+	// Simply check if config.yaml exists in project root
+	if _, err := os.Stat("config.yaml"); err == nil {
+		// Config exists, don't set defaults
+		fmt.Println("Config file exists, skipping defaults to preserve user settings")
+		return
+	}
+
+	fmt.Println("No existing config found, setting defaults for new installation")
+
 	// Server defaults
 	viper.SetDefault("server.port", 9000)
 	viper.SetDefault("server.bind_address", "0.0.0.0")
