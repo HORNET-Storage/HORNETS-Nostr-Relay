@@ -366,22 +366,24 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 	}
 
 	// Update each setting using thread-safe config functions
-	for key, value := range settings {
-		logging.Infof("Setting %s = %v (type: %T)", key, value, value)
-		if err := config.UpdateConfig(key, value, false); err != nil {
+	// Use save=true on the last setting to persist all changes at once
+	settingKeys := make([]string, 0, len(settings))
+	for key := range settings {
+		settingKeys = append(settingKeys, key)
+	}
+
+	for i, key := range settingKeys {
+		value := settings[key]
+		// Save on the last setting to persist all changes together
+		shouldSave := (i == len(settingKeys)-1)
+
+		logging.Infof("Setting %s = %v (type: %T, save: %v)", key, value, value, shouldSave)
+		if err := config.UpdateConfig(key, value, shouldSave); err != nil {
 			logging.Infof("Error updating config key %s: %v", key, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": fmt.Sprintf("Failed to update setting %s", key),
 			})
 		}
-	}
-
-	// Save the configuration using thread-safe function
-	if err := config.SaveConfig(); err != nil {
-		logging.Infof("Error saving config: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to save settings",
-		})
 	}
 
 	// Config is already refreshed by SaveConfig(), so we can remove this
