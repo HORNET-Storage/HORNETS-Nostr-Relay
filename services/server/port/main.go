@@ -136,6 +136,16 @@ func main() {
 
 	serializedPrivateKey := viper.GetString("relay.private_key")
 
+	// Add diagnostic logging for config state
+	logging.Info("Config initialization diagnostic", map[string]interface{}{
+		"config_file_exists": viper.ConfigFileUsed() != "",
+		"config_file_path":   viper.ConfigFileUsed(),
+		"private_key_exists": len(serializedPrivateKey) > 0,
+		"dht_key_exists":     len(viper.GetString("relay.dht_key")) > 0,
+		"public_key_exists":  len(viper.GetString("relay.public_key")) > 0,
+		"wallet_key_exists":  len(viper.GetString("external_services.wallet.key")) > 0,
+	})
+
 	if len(serializedPrivateKey) <= 0 {
 		newKey, err := signing.GeneratePrivateKey()
 		if err != nil {
@@ -226,18 +236,27 @@ func main() {
 		logging.Fatal("failed to deserialize private key")
 	}
 
-	// Ensure public key is always derived from private_key on relay start no matter what the public key is in the config
+	// Ensure public key matches the private key, but only save if it differs
 	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
 	if err != nil {
 		logging.Errorf("Failed to serialize public key: %v", err)
 	} else {
-		viper.Set("relay.public_key", *serializedPublicKey)
+		currentPublicKey := viper.GetString("relay.public_key")
 
-		err = config.SaveConfig()
-		if err != nil {
-			logging.Errorf("Failed to save public key to config: %v", err)
+		// Only save config if the public key has actually changed
+		if currentPublicKey != *serializedPublicKey {
+			viper.Set("relay.public_key", *serializedPublicKey)
+
+			err = config.SaveConfig()
+			if err != nil {
+				logging.Errorf("Failed to save updated public key to config: %v", err)
+			} else {
+				logging.Info("Updated public key in configuration (derived from private key)", map[string]interface{}{
+					"public_key": *serializedPublicKey,
+				})
+			}
 		} else {
-			logging.Info("Saved public key to configuration", map[string]interface{}{
+			logging.Info("Public key already matches derived key, no config update needed", map[string]interface{}{
 				"public_key": *serializedPublicKey,
 			})
 		}
