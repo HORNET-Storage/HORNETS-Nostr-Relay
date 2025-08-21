@@ -538,18 +538,45 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 		})
 	}
 
-	// Update the setting using thread-safe config function
-	if err := config.UpdateConfig(key, value, true); err != nil {
-		logging.Infof("Error updating config: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to save setting",
+	// Convert individual setting to the safe UpdateMultipleSections format
+	// This prevents config overwrites by using our intelligent update system
+	parts := strings.Split(key, ".")
+	if len(parts) < 2 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Setting key must be in format 'section.field' or 'section.subsection.field'",
 		})
 	}
 
-	// Refresh the cached configuration
-	if err := config.RefreshConfig(); err != nil {
-		logging.Infof("Warning: Failed to refresh config cache: %v", err)
-		// Don't fail the request, just log the warning
+	// Build nested settings structure for UpdateMultipleSections
+	settings := make(map[string]interface{})
+
+	if len(parts) == 2 {
+		// Simple case: section.field
+		sectionName := parts[0]
+		fieldName := parts[1]
+		settings[sectionName] = map[string]interface{}{
+			fieldName: value,
+		}
+	} else {
+		// Complex case: section.subsection.field (e.g. external_services.wallet.url)
+		sectionName := parts[0]
+		subsectionName := parts[1]
+		fieldName := parts[2]
+		settings[sectionName] = map[string]interface{}{
+			subsectionName: map[string]interface{}{
+				fieldName: value,
+			},
+		}
+	}
+
+	logging.Infof("Individual setting update converted to safe format: %s=%v -> %+v", key, value, settings)
+
+	// Use the same safe update mechanism as UpdateSettings
+	if err := config.UpdateMultipleSections(settings); err != nil {
+		logging.Infof("Error updating configuration: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to save setting",
+		})
 	}
 
 	return c.JSON(fiber.Map{
