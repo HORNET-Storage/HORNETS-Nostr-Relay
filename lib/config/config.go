@@ -622,6 +622,7 @@ func setDefaults() {
 	viper.SetDefault("allowed_users.write_access.enabled", true)
 	viper.SetDefault("allowed_users.write_access.scope", "all_users")
 	viper.SetDefault("allowed_users.last_updated", 0)
+	viper.SetDefault("allowed_users.batch_update_on_startup", false) // Disable batch update by default for performance
 
 	// Default free tier with 100MB monthly storage
 	viper.SetDefault("allowed_users.tiers", []map[string]interface{}{

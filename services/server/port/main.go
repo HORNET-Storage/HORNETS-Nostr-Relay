@@ -289,11 +289,6 @@ func main() {
 	// Initialize image moderation system if enabled
 	if config.IsEnabled("content_filtering.image_moderation.enabled") {
 		defer func() {
-			err := store.Cleanup()
-			if err != nil {
-				logging.Infof("Failed to cleanup temp database: %v", err)
-			}
-
 			// Shutdown moderation system if initialized
 			moderation.Shutdown()
 		}()
@@ -347,16 +342,31 @@ func main() {
 	)
 	logging.Info("Global subscription manager initialized successfully")
 
-	// Batch update existing kind 11888 events on startup to ensure they reflect current config
-	logging.Info("Updating existing kind 11888 events to reflect current configuration...")
-	if manager := subscription.GetGlobalManager(); manager != nil {
-		go func() {
-			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
-				logging.Errorf("Failed to update existing kind 11888 events on startup: %v", err)
-			} else {
-				logging.Info("Successfully updated existing kind 11888 events on startup")
-			}
-		}()
+	// Create a cancellable context for background operations
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// WaitGroup to track background goroutines
+	var bgWg sync.WaitGroup
+
+	// Batch update existing kind 11888 events on startup if enabled
+	if viper.GetBool("allowed_users.batch_update_on_startup") {
+		logging.Info("Batch update is enabled - updating existing kind 11888 events to reflect current configuration...")
+		if manager := subscription.GetGlobalManager(); manager != nil {
+			bgWg.Add(1)
+			go func() {
+				defer bgWg.Done()
+				if err := manager.BatchUpdateAllSubscriptionEventsWithContext(ctx); err != nil {
+					if ctx.Err() == nil { // Only log error if not cancelled
+						logging.Errorf("Failed to update existing kind 11888 events on startup: %v", err)
+					}
+				} else {
+					logging.Info("Successfully updated existing kind 11888 events on startup")
+				}
+			}()
+		}
+	} else {
+		logging.Info("Batch update on startup is disabled (set allowed_users.batch_update_on_startup to true to enable)")
 	}
 
 	// Initialize daily free tier subscription renewal
@@ -600,10 +610,29 @@ func main() {
 
 	go func() {
 		<-sigs
+		logging.Info("Received shutdown signal, cleaning up...")
+
+		// Cancel context to stop background operations
+		cancel()
+
+		// Wait for background goroutines to finish with timeout
+		done := make(chan struct{})
+		go func() {
+			bgWg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			logging.Info("All background operations completed")
+		case <-time.After(5 * time.Second):
+			logging.Info("Timeout waiting for background operations, proceeding with cleanup")
+		}
 
 		// Cleanup push notification service
 		push.StopGlobalPushService()
 
+		// Now safe to cleanup database
 		store.Cleanup()
 
 		os.Exit(0)
