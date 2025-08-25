@@ -51,3 +51,6 @@ test-db/
 test-db-*/
 ./test-db
 ./test-db-*
+
+# iOS keys directory
+ios_keys/

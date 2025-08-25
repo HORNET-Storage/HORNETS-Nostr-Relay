@@ -11,6 +11,7 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/services/push"
 )
 
 func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connectionState, store stores.Store) {
@@ -94,5 +95,11 @@ func handleEventWithHandler(c *websocket.Conn, env *nostr.EventEnvelope, handler
 	}
 
 	notifyListeners(&env.Event)
+
+	// Process event for push notifications
+	if pushService := push.GetGlobalPushService(); pushService != nil {
+		pushService.ProcessEvent(&env.Event)
+	}
+
 	handler(read, write)
 }

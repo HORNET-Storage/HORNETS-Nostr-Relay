@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
@@ -18,66 +17,34 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
+	"github.com/HORNET-Storage/hornet-storage/services/push"
 )
 
 // GetSettings returns the entire configuration
 func GetSettings(c *fiber.Ctx) error {
 	logging.Info("Get settings request received")
 
-	// Return the entire config as JSON
-	settings := viper.AllSettings()
+	// Use the new thread-safe helper function to get all settings
+	// This avoids the concurrent map read/write error from viper.AllSettings()
+	settings, err := config.GetAllSettingsAsMap()
+	if err != nil {
+		logging.Infof("Error getting settings: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve configuration",
+		})
+	}
 
 	// Clean prefixed keys before sending to frontend
 	cleanSettingsForFrontend(settings)
 
-	// Log each major section
-	if _, ok := settings["subscriptions"]; ok {
-		// logging.Infof("subscriptions: %+v", subscriptions)
-	} else {
-		logging.Infof("subscriptions: NOT FOUND")
-	}
-
-	if _, ok := settings["allowed_users"]; ok {
-		// logging.Infof("allowed_users: %+v", allowedUsers)
-	} else {
-		logging.Infof("allowed_users: NOT FOUND")
-	}
-
-	if _, ok := settings["event_filtering"]; ok {
-		// logging.Infof("event_filtering: %+v", eventFiltering)
-	} else {
-		logging.Infof("event_filtering: NOT FOUND")
-	}
-
-	if _, ok := settings["content_filtering"]; ok {
-		// logging.Infof("content_filtering: %+v", contentFiltering)
-	} else {
-		logging.Infof("content_filtering: NOT FOUND")
-	}
-
-	if _, ok := settings["relay"]; ok {
-		// logging.Infof("relay: %+v", relay)
-	} else {
-		logging.Infof("relay: NOT FOUND")
-	}
-
-	if _, ok := settings["server"]; ok {
-		// logging.Infof("server: %+v", server)
-	} else {
-		logging.Infof("server: NOT FOUND")
-	}
-
-	if _, ok := settings["external_services"]; ok {
-		// logging.Infof("external_services: %+v", externalServices)
-	} else {
-		logging.Infof("external_services: NOT FOUND")
-	}
-
-	if _, ok := settings["logging"]; ok {
-		// logging.Infof("logging: %+v", logger)
-	} else {
-		logging.Info("logging: NOT FOUND")
-	}
+	// Log successful configuration sections retrieval
+	logging.Infof("Successfully retrieved configuration sections: %v", func() []string {
+		var sections []string
+		for key := range settings {
+			sections = append(sections, key)
+		}
+		return sections
+	}())
 
 	response := fiber.Map{
 		"settings": settings,
@@ -374,37 +341,39 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 				if err != nil {
 					logging.Infof("Error calculating supported NIPs from kinds: %v", err)
 				} else {
-					// Update supported_nips directly in viper to avoid overwriting other relay settings
-					viper.Set("relay.supported_nips", supportedNIPs)
-					logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
+					// Update supported_nips in relay settings (create relay section if it doesn't exist)
+					// This is safer than direct viper.Set which can pollute in-memory config
+					if _, exists := settings["relay"]; !exists {
+						settings["relay"] = make(map[string]interface{})
+						logging.Infof("DEBUG: Created relay section in settings")
+					}
+					if relayMap, ok := settings["relay"].(map[string]interface{}); ok {
+						relayMap["supported_nips"] = supportedNIPs
+						logging.Infof("Updated supported_nips based on kind_whitelist: %v", supportedNIPs)
+					}
+
+					// Note: The supportedNIPs will be saved through the UpdateMultipleSections call below
+					// We avoid viper.Set to prevent config pollution that caused overwrites
 				}
 			}
 		}
 	}
 
-	// Update each setting using thread-safe config functions
-	for key, value := range settings {
-		logging.Infof("Setting %s = %v (type: %T)", key, value, value)
-		if err := config.UpdateConfig(key, value, false); err != nil {
-			logging.Infof("Error updating config key %s: %v", key, err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": fmt.Sprintf("Failed to update setting %s", key),
-			})
-		}
+	// Check if push notification settings are being updated
+	pushNotificationsUpdated := false
+	if _, exists := settings["push_notifications"]; exists {
+		pushNotificationsUpdated = true
+		logging.Info("Push notification settings updated, will reload push service...")
 	}
 
-	// Save the configuration using thread-safe function
-	if err := config.SaveConfig(); err != nil {
-		logging.Infof("Error saving config: %v", err)
+	// Use the new intelligent update function that only saves changed values
+	// This prevents overwriting unchanged configuration
+	logging.Info("Applying configuration changes intelligently...")
+	if err := config.UpdateMultipleSections(settings); err != nil {
+		logging.Infof("Error updating configuration: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to save settings",
+			"error": fmt.Sprintf("Failed to update settings: %v", err),
 		})
-	}
-
-	// Config is already refreshed by SaveConfig(), so we can remove this
-	if err := config.RefreshConfig(); err != nil {
-		logging.Infof("Warning: Failed to refresh config cache: %v", err)
-		// Don't fail the request, just log the warning
 	}
 
 	// If allowed_users settings were updated, update access control and trigger event regeneration
@@ -469,8 +438,14 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 
 				logging.Infof("Regenerating kind 10411 event due to %s...", reason)
 
-				// Get the private and public keys from viper (same way as main.go does)
-				serializedPrivateKey := viper.GetString("relay.private_key")
+				// Get the private and public keys from config (thread-safe)
+				cfg, err := config.GetConfig()
+				if err != nil {
+					logging.Infof("Error getting config: %v", err)
+					return
+				}
+
+				serializedPrivateKey := cfg.Relay.PrivateKey
 				if len(serializedPrivateKey) <= 0 {
 					logging.Infof("Error: No private key found in configuration")
 					return
@@ -495,6 +470,21 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		}
 	}
 
+	// If push notification settings were updated, reload the push service
+	if pushNotificationsUpdated {
+		logging.Info("Reloading push notification service with new configuration...")
+
+		// Reload the service with new configuration
+		statsStore := store.GetStatsStore()
+		if err := push.ReloadGlobalPushService(statsStore); err != nil {
+			logging.Infof("Warning: Failed to reload push notification service: %v", err)
+			// Don't fail the request, just log the warning
+			// The service will pick up the new config on next restart
+		} else {
+			logging.Info("Push notification service reloaded successfully")
+		}
+	}
+
 	logging.Info("Settings updated successfully")
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -511,7 +501,14 @@ func GetSettingValue(c *fiber.Ctx) error {
 		})
 	}
 
-	value := viper.Get(key)
+	// Use the thread-safe helper function to get a specific setting value
+	value, err := config.GetSettingValue(key)
+	if err != nil {
+		logging.Infof("Error getting setting value for key %s: %v", key, err)
+		// Return nil value instead of error for missing keys (backward compatibility)
+		value = nil
+	}
+
 	return c.JSON(fiber.Map{
 		"key":   key,
 		"value": value,
@@ -541,18 +538,45 @@ func UpdateSettingValue(c *fiber.Ctx) error {
 		})
 	}
 
-	// Update the setting using thread-safe config function
-	if err := config.UpdateConfig(key, value, true); err != nil {
-		logging.Infof("Error updating config: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to save setting",
+	// Convert individual setting to the safe UpdateMultipleSections format
+	// This prevents config overwrites by using our intelligent update system
+	parts := strings.Split(key, ".")
+	if len(parts) < 2 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Setting key must be in format 'section.field' or 'section.subsection.field'",
 		})
 	}
 
-	// Refresh the cached configuration
-	if err := config.RefreshConfig(); err != nil {
-		logging.Infof("Warning: Failed to refresh config cache: %v", err)
-		// Don't fail the request, just log the warning
+	// Build nested settings structure for UpdateMultipleSections
+	settings := make(map[string]interface{})
+
+	if len(parts) == 2 {
+		// Simple case: section.field
+		sectionName := parts[0]
+		fieldName := parts[1]
+		settings[sectionName] = map[string]interface{}{
+			fieldName: value,
+		}
+	} else {
+		// Complex case: section.subsection.field (e.g. external_services.wallet.url)
+		sectionName := parts[0]
+		subsectionName := parts[1]
+		fieldName := parts[2]
+		settings[sectionName] = map[string]interface{}{
+			subsectionName: map[string]interface{}{
+				fieldName: value,
+			},
+		}
+	}
+
+	logging.Infof("Individual setting update converted to safe format: %s=%v -> %+v", key, value, settings)
+
+	// Use the same safe update mechanism as UpdateSettings
+	if err := config.UpdateMultipleSections(settings); err != nil {
+		logging.Infof("Error updating configuration: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to save setting",
+		})
 	}
 
 	return c.JSON(fiber.Map{

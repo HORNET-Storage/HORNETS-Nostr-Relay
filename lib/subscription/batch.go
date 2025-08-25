@@ -3,6 +3,7 @@
 package subscription
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -54,6 +55,12 @@ func ScheduleBatchUpdateAfter(delay time.Duration) {
 // BatchUpdateAllSubscriptionEvents processes all kind 11888 events in batches
 // to update storage allocations after allowed users settings have changed
 func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
+	return m.BatchUpdateAllSubscriptionEventsWithContext(context.Background())
+}
+
+// BatchUpdateAllSubscriptionEventsWithContext processes all kind 11888 events in batches
+// with context support for cancellation
+func (m *SubscriptionManager) BatchUpdateAllSubscriptionEventsWithContext(ctx context.Context) error {
 	logging.Infof("Starting batch update of all kind 11888 subscription events")
 
 	// Get the current allowed users settings
@@ -64,15 +71,61 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 
 	currentMode := strings.ToLower(allowedUsersSettings.Mode)
 
-	// Process events in batches of 50
+	// First, check if we actually need to do a batch update
+	expectedRelayMode := m.getRelayMode()
+	
+	// Quick check: Query a small sample to see if update is needed
+	sampleFilter := nostr.Filter{
+		Kinds: []int{11888},
+		Limit: 10,
+	}
+	sampleEvents, err := m.store.QueryEvents(sampleFilter)
+	if err != nil {
+		return fmt.Errorf("error querying sample events: %v", err)
+	}
+	
+	// Check if any events actually need updating
+	needsUpdate := false
+	for _, event := range sampleEvents {
+		currentRelayMode := getTagValue(event.Tags, "relay_mode")
+		if currentRelayMode != expectedRelayMode {
+			needsUpdate = true
+			break
+		}
+	}
+	
+	if !needsUpdate && len(sampleEvents) > 0 {
+		logging.Info("Batch update check complete: All sampled events are already up to date")
+		return nil
+	}
+
+	// Process events in batches with proper pagination
 	batchSize := 50
 	processed := 0
+	updated := 0
+	skipped := 0
+	var lastEventTime int64 = 0
+	maxProcessed := 1000 // Safety limit to prevent runaway processing
 
-	for {
-		// Query the next batch of events
+	for processed < maxProcessed {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			logging.Info("Batch update cancelled")
+			return ctx.Err()
+		default:
+		}
+
+		// Query the next batch of events using timestamp for pagination
 		filter := nostr.Filter{
 			Kinds: []int{11888},
 			Limit: batchSize,
+		}
+		
+		// Use Since to get events after the last processed timestamp
+		if lastEventTime > 0 {
+			sinceTimestamp := nostr.Timestamp(lastEventTime + 1)
+			filter.Since = &sinceTimestamp
 		}
 
 		events, err := m.store.QueryEvents(filter)
@@ -87,23 +140,39 @@ func (m *SubscriptionManager) BatchUpdateAllSubscriptionEvents() error {
 
 		// Process each event in the batch
 		for _, event := range events {
-			if err := m.processSingleSubscriptionEvent(event); err != nil {
-				logging.Infof("Error processing event %s: %v", event.ID, err)
-				// Continue with next event even if this one fails
+			// Quick check if this event needs updating
+			currentRelayMode := getTagValue(event.Tags, "relay_mode")
+			if currentRelayMode == expectedRelayMode {
+				skipped++
+			} else {
+				if err := m.processSingleSubscriptionEvent(event); err != nil {
+					logging.Debugf("Error processing event %s: %v", event.ID, err)
+				} else {
+					updated++
+				}
 			}
-
+			
+			// Update last event timestamp for pagination
+			eventTime := int64(event.CreatedAt)
+			if eventTime > lastEventTime {
+				lastEventTime = eventTime
+			}
+			
 			processed++
 		}
 
-		logging.Infof("Processed %d kind 11888 events so far", processed)
+		// Log progress periodically
+		if processed%200 == 0 {
+			logging.Infof("Batch update progress: %d processed, %d updated, %d skipped", processed, updated, skipped)
+		}
 
-		// If we received fewer events than requested, we've reached the end of available events
+		// If we received fewer events than requested, we've reached the end
 		if len(events) < batchSize {
 			break
 		}
 	}
 
-	logging.Infof("Completed batch update, processed %d kind 11888 events", processed)
+	logging.Infof("Batch update completed: %d processed, %d updated, %d skipped", processed, updated, skipped)
 
 	// Only allocate Bitcoin addresses in subscription (paid) mode
 	// Never allocate addresses in free modes

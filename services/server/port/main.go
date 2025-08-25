@@ -14,6 +14,7 @@ import (
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/services/push"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/count"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/filter"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1809"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
@@ -134,6 +136,19 @@ func main() {
 
 	serializedPrivateKey := viper.GetString("relay.private_key")
 
+	// Add diagnostic logging for config state
+	logging.Info("Config initialization diagnostic", map[string]interface{}{
+		"config_file_exists": viper.ConfigFileUsed() != "",
+		"config_file_path":   viper.ConfigFileUsed(),
+		"private_key_exists": len(serializedPrivateKey) > 0,
+		"dht_key_exists":     len(viper.GetString("relay.dht_key")) > 0,
+		"public_key_exists":  len(viper.GetString("relay.public_key")) > 0,
+		"wallet_key_exists":  len(viper.GetString("external_services.wallet.key")) > 0,
+	})
+
+	// Track if we need to save config at the end
+	configNeedsSave := false
+
 	if len(serializedPrivateKey) <= 0 {
 		newKey, err := signing.GeneratePrivateKey()
 		if err != nil {
@@ -160,12 +175,10 @@ func main() {
 				viper.Set("relay.public_key", serializedPublicKey)
 			}
 
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Fatal("Failed to save configuration", map[string]interface{}{
-					"error": err,
-				})
-			}
+			// Use UpdateConfig with save=false for all changes during startup
+			config.UpdateConfig("relay.private_key", *key, true)
+			config.UpdateConfig("relay.public_key", *serializedPublicKey, true)
+			configNeedsSave = true
 
 			logging.Info("Generated new server keys", map[string]interface{}{
 				"private_key": serializedPrivateKey,
@@ -181,14 +194,9 @@ func main() {
 		if err != nil {
 			logging.Errorf("Failed to generate DHT key: %v", err)
 		} else {
-			viper.Set("relay.dht_key", dhtKey)
-
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Fatal("Failed to save configuration", map[string]interface{}{
-					"error": err,
-				})
-			}
+			// Use UpdateConfig with save=false
+			config.UpdateConfig("relay.dht_key", dhtKey, true)
+			configNeedsSave = true
 
 			logging.Info("Generated new server DHT key", map[string]interface{}{
 				"dht_key": dhtKey,
@@ -204,14 +212,9 @@ func main() {
 		if err != nil {
 			logging.Errorf("Failed to generate wallet API key: %v", err)
 		} else {
-			viper.Set("external_services.wallet.key", newAPIKey)
-
-			err = config.SaveConfig()
-			if err != nil {
-				logging.Fatal("Failed to save configuration", map[string]interface{}{
-					"error": err,
-				})
-			}
+			// Use UpdateConfig with save=false
+			config.UpdateConfig("external_services.wallet.key", newAPIKey, true)
+			configNeedsSave = true
 
 			logging.Info("Generated new wallet API key", map[string]interface{}{
 				"wallet_api_key": newAPIKey,
@@ -224,21 +227,41 @@ func main() {
 		logging.Fatal("failed to deserialize private key")
 	}
 
-	// Ensure public key is always derived from private_key on relay start no matter what the public key is in the config
+	// Ensure public key matches the private key, but only save if it differs
 	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
 	if err != nil {
 		logging.Errorf("Failed to serialize public key: %v", err)
 	} else {
-		viper.Set("relay.public_key", *serializedPublicKey)
+		currentPublicKey := viper.GetString("relay.public_key")
 
-		err = config.SaveConfig()
-		if err != nil {
-			logging.Errorf("Failed to save public key to config: %v", err)
+		// Only update if the public key has actually changed
+		if currentPublicKey != *serializedPublicKey {
+			// Use UpdateConfig with save=false
+			config.UpdateConfig("relay.public_key", *serializedPublicKey, true)
+			configNeedsSave = true
+
+			logging.Info("Updated public key in configuration (derived from private key)", map[string]interface{}{
+				"public_key": *serializedPublicKey,
+			})
 		} else {
-			logging.Info("Saved public key to configuration", map[string]interface{}{
+			logging.Info("Public key already matches derived key, no config update needed", map[string]interface{}{
 				"public_key": *serializedPublicKey,
 			})
 		}
+	}
+
+	// Save config ONCE if any changes were made during startup
+	// Use UpdateConfig with a dummy key to trigger the save
+	if configNeedsSave {
+		logging.Info("Saving startup configuration changes...")
+		// Force a save by updating a timestamp
+		err = config.UpdateConfig("startup_initialized", time.Now().Unix(), true)
+		if err != nil {
+			logging.Fatal("Failed to save startup configuration", map[string]interface{}{
+				"error": err,
+			})
+		}
+		logging.Info("Startup configuration saved successfully")
 	}
 
 	port := config.GetPort("hornets")
@@ -266,11 +289,6 @@ func main() {
 	// Initialize image moderation system if enabled
 	if config.IsEnabled("content_filtering.image_moderation.enabled") {
 		defer func() {
-			err := store.Cleanup()
-			if err != nil {
-				logging.Infof("Failed to cleanup temp database: %v", err)
-			}
-
 			// Shutdown moderation system if initialized
 			moderation.Shutdown()
 		}()
@@ -324,16 +342,31 @@ func main() {
 	)
 	logging.Info("Global subscription manager initialized successfully")
 
-	// Batch update existing kind 11888 events on startup to ensure they reflect current config
-	logging.Info("Updating existing kind 11888 events to reflect current configuration...")
-	if manager := subscription.GetGlobalManager(); manager != nil {
-		go func() {
-			if err := manager.BatchUpdateAllSubscriptionEvents(); err != nil {
-				logging.Errorf("Failed to update existing kind 11888 events on startup: %v", err)
-			} else {
-				logging.Info("Successfully updated existing kind 11888 events on startup")
-			}
-		}()
+	// Create a cancellable context for background operations
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// WaitGroup to track background goroutines
+	var bgWg sync.WaitGroup
+
+	// Batch update existing kind 11888 events on startup if enabled
+	if viper.GetBool("allowed_users.batch_update_on_startup") {
+		logging.Info("Batch update is enabled - updating existing kind 11888 events to reflect current configuration...")
+		if manager := subscription.GetGlobalManager(); manager != nil {
+			bgWg.Add(1)
+			go func() {
+				defer bgWg.Done()
+				if err := manager.BatchUpdateAllSubscriptionEventsWithContext(ctx); err != nil {
+					if ctx.Err() == nil { // Only log error if not cancelled
+						logging.Errorf("Failed to update existing kind 11888 events on startup: %v", err)
+					}
+				} else {
+					logging.Info("Successfully updated existing kind 11888 events on startup")
+				}
+			}()
+		}
+	} else {
+		logging.Info("Batch update on startup is disabled (set allowed_users.batch_update_on_startup to true to enable)")
 	}
 
 	// Initialize daily free tier subscription renewal
@@ -366,8 +399,16 @@ func main() {
 		} else {
 			logging.Info("Global access control initialized successfully")
 		}
+
+		// Initialize push notification service
+		logging.Info("Initializing push notification service...")
+		if err := push.InitGlobalPushService(statsStore); err != nil {
+			logging.Errorf("Failed to initialize push notification service: %v", err)
+		} else {
+			logging.Info("Push notification service initialized successfully")
+		}
 	} else {
-		logging.Warn("Warning: Statistics store not available, access control not initialized")
+		logging.Warn("Warning: Statistics store not available, access control and push notifications not initialized")
 	}
 
 	// Create and store kind 10411 event
@@ -426,8 +467,10 @@ func main() {
 		for _, addr := range host.Addrs() {
 			libp2pAddrs = append(libp2pAddrs, addr.String())
 		}
-		viper.Set("LibP2PID", host.ID().String())
-		viper.Set("LibP2PAddrs", libp2pAddrs)
+		// Use UpdateConfig with save=false for runtime-only values
+		// This prevents them from being persisted to config.yaml
+		config.UpdateConfig("LibP2PID", host.ID().String(), false)
+		config.UpdateConfig("LibP2PAddrs", libp2pAddrs, false)
 		selfRelay := ws.GetRelayInfo()
 		logging.Infof("Self Relay: %+v\n", selfRelay)
 
@@ -447,6 +490,7 @@ func main() {
 	nostr.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
 	nostr.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	nostr.RegisterHandler("kind/1808", kind1808.BuildKind1808Handler(store))
+	nostr.RegisterHandler("kind/1809", kind1809.BuildKind1809Handler(store))
 	nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 	nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
 	nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
@@ -566,7 +610,29 @@ func main() {
 
 	go func() {
 		<-sigs
+		logging.Info("Received shutdown signal, cleaning up...")
 
+		// Cancel context to stop background operations
+		cancel()
+
+		// Wait for background goroutines to finish with timeout
+		done := make(chan struct{})
+		go func() {
+			bgWg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			logging.Info("All background operations completed")
+		case <-time.After(5 * time.Second):
+			logging.Info("Timeout waiting for background operations, proceeding with cleanup")
+		}
+
+		// Cleanup push notification service
+		push.StopGlobalPushService()
+
+		// Now safe to cleanup database
 		store.Cleanup()
 
 		os.Exit(0)

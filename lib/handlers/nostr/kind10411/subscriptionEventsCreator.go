@@ -17,7 +17,6 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
-	"github.com/spf13/viper"
 )
 
 // Address status constants
@@ -118,27 +117,41 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 		})
 	}
 
+	// Get config using safe method instead of direct viper access
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return fmt.Errorf("error getting config: %v", err)
+	}
+
 	// Format contact field as "email | npub"
-	email := viper.GetString("relay.contact")
-	publicKeyHex := viper.GetString("relay.public_key")
-	contact := email
-	if email != "" && publicKeyHex != "" {
-		if npub, err := nip19.EncodePublicKey(publicKeyHex); err == nil {
-			contact = fmt.Sprintf("%s | %s", email, npub)
+	contact := cfg.Relay.Contact
+	// Derive public key from private key
+	_, pubKey, err := signing.DeserializePrivateKey(cfg.Relay.PrivateKey)
+	if err != nil {
+		return fmt.Errorf("error deserializing private key: %v", err)
+	}
+	publicKeyHex, err := signing.SerializePublicKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("error serializing public key: %v", err)
+	}
+
+	if cfg.Relay.Contact != "" && publicKeyHex != nil && *publicKeyHex != "" {
+		if npub, err := nip19.EncodePublicKey(*publicKeyHex); err == nil {
+			contact = fmt.Sprintf("%s | %s", cfg.Relay.Contact, npub)
 		}
 	}
 
-	// Get relay info
+	// Get relay info from cached config instead of viper
 	relayInfo := RelayInfo{
-		Name:              viper.GetString("relay.name"),
-		Description:       viper.GetString("relay.description"),
-		Pubkey:            viper.GetString("relay.public_key"),
+		Name:              cfg.Relay.Name,
+		Description:       cfg.Relay.Description,
+		Pubkey:            *publicKeyHex,
 		Contact:           contact,
-		Icon:              viper.GetString("relay.icon"),
-		SupportedNIPs:     viper.GetIntSlice("relay.supported_nips"),
-		Software:          viper.GetString("relay.software"),
-		Version:           viper.GetString("relay.version"),
-		DHTkey:            viper.GetString("relay.dht_key"),
+		Icon:              cfg.Relay.Icon,
+		SupportedNIPs:     cfg.Relay.SupportedNIPs,
+		Software:          cfg.Relay.Software,
+		Version:           cfg.Relay.Version,
+		DHTkey:            cfg.Relay.DHTKey,
 		SubscriptionTiers: tierInfos,
 	}
 
@@ -232,12 +245,18 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 		return nil, fmt.Errorf("failed to allocate address: %v", err)
 	}
 
+	// Get config using safe method
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("error getting config: %v", err)
+	}
+
 	tags := []nostr.Tag{
 		{"subscription-duration", "1 month"},
 		{"npub", userPubKey},
 		{"relay-bitcoin-address", addr.Address},
 		// Add Lightning invoice if applicable
-		{"relay-dht-key", viper.GetString("relay.dht_key")},
+		{"relay-dht-key", cfg.Relay.DHTKey},
 	}
 
 	event := &nostr.Event{

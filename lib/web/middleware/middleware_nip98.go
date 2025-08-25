@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -44,17 +45,48 @@ func NIP98Middleware(config ...NIP98Config) fiber.Handler {
 	}
 
 	return func(c *fiber.Ctx) error {
+		logging.Info("NIP-98 middleware processing request", map[string]interface{}{
+			"method": c.Method(),
+			"path":   c.Path(),
+			"url":    c.OriginalURL(),
+		})
+
 		// Extract Authorization header
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
+			logging.Warn("NIP-98 auth failed: missing Authorization header", map[string]interface{}{
+				"method": c.Method(),
+				"path":   c.Path(),
+			})
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Missing Authorization header",
 			})
 		}
 
+		logging.Info("NIP-98 auth header found", map[string]interface{}{
+			"header_length": len(authHeader),
+			"header_prefix": func() string {
+				if len(authHeader) > 20 {
+					return authHeader[:20]
+				}
+				return authHeader
+			}(),
+		})
+
 		// Check for "Nostr" scheme
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Nostr" {
+			logging.Warn("NIP-98 auth failed: invalid scheme", map[string]interface{}{
+				"parts_count": len(parts),
+				"scheme": func() string {
+					if len(parts) > 0 {
+						return parts[0]
+					} else {
+						return "none"
+					}
+				}(),
+				"expected": "Nostr",
+			})
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid Authorization scheme, expected 'Nostr'",
 			})
@@ -63,25 +95,55 @@ func NIP98Middleware(config ...NIP98Config) fiber.Handler {
 		// Decode base64 event
 		eventJSON, err := base64.StdEncoding.DecodeString(parts[1])
 		if err != nil {
+			logging.Warn("NIP-98 auth failed: base64 decode error", map[string]interface{}{
+				"error":       err.Error(),
+				"data_length": len(parts[1]),
+			})
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid base64 encoding",
 			})
 		}
 
+		logging.Info("NIP-98 base64 decoded successfully", map[string]interface{}{
+			"json_length": len(eventJSON),
+		})
+
 		// Parse Nostr event
 		var event nostr.Event
 		if err := json.Unmarshal(eventJSON, &event); err != nil {
+			logging.Warn("NIP-98 auth failed: JSON parse error", map[string]interface{}{
+				"error": err.Error(),
+				"json":  string(eventJSON),
+			})
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid Nostr event format",
 			})
 		}
 
+		logging.Info("NIP-98 event parsed successfully", map[string]interface{}{
+			"kind":       event.Kind,
+			"pubkey":     event.PubKey,
+			"created_at": event.CreatedAt,
+			"tags_count": len(event.Tags),
+		})
+
 		// Validate event
 		if err := validateNIP98Event(&event, c, cfg); err != nil {
+			logging.Warn("NIP-98 auth failed: validation error", map[string]interface{}{
+				"error":  err.Error(),
+				"kind":   event.Kind,
+				"pubkey": event.PubKey,
+			})
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": err.Error(),
 			})
 		}
+
+		logging.Info("NIP-98 auth successful", map[string]interface{}{
+			"pubkey": event.PubKey,
+			"method": c.Method(),
+			"path":   c.Path(),
+		})
 
 		// Store pubkey in context for handlers
 		c.Locals(NIP98PubkeyKey, event.PubKey)

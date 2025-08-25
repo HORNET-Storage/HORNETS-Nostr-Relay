@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/spf13/viper"
-
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -20,6 +18,7 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -43,9 +42,10 @@ func generateKey() *string {
 		logging.Fatal("Unable to serialize public key. Exiting.")
 	}
 
-	// TODO: should this not go here?
-	viper.Set("key", serializedPub)
-	viper.Set("priv_key", serializedPriv)
+	// Use UpdateConfig with save=false for runtime-only values
+	// These are libp2p keys, not the main relay keys, and shouldn't persist
+	config.UpdateConfig("key", *serializedPub, false)
+	config.UpdateConfig("priv_key", *serializedPriv, false)
 	logging.Infof("Generated public/private key pair: %s/%s", *serializedPub, *serializedPriv)
 	logging.Info("Please copy the private key into your config.json file if you want to re-use it")
 

@@ -21,6 +21,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/bitcoin"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/moderation"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/push"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/settings"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/wallet"
@@ -173,6 +174,30 @@ func StartServer(store stores.Store) error {
 	walletRoutes.Post("/addresses", func(c *fiber.Ctx) error {
 		return wallet.SaveWalletAddresses(c, store)
 	})
+
+	// ================================
+	// PUSH NOTIFICATION ROUTES (NIP-98 AUTH)
+	// ================================
+	// NOTE: These MUST be defined before the secured /api group to avoid JWT middleware
+
+	pushRoutes := app.Group("/api/push")
+
+	// Add basic request logging for push routes
+	pushRoutes.Use(func(c *fiber.Ctx) error {
+		logging.Info("Push route accessed", map[string]interface{}{
+			"method": c.Method(),
+			"path":   c.Path(),
+			"url":    c.OriginalURL(),
+		})
+		return c.Next()
+	})
+
+	// Apply NIP-98 authentication middleware for push routes
+	pushRoutes.Use(middleware.NIP98Middleware())
+
+	pushRoutes.Post("/register", push.RegisterDeviceHandler(store))
+	pushRoutes.Post("/unregister", push.UnregisterDeviceHandler(store))
+	pushRoutes.Post("/test", push.TestNotificationHandler(store))
 
 	// ================================
 	// SECURED API ROUTES

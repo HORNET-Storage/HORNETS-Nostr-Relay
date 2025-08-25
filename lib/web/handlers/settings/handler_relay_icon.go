@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/spf13/viper"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/gofiber/fiber/v2"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
@@ -153,8 +154,8 @@ func UploadRelayIcon(c *fiber.Ctx, store stores.Store) error {
 	blossomURL := fmt.Sprintf("%s/blossom/%s", panelURL, encodedHash)
 
 	// Update relay icon in config
-	viper.Set("relay.icon", blossomURL)
-	if err := viper.WriteConfig(); err != nil {
+	// Use UpdateConfig with save=true since this is a legitimate config update
+	if err := config.UpdateConfig("relay.icon", blossomURL, true); err != nil {
 		logging.Infof("Warning: Failed to update relay icon in config: %v", err)
 		// Don't fail the request, just log the warning
 	}

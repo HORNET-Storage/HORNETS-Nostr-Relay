@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/spf13/viper"
 )
 
@@ -72,7 +73,9 @@ func ValidateWalletName(transactions []map[string]interface{}) string {
 	// Set wallet name from first transaction if not set
 	if expectedWalletName == "" && len(transactions) > 0 {
 		if walletName, ok := transactions[0]["wallet_name"].(string); ok {
-			viper.Set("wallet.name", walletName)
+			// Use UpdateConfig with save=false for runtime-only value
+			// This prevents pollution of viper memory that would be saved later
+			config.UpdateConfig("wallet.name", walletName, false)
 			expectedWalletName = walletName
 		}
 	}

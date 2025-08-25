@@ -3,7 +3,8 @@ package statistics
 import (
 	"time"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	libtypes "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	"github.com/nbd-wtf/go-nostr"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
@@ -39,8 +40,8 @@ type StatisticsStore interface {
 	QueryFiles(criteria map[string]interface{}) ([]types.FileInfo, error)
 	SaveTags(root string, leaf *merkle_dag.DagLeaf) error
 	QueryTags(tags map[string]string) ([]string, error)
-	FetchKindData() ([]types.AggregatedKindData, error)
-	FetchKindTrendData(kindNumber int) ([]types.MonthlyKindData, error)
+	FetchKindData() ([]libtypes.AggregatedKindData, error)
+	FetchKindTrendData(kindNumber int) ([]libtypes.MonthlyKindData, error)
 
 	// Wallet-related operations
 	SaveWalletTransaction(tx types.WalletTransactions) error
@@ -55,7 +56,7 @@ type StatisticsStore interface {
 	UpdateBitcoinRate(rate float64) error
 	SaveUnconfirmedTransaction(pendingTransaction *types.PendingTransaction) error
 	CountAvailableAddresses() (int64, error)
-	AllocateBitcoinAddress(npub string) (*types.Address, error)
+	AllocateBitcoinAddress(npub string) (*libtypes.Address, error)
 	GetSubscriberByAddress(address string) (*types.SubscriberAddress, error)
 	GetSubscriberByNpub(npub string) (*types.SubscriberAddress, error)
 	SaveSubscriberAddress(address *types.SubscriberAddress) error
@@ -74,14 +75,14 @@ type StatisticsStore interface {
 	IsActiveToken(token string) (bool, error)
 
 	// Statistics and storage stats
-	FetchMonthlyStorageStats() ([]types.ActivityData, error)
-	FetchNotesMediaStorageData() ([]types.BarChartData, error)
-	FetchProfilesTimeSeriesData(startDate, endDate string) ([]types.TimeSeriesData, error)
+	FetchMonthlyStorageStats() ([]libtypes.ActivityData, error)
+	FetchNotesMediaStorageData() ([]libtypes.BarChartData, error)
+	FetchProfilesTimeSeriesData(startDate, endDate string) ([]libtypes.TimeSeriesData, error)
 
 	// Fetch counts for various file types
 	FetchKindCount() (int, error)
 	FetchFileCountByType(mimeType string) (int, error)
-	FetchFilesByType(mimeType string, page int, pageSize int) ([]types.FileInfo, *types.PaginationMetadata, error)
+	FetchFilesByType(mimeType string, page int, pageSize int) ([]libtypes.FileInfo, *libtypes.PaginationMetadata, error)
 
 	// Paid subscriber management
 	GetPaidSubscribers() ([]types.PaidSubscriber, error)
@@ -103,8 +104,8 @@ type StatisticsStore interface {
 	GetModerationStats() (*types.ModerationStats, error)
 	GetBlockedContentCount() (int, error)
 	GetTodayBlockedContentCount() (int, error)
-	GetBlockedContentByType() ([]types.TypeStat, error)
-	GetBlockedContentByUser(limit int) ([]types.UserStat, error)
+	GetBlockedContentByType() ([]libtypes.TypeStat, error)
+	GetBlockedContentByUser(limit int) ([]libtypes.UserStat, error)
 	GetRecentBlockingReasons(limit int) ([]string, error)
 
 	// Payment notification management
@@ -122,8 +123,8 @@ type StatisticsStore interface {
 	GetTodayRevenue() (int64, error)
 	GetActiveSubscribersCount() (int, error)
 	GetNewSubscribersToday() (int, error)
-	GetRevenueByTier() ([]types.TierStat, error)
-	GetRecentTransactions(limit int) ([]types.TxSummary, error)
+	GetRevenueByTier() ([]libtypes.TierStat, error)
+	GetRecentTransactions(limit int) ([]libtypes.TxSummary, error)
 
 	// Report notification management
 	CreateReportNotification(notification *types.ReportNotification) error
@@ -139,8 +140,8 @@ type StatisticsStore interface {
 	GetReportStats() (*types.ReportStats, error)
 	GetTotalReported() (int, error)
 	GetTodayReportedCount() (int, error)
-	GetReportsByType() ([]types.TypeStat, error)
-	GetMostReportedContent(limit int) ([]types.ReportSummary, error)
+	GetReportsByType() ([]libtypes.TypeStat, error)
+	GetMostReportedContent(limit int) ([]libtypes.ReportSummary, error)
 
 	// NPUB access control management
 	GetAllowedUser(npub string) (*types.AllowedUser, error)
@@ -158,4 +159,17 @@ type StatisticsStore interface {
 	// Bitcoin address management for mode switching
 	GetAvailableBitcoinAddressCount() (int, error)
 	CountUsersWithoutBitcoinAddresses() (int, error)
+
+	// Push notification device management
+	RegisterPushDevice(pubkey string, deviceToken string, platform string) error
+	UnregisterPushDevice(pubkey string, deviceToken string) error
+	GetPushDevicesByPubkey(pubkey string) ([]types.PushDevice, error)
+	GetAllActivePushDevices() ([]types.PushDevice, error)
+	UpdatePushDeviceStatus(deviceToken string, isActive bool) error
+	CleanupInactivePushDevices(olderThan time.Time) error
+
+	// Push notification logging
+	LogPushNotification(log *types.PushNotificationLog) error
+	GetPushNotificationHistory(pubkey string, limit int) ([]types.PushNotificationLog, error)
+	UpdatePushNotificationDelivery(id uint, delivered bool, errorMessage string) error
 }
