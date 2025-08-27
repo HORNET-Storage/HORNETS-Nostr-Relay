@@ -28,9 +28,11 @@ import (
 )
 
 type connectionState struct {
-	authenticated bool
-	pubkey        string    // Store the pubkey to know who owns this connection
-	blockedCheck  time.Time // When we last checked if this pubkey is blocked
+	authenticated    bool
+	pubkey          string    // Store the pubkey to know who owns this connection
+	blockedCheck    time.Time // When we last checked if this pubkey is blocked
+	authAttempts    int       // Track number of auth attempts
+	lastAuthAttempt time.Time // Track last auth attempt time
 }
 
 // isConnectionBlocked checks if a connection's pubkey is blocked
@@ -331,7 +333,34 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 
 				// If second element is a map, it's the auth event
 				if eventMap, ok := rawArray[1].(map[string]interface{}); ok {
-					logging.Infof("Received AUTH event")
+					// Check if already authenticated
+					if state.authenticated {
+						logging.Infof("Ignoring AUTH event - connection already authenticated for pubkey: %s", state.pubkey)
+						noticeMsg := nostr.NoticeEnvelope("Already authenticated")
+						c.WriteJSON(noticeMsg)
+						return nil
+					}
+
+					// Rate limiting: Check if too many auth attempts
+					const maxAuthAttempts = 5
+					const authRateLimitWindow = time.Minute
+					
+					now := time.Now()
+					if state.authAttempts >= maxAuthAttempts {
+						if now.Sub(state.lastAuthAttempt) < authRateLimitWindow {
+							logging.Infof("Rate limiting AUTH attempts - %d attempts in last minute", state.authAttempts)
+							noticeMsg := nostr.NoticeEnvelope("Too many authentication attempts. Please wait before trying again.")
+							c.WriteJSON(noticeMsg)
+							return nil
+						}
+						// Reset counter after window expires
+						state.authAttempts = 0
+					}
+					
+					state.authAttempts++
+					state.lastAuthAttempt = now
+					
+					logging.Infof("Received AUTH event (attempt %d)", state.authAttempts)
 					eventBytes, err := json.Marshal(eventMap)
 					if err != nil {
 						logging.Infof("Failed to marshal event map: %v", err)

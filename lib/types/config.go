@@ -10,6 +10,7 @@ type Config struct {
 	ContentFiltering     ContentFilteringConfig `mapstructure:"content_filtering"`
 	EventFiltering       EventFilteringConfig   `mapstructure:"event_filtering"`
 	AllowedUsersSettings AllowedUsersSettings   `mapstructure:"allowed_users"`
+	PushNotifications    PushNotificationConfig `mapstructure:"push_notifications"`
 }
 
 // ServerConfig holds server-related configuration
@@ -152,5 +153,5 @@ type AllowedUsersSettings struct {
 	Read        string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only-me
 	Write       string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only-me
 	Tiers       []SubscriptionTier `json:"tiers" mapstructure:"tiers"`
-	LastUpdated int64
+	LastUpdated int64              `json:"last_updated" mapstructure:"last_updated"`
 }

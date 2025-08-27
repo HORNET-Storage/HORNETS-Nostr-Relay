@@ -66,6 +66,8 @@ func (store *GormStatisticsStore) Init() error {
 		&types.ReportNotification{}, // Add ReportNotification to be migrated
 		&types.AllowedUser{},
 		&types.RelayOwner{},
+		&types.PushDevice{},          // Add PushDevice to be migrated
+		&types.PushNotificationLog{}, // Add PushNotificationLog to be migrated
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database schema: %v", err)
@@ -1928,4 +1930,97 @@ func (store *GormStatisticsStore) CountUsersWithoutBitcoinAddresses() (int, erro
 	}
 
 	return usersWithoutAddresses, nil
+}
+
+// Push notification device management implementation
+
+// RegisterPushDevice registers a new push device for a user
+func (store *GormStatisticsStore) RegisterPushDevice(pubkey string, deviceToken string, platform string) error {
+	// Check if device already exists and update it
+	var existingDevice types.PushDevice
+	result := store.DB.Where("pubkey = ? AND device_token = ?", pubkey, deviceToken).First(&existingDevice)
+
+	if result.Error == nil {
+		// Device exists, update it
+		existingDevice.Platform = platform
+		existingDevice.IsActive = true
+		return store.DB.Save(&existingDevice).Error
+	}
+
+	// Create new device
+	device := &types.PushDevice{
+		Pubkey:      pubkey,
+		DeviceToken: deviceToken,
+		Platform:    platform,
+		IsActive:    true,
+	}
+
+	return store.DB.Create(device).Error
+}
+
+// UnregisterPushDevice removes a push device for a user
+func (store *GormStatisticsStore) UnregisterPushDevice(pubkey string, deviceToken string) error {
+	return store.DB.Where("pubkey = ? AND device_token = ?", pubkey, deviceToken).Delete(&types.PushDevice{}).Error
+}
+
+// GetPushDevicesByPubkey retrieves all active push devices for a user
+func (store *GormStatisticsStore) GetPushDevicesByPubkey(pubkey string) ([]types.PushDevice, error) {
+	var devices []types.PushDevice
+	err := store.DB.Where("pubkey = ? AND is_active = ?", pubkey, true).Find(&devices).Error
+	return devices, err
+}
+
+// GetAllActivePushDevices retrieves all active push devices
+func (store *GormStatisticsStore) GetAllActivePushDevices() ([]types.PushDevice, error) {
+	var devices []types.PushDevice
+	err := store.DB.Where("is_active = ?", true).Find(&devices).Error
+	return devices, err
+}
+
+// UpdatePushDeviceStatus updates the active status of a push device
+func (store *GormStatisticsStore) UpdatePushDeviceStatus(deviceToken string, isActive bool) error {
+	return store.DB.Model(&types.PushDevice{}).Where("device_token = ?", deviceToken).Update("is_active", isActive).Error
+}
+
+// CleanupInactivePushDevices removes push devices that haven't been updated since the specified time
+func (store *GormStatisticsStore) CleanupInactivePushDevices(olderThan time.Time) error {
+	return store.DB.Where("updated_at < ?", olderThan).Delete(&types.PushDevice{}).Error
+}
+
+// Push notification logging implementation
+
+// LogPushNotification logs a push notification attempt
+func (store *GormStatisticsStore) LogPushNotification(log *types.PushNotificationLog) error {
+	return store.DB.Create(log).Error
+}
+
+// GetPushNotificationHistory retrieves push notification history for a user
+func (store *GormStatisticsStore) GetPushNotificationHistory(pubkey string, limit int) ([]types.PushNotificationLog, error) {
+	var logs []types.PushNotificationLog
+	query := store.DB.Where("pubkey = ?", pubkey).Order("created_at DESC")
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Find(&logs).Error
+	return logs, err
+}
+
+// UpdatePushNotificationDelivery updates the delivery status of a push notification
+func (store *GormStatisticsStore) UpdatePushNotificationDelivery(id uint, delivered bool, errorMessage string) error {
+	updates := map[string]interface{}{
+		"delivered": delivered,
+	}
+
+	if errorMessage != "" {
+		updates["error_message"] = errorMessage
+	}
+
+	if delivered {
+		now := time.Now()
+		updates["sent_at"] = &now
+	}
+
+	return store.DB.Model(&types.PushNotificationLog{}).Where("id = ?", id).Updates(updates).Error
 }
