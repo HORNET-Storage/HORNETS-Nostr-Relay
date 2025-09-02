@@ -74,7 +74,12 @@ Required for building C-based dependencies via `cgo`.
 
 ### 🚀 **Building Relay with Panel** (When Needing to Pull Latest Panel Version)
 
-After cloning the repository:
+After cloning the repository,
+
+```bash
+git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
+cd HORNETS-Nostr-Relay
+```
 
 #### On **Linux or macOS**:
 
@@ -94,6 +99,13 @@ After cloning the repository:
 
 
 ### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode If Modifying Panel In Subfolder /panel-source):
+
+After cloning the repository,
+
+```bash
+git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
+cd HORNETS-Nostr-Relay
+```
 
 #### On **Linux or macOS**:
 
@@ -121,7 +133,7 @@ The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created i
 
 ### 🚀 **Building Relay without Panel**
 
-After cloning the repository:
+After cloning the repository,
 
 ```bash
 git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
