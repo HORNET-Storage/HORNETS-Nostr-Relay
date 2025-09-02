@@ -72,7 +72,54 @@ Required for building C-based dependencies via `cgo`.
 
 ---
 
-### 🚀 **Building Relay from Source**
+### 🚀 **Building Relay with Panel** (When Needing to Pull Latest Panel Version)
+
+After cloning the repository:
+
+#### On **Linux or macOS**:
+
+*Run this script found in the main directory:*
+```bash
+./build-panel.sh
+```
+
+#### On **Windows**:
+
+*Run this script found in the main directory:*
+```powershell
+./build-panel.bat
+```
+
+---
+
+
+### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode If Modifying Panel In Subfolder /panel-source):
+
+#### On **Linux or macOS**:
+
+*Run this script found in the main directory:*
+```bash
+./build-panel-devmode.sh
+```
+
+#### On **Windows**:
+
+*Run this script found in the main directory:*
+```powershell
+./build-panel-devmode.bat
+```
+
+The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
+
+⚠️ Troubleshooting:
+
+.Make sure the port in the .env.development file for the relay's base URL matches the port that the relay is using inside of the config.yaml file. 
+
+Web panel is always served on that port + 2, so if the relay is running on 9000 then the .env.development base url needs to point to 9002.
+
+---
+
+### 🚀 **Building Relay without Panel**
 
 After cloning the repository:
 
@@ -81,57 +128,19 @@ git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
 cd HORNETS-Nostr-Relay
 ```
 
-#### If On **Linux or macOS** Then Run:
+##### If On **Linux or macOS** Then Run:
 
 *Run this script found in the main directory:*
 ```bash
 ./build.sh
 ```
 
-#### If On **Windows** Then Run:
+##### If On **Windows** Then Run:
 
 *Run this script found in the main directory:*
 ```powershell
 ./build.bat
 ```
-
-The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
-
----
-
-### 🚀 **Building Panel from Source**
-
-#### On **Linux or macOS** When Needing to Pull Latest Panel:
-
-*Run this script found in the main directory:*
-```bash
-./build-panel.sh
-```
-
-#### On **Windows** When Needing to Pull Latest Panel:
-
-*Run this script found in the main directory:*
-```powershell
-./build-panel.bat
-```
-
-#### On **Linux or macOS** When Editing Panel in /panel-source (Hot Reload Dev Mode):
-
-*Run this script found in the main directory:*
-```bash
-./build-panel-devmode.sh
-```
-
-#### On **Windows** When Editing Panel in /panel-source (Hot Reload Dev Mode):
-
-*Run this script found in the main directory:*
-```powershell
-./build-panel-devmode.bat
-```
-
-Make sure the port in the .env.development for the relay base url matches the port that the relay is using inside of the config.yaml
-
-The web panel is always served on that port + 2 so if the relay is running on 9000 then the .env.development base url needs to point to 9002
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
