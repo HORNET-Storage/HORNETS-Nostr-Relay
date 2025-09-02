@@ -111,11 +111,11 @@ After cloning the repository:
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
-⚠️ Troubleshooting:
+#### ⚠️ When Troubleshooting:
 
-.Make sure the port in the .env.development file for the relay's base URL matches the port that the relay is using inside of the config.yaml file. 
+*Make sure the port in the .env.development file for the relay's base URL matches the port that the relay is using inside of the config.yaml file.*
 
-Web panel is always served on that port + 2, so if the relay is running on 9000 then the .env.development base url needs to point to 9002.
+***Web panel is always served on that port +2, so if the relay is running on 9000 then the .env.development base url needs to point to 9002.***
 
 ---
 
