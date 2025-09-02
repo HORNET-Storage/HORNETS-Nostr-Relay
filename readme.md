@@ -95,6 +95,8 @@ cd HORNETS-Nostr-Relay
 ./build-panel.bat
 ```
 
+The compiled binary (hornet-storage or hornet-storage.exe) will be created in the project root directory.
+
 ---
 
 
