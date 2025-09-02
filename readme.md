@@ -129,6 +129,10 @@ The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created i
 ./build-panel-devmode.bat
 ```
 
+Make sure the port in the .env.development for the relay base url matches the port that the relay is using inside of the config.yaml
+
+The web panel is always served on that port + 2 so if the relay is running on 9000 then the .env.development base url needs to point to 9002
+
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
 ---
