@@ -1,106 +1,94 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions DisableDelayedExpansion
 
-echo.
-echo ================================
-echo HORNETS-Relay-Panel Development Build
-echo ================================
-echo.
+REM Always operate from the script's folder (repo root)
+pushd "%~dp0" >nul
 
-REM Check if local panel-source exists
-if not exist panel-source (
-    echo Local panel-source directory not found!
-    echo Creating panel-source and cloning from GitHub...
-    echo.
-    
-    REM Clone the panel repository
-    git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git panel-source
-    if errorlevel 1 (
-        echo ERROR: Failed to clone panel repository!
-        echo Please check your internet connection and git installation.
-        goto end
-    )
-    
-    echo Successfully cloned panel repository!
-    echo.
-) else (
-    echo Using existing local panel source...
-    echo.
+REM --- Config ---
+set "REPO_URL=https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git"
+set "PANEL_DIR=panel-source"
+set "BACKEND_EXE=hornet-storage.exe"
+set "NODE_OPTIONS=--openssl-legacy-provider --max-old-space-size=4096"
+REM -------------
+
+echo(
+echo ================================
+echo HORNETS-Relay-Panel Dev Runner
+echo ================================
+echo(
+
+REM 1) Clone panel if missing (no pull/update if it already exists)
+if not exist "%PANEL_DIR%" (
+  where git >nul 2>nul || (echo ERROR: git not found in PATH.& goto FAIL)
+  echo Cloning panel to %PANEL_DIR% ...
+  git clone "%REPO_URL%" "%PANEL_DIR%" || (echo ERROR: clone failed.& goto FAIL)
 )
 
-REM Navigate into panel-source
-pushd panel-source
-
-REM Check if it's a valid panel project
-if not exist package.json (
-    echo ERROR: panel-source doesn't appear to be a valid panel project - missing package.json!
-    popd
-    goto end
+REM Sanity check the panel project exists
+if not exist "%PANEL_DIR%\package.json" (
+  echo ERROR: %PANEL_DIR%\package.json not found.
+  goto FAIL
 )
 
-REM Install/update dependencies
-echo Installing dependencies with yarn...
-call yarn install
+REM 2) Build the RELAY using root build.bat
+if not exist "build.bat" (
+  echo ERROR: Root build.bat not found.
+  goto FAIL
+)
+echo Running root build.bat (relay)...
+call build.bat
 if errorlevel 1 (
-    echo Warning: Yarn install may have encountered issues.
+  echo ERROR: build.bat failed.
+  goto FAIL
 )
 
-REM Build the project
-echo Building panel...
-REM Clear any existing build first
-rmdir /S /Q build 2>nul
+popd >nul
 
-REM Check if build.bat exists and use it, otherwise use yarn build
-if exist build.bat (
-    echo Running build.bat...
-    call build.bat
-    if errorlevel 1 (
-        echo Error: Panel build.bat failed.
-        popd
-        goto end
-    )
+REM 3) Run the backend exe from the root
+if not exist "%BACKEND_EXE%" (
+  echo ERROR: %BACKEND_EXE% not found in repo root after build.
+  echo Tip: confirm build.bat outputs the exe to the root, or adjust BACKEND_EXE path.
+  goto FAIL
+)
+echo Starting backend: %BACKEND_EXE%
+start "" "%BACKEND_EXE%"
+
+REM 4) Start the panel in dev mode (current window)
+echo(
+echo Starting panel dev server (dev mode)...
+pushd "%PANEL_DIR%" >nul
+
+REM Install deps (Yarn preferred, fallback to npm)
+where yarn >nul 2>nul
+if errorlevel 1 (
+  call npm install
+  if errorlevel 1 echo WARNING: npm install reported issues.
 ) else (
-    echo Running yarn build...
-    set GENERATE_SOURCEMAP=false
-    set NODE_ENV=production
-    call yarn build
-    if errorlevel 1 (
-        echo Error: Yarn build failed.
-        popd
-        goto end
-    )
+  call yarn install
+  if errorlevel 1 echo WARNING: yarn install reported issues.
 )
 
-REM Return to root and copy build output
-popd
-echo Copying build files to web directory...
-REM Create web directory if it doesn't exist
-if not exist web mkdir web
-REM Clear any existing files
-del /Q web\* 2>nul
-for /d %%p in (web\*) do rmdir /S /Q "%%p" 2>nul
-REM Copy built files
-xcopy /E /I /Y panel-source\build\* web\
+REM Prefer CRACO if present; else yarn start; else npm start
+if exist "node_modules\.bin\craco" (
+  call npx craco start
+  set "RC=%ERRORLEVEL%"
+) else (
+  where yarn >nul 2>nul
+  if errorlevel 1 (
+    set "NODE_ENV=development"
+    call npm run start
+    set "RC=%ERRORLEVEL%"
+  ) else (
+    set "NODE_ENV=development"
+    call yarn start
+    set "RC=%ERRORLEVEL%"
+  )
+)
 
-REM Final message
-echo.
-echo ================================
-echo Build Complete!
-echo ================================
-echo Panel built and deployed successfully!
-echo The panel is now available at your relay's root URL
-echo.
-echo Development workflow:
-echo 1. Make changes in panel-source
-echo 2. Run build-panel-devmode.bat to rebuild
-echo 3. Refresh your browser to see changes
-echo.
-echo To test the panel:
-echo 1. Start your relay server: go run services\server\port\main.go
-echo 2. Visit http://localhost:9002 (or your configured port)
-echo 3. The panel should load automatically
-echo.
+popd >nul
+popd >nul
+exit /b %RC%
 
-:end
-pause
-endlocal
+:FAIL
+popd >nul
+exit /b 1

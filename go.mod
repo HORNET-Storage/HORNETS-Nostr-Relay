@@ -3,8 +3,8 @@ module github.com/HORNET-Storage/hornet-storage
 go 1.22.1
 
 require (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.5
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250703232705-f3817d7d33e2
+	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.6
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250820033743-c323deefba49
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/fsnotify/fsnotify v1.7.0

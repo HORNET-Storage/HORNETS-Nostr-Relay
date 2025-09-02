@@ -65,7 +65,7 @@ func validateTags(tags nostr.Tags) string {
 		}
 
 		// Ensure at least one valid permission tag is present
-		if tag[0] == "b" && len(tag) == 3 {
+		if tag[0] == "b" && len(tag) == 2 {
 			hasBranchTag = true
 		}
 	}
