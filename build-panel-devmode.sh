@@ -62,6 +62,13 @@ else
   npm install || echo "WARNING: npm install reported issues."
 fi
 
+# Create themes directory if it doesn't exist and build themes
+echo "Building themes for development..."
+mkdir -p "public/themes"
+node_modules/.bin/lessc --js --clean-css="--s1 --advanced" src/styles/themes/main.less public/themes/main.css || {
+  echo "WARNING: Theme building failed. Styles may not load properly."
+}
+
 # Prefer CRACO if present; else yarn start; else npm start
 if [ -f "node_modules/.bin/craco" ]; then
   exec npx craco start

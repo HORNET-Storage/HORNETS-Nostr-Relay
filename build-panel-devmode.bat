@@ -68,6 +68,14 @@ if errorlevel 1 (
   if errorlevel 1 echo WARNING: yarn install reported issues.
 )
 
+REM Create themes directory if it doesn't exist and build themes
+echo Building themes for development...
+if not exist "public\themes" mkdir "public\themes"
+call node_modules\.bin\lessc --js --clean-css="--s1 --advanced" src/styles/themes/main.less public/themes/main.css
+if errorlevel 1 (
+  echo WARNING: Theme building failed. Styles may not load properly.
+)
+
 REM Prefer CRACO if present; else yarn start; else npm start
 if exist "node_modules\.bin\craco" (
   call npx craco start
