@@ -25,6 +25,7 @@ temp
 /immudb
 /hornet-storage
 /web
+/panel-source
 
 config.json
 config.json.backup

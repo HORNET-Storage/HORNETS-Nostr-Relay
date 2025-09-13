@@ -37,37 +37,29 @@ func main() {
 	logging.Info("========================================")
 
 	// Use a separate data directory for the demo server to avoid conflicts
-	// Initialize BadgerHold store with a separate data directory for demo mode
-	store, err := badgerhold.InitStore("demo-data")
+	// Initialize BadgerHold store with a separate data directory for demo mode and custom statistics DB path
+	dbPath := "./data/statistics/statistics.db"
+	store, err := badgerhold.InitStore("demo-data", dbPath)
 	if err != nil {
 		logging.Fatalf("Failed to initialize BadgerHold store: %v", err)
 	}
 
-	// Switch to using a separate statistics database for demo mode
-	// This ensures we don't mix demo data with production statistics
-	dbPath := "demo_statistics.db"
-	if err := store.UseDemoStatisticsDB(); err != nil {
-		logging.Infof("Warning: Failed to switch to demo statistics database: %v", err)
-		logging.Info("Continuing with standard statistics database...")
-		// Continue anyway as this is not a critical failure
-	} else {
-		logging.Info("Demo server is using a separate statistics database (demo_statistics.db)")
+	logging.Info("Demo server is using a separate statistics database (./data/statistics/statistics.db)")
 
-		// Check if the database is empty and generate demo data if needed
-		isEmpty, count, err := databaseIsEmptyWithCount(dbPath)
-		if err != nil {
-			logging.Infof("Warning: Failed to check if database is empty: %v", err)
-		} else if isEmpty {
-			logging.Info("Statistics database is empty, generating demo data...")
-			if err := generateDemoData(dbPath); err != nil {
-				logging.Infof("Warning: Failed to generate demo data: %v", err)
-				logging.Info("Demo charts may not display correctly without data")
-			} else {
-				logging.Info("Successfully generated demo data for statistics visualization")
-			}
+	// Check if the database is empty and generate demo data if needed
+	isEmpty, count, err := databaseIsEmptyWithCount(dbPath)
+	if err != nil {
+		logging.Infof("Warning: Failed to check if database is empty: %v", err)
+	} else if isEmpty {
+		logging.Info("Statistics database is empty, generating demo data...")
+		if err := generateDemoData(dbPath); err != nil {
+			logging.Infof("Warning: Failed to generate demo data: %v", err)
+			logging.Info("Demo charts may not display correctly without data")
 		} else {
-			logging.Infof("Using existing demo data in statistics database (found %d events)", count)
+			logging.Info("Successfully generated demo data for statistics visualization")
 		}
+	} else {
+		logging.Infof("Using existing demo data in statistics database (found %d events)", count)
 	}
 
 	// Set up cleanup on exit
@@ -101,7 +93,7 @@ func databaseIsEmptyWithCount(dbPath string) (bool, int, error) {
 		return true, 0, nil
 	}
 
-	// Initialize the database connection
+	// Initialize the database connection with the specified path
 	store, err := sqlite.InitStore(dbPath)
 	if err != nil {
 		return true, 0, fmt.Errorf("error connecting to SQLite database: %v", err)
@@ -122,7 +114,7 @@ func generateDemoData(dbPath string) error {
 	// Create a new generator with default settings
 	generator := demodata.NewDemoDataGenerator()
 
-	// Initialize the SQLite store
+	// Initialize the SQLite store with the specified path
 	store, err := sqlite.InitStore(dbPath)
 	if err != nil {
 		return fmt.Errorf("error initializing SQLite store: %v", err)
