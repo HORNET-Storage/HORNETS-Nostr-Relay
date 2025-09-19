@@ -615,6 +615,23 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.protocols.enabled", false)
 	viper.SetDefault("event_filtering.protocols.allowed_protocols", []string{})
 
+	// Media definitions defaults
+	viper.SetDefault("event_filtering.media_definitions.image.mime_patterns", []string{"image/*"})
+	viper.SetDefault("event_filtering.media_definitions.image.extensions", []string{".jpg", ".jpeg", ".png", ".gif", ".webp"})
+	viper.SetDefault("event_filtering.media_definitions.image.max_size_mb", 100)
+
+	viper.SetDefault("event_filtering.media_definitions.video.mime_patterns", []string{"video/*"})
+	viper.SetDefault("event_filtering.media_definitions.video.extensions", []string{".mp4", ".webm", ".avi", ".mov"})
+	viper.SetDefault("event_filtering.media_definitions.video.max_size_mb", 500)
+
+	viper.SetDefault("event_filtering.media_definitions.audio.mime_patterns", []string{"audio/*"})
+	viper.SetDefault("event_filtering.media_definitions.audio.extensions", []string{".mp3", ".wav", ".ogg", ".flac"})
+	viper.SetDefault("event_filtering.media_definitions.audio.max_size_mb", 100)
+
+	viper.SetDefault("event_filtering.media_definitions.git.mime_patterns", []string{"application/x-git"})
+	viper.SetDefault("event_filtering.media_definitions.git.extensions", []string{".git", ".bundle", ".json"})
+	viper.SetDefault("event_filtering.media_definitions.git.max_size_mb", 100)
+
 	// Allowed users defaults - free mode for rapid testing
 	viper.SetDefault("allowed_users.mode", "public")
 	viper.SetDefault("allowed_users.read_access.enabled", true)
