@@ -16,7 +16,7 @@ import (
 type NIP11RelayInfo struct {
 	Name            string           `json:"name,omitempty"`
 	Description     string           `json:"description,omitempty"`
-	Pubkey          string           `json:"-"`                         // Keep field but exclude from JSON
+	Pubkey          string           `json:"pubkey,omitempty"`
 	Contact         string           `json:"contact,omitempty"`
 	Icon            string           `json:"icon,omitempty"`
 	SupportedNIPs   []int            `json:"supported_nips,omitempty"`
