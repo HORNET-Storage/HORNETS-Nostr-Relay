@@ -900,7 +900,19 @@ func (store *GormStatisticsStore) FetchKindCount() (int, error) {
 // FetchFileCountByType retrieves the count of stored files for a specific mime type
 func (store *GormStatisticsStore) FetchFileCountByType(mimeType string) (int, error) {
 	var count int64
-	err := store.DB.Model(&types.FileInfo{}).Where("mime_type = ?", mimeType).Count(&count).Error
+	var err error
+
+	if strings.Contains(mimeType, "*") {
+		pattern := strings.ReplaceAll(mimeType, "*", "%")
+		err = store.DB.Model(&types.FileInfo{}).
+			Where("mime_type LIKE ?", pattern).
+			Count(&count).Error
+	} else {
+		err = store.DB.Model(&types.FileInfo{}).
+			Where("mime_type = ?", mimeType).
+			Count(&count).Error
+	}
+
 	return int(count), err
 }
 

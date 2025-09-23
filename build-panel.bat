@@ -4,6 +4,18 @@ setlocal enabledelayedexpansion
 echo Starting build and deployment of HORNETS-Relay-Panel...
 echo.
 
+REM 0) Build the RELAY using root build.bat
+if not exist "build.bat" (
+  echo ERROR: Root build.bat not found.
+  goto FAIL
+)
+echo Running root build.bat (relay)...
+call build.bat
+if errorlevel 1 (
+  echo ERROR: build.bat failed.
+  goto FAIL
+)
+
 REM Step 1: Remove old panel source
 echo Removing old panel source...
 rmdir /S /Q panel-source 2>nul

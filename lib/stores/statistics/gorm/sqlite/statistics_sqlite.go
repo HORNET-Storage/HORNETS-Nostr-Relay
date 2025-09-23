@@ -18,13 +18,30 @@ import (
 func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error) {
 	store := &statistics_gorm.GormStatisticsStore{}
 	var err error
+	var dbPath string
 
-	statisticsPath := config.GetPath("statistics")
+	// Check if a database path was provided
+	if len(args) > 0 {
+		if path, ok := args[0].(string); ok {
+			dbPath = path
+		}
+	}
 
-	if _, err := os.Stat(statisticsPath); os.IsNotExist(err) {
-		err := os.Mkdir(statisticsPath, os.ModePerm)
-		if err != nil {
-			logging.Fatalf("Failed to create statistics directory: %v", err)
+	// If no path provided, use default from config
+	if dbPath == "" {
+		statisticsPath := config.GetPath("statistics")
+		if _, err := os.Stat(statisticsPath); os.IsNotExist(err) {
+			err := os.MkdirAll(statisticsPath, os.ModePerm)
+			if err != nil {
+				logging.Fatalf("Failed to create statistics directory: %v", err)
+			}
+		}
+		dbPath = filepath.Join(statisticsPath, "statistics.db")
+	} else {
+		// Ensure the directory exists for the provided path
+		dbDir := filepath.Dir(dbPath)
+		if err := os.MkdirAll(dbDir, os.ModePerm); err != nil {
+			logging.Infof("Warning: Could not create statistics directory: %v\n", err)
 		}
 	}
 
@@ -36,7 +53,7 @@ func InitStore(args ...interface{}) (*statistics_gorm.GormStatisticsStore, error
 	// - _mutex=no disables recursive mutexes for better concurrency
 	// - _locking_mode=normal allows multiple readers
 	// - cache=shared enables shared cache mode for better performance
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate&_synchronous=normal&_mutex=no&_locking_mode=normal&cache=shared", filepath.Join(statisticsPath, "statistics.db"))
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate&_synchronous=normal&_mutex=no&_locking_mode=normal&cache=shared", dbPath)
 
 	// Configure GORM with more advanced settings
 	store.DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{

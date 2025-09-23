@@ -1,75 +1,79 @@
-#!/bin/bash
-
-# Development Mode Build Script for HORNETS-Relay-Panel
-# This script builds the panel from local source
-# If panel-source doesn't exist, it clones from GitHub
-
+#!/usr/bin/env bash
 set -e
 
-echo "🚀 Building HORNETS-Relay-Panel (Development Mode)..."
-echo ""
+# Always operate from the script's folder (repo root)
+cd "$(dirname "$0")"
 
-# Check if local panel-source exists
-if [ ! -d "panel-source" ]; then
-    echo "📦 Local panel-source directory not found!"
-    echo "📥 Creating panel-source and cloning from GitHub..."
-    echo ""
-    
-    # Clone the panel repository
-    git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-source
-    if [ $? -ne 0 ]; then
-        echo "❌ Error: Failed to clone panel repository!"
-        echo "   Please check your internet connection and git installation."
-        exit 1
-    fi
-    
-    echo "✅ Successfully cloned panel repository!"
-    echo ""
-else
-    echo "📁 Using existing local panel source..."
-    echo ""
-fi
+# --- Config ---
+REPO_URL="https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git"
+PANEL_DIR="panel-source"
+BACKEND_EXE="./hornet-storage"
+export NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=4096"
+# -------------
 
-# Navigate to panel source directory
-cd panel-source
+echo
+echo "==============================="
+echo "HORNETS-Relay-Panel Dev Runner"
+echo "==============================="
+echo
 
-# Check if it's a valid panel project
-if [ ! -f "package.json" ]; then
-    echo "❌ Error: panel-source doesn't appear to be a valid panel project (missing package.json)"
+# 1) Clone panel if missing (no pull/update if it already exists)
+if [ ! -d "$PANEL_DIR" ]; then
+  if ! command -v git >/dev/null 2>&1; then
+    echo "ERROR: git not found in PATH."
     exit 1
+  fi
+  echo "Cloning panel to $PANEL_DIR ..."
+  git clone "$REPO_URL" "$PANEL_DIR" || { echo "ERROR: clone failed."; exit 1; }
 fi
 
-# Install/update dependencies
-echo "📦 Installing dependencies..."
-yarn install
+# Sanity check the panel project exists
+if [ ! -f "$PANEL_DIR/package.json" ]; then
+  echo "ERROR: $PANEL_DIR/package.json not found."
+  exit 1
+fi
 
-# Build the project
-echo "🔨 Building panel..."
-# Clear any existing build first
-rm -rf build
-# Build with production optimizations disabled to avoid syntax errors
-GENERATE_SOURCEMAP=false NODE_ENV=production yarn build
+# 2) Build the RELAY using root build.sh
+if [ ! -f "build.sh" ]; then
+  echo "ERROR: Root build.sh not found."
+  exit 1
+fi
+echo "Running root build.sh (relay)..."
+./build.sh
 
-# Copy built files to web directory
-echo "📋 Copying files to web directory..."
-cd ..
-# Create web directory if it doesn't exist
-mkdir -p web
-# Clear any existing files
-rm -rf web/*
-# Copy built files
-cp -r panel-source/build/* web/
+# 3) Run the backend exe from the root
+if [ ! -f "$BACKEND_EXE" ]; then
+  echo "ERROR: $BACKEND_EXE not found in repo root after build."
+  echo "Tip: confirm build.sh outputs the binary to the root, or adjust BACKEND_EXE path."
+  exit 1
+fi
+echo "Starting backend: $BACKEND_EXE"
+$BACKEND_EXE &
 
-echo ""
-echo "✅ Panel built and deployed successfully!"
-echo "🌐 The panel is now available at your relay's root URL"
-echo ""
-echo "📝 Development workflow:"
-echo "1. Make changes in ./panel-source"
-echo "2. Run ./build-panel-devmode.sh to rebuild"
-echo "3. Refresh your browser to see changes"
-echo ""
-echo "To test the panel:"
-echo "1. Start your relay server: go run services/server/port/main.go"
-echo "2. Visit http://localhost:9002 (or your configured port)"
-echo "3. The panel should load automatically"
+# 4) Start the panel in dev mode (current process)
+echo
+echo "Starting panel dev server (dev mode)..."
+cd "$PANEL_DIR"
+
+# Install deps (Yarn preferred, fallback to npm)
+if command -v yarn >/dev/null 2>&1; then
+  yarn install || echo "WARNING: yarn install reported issues."
+else
+  npm install || echo "WARNING: npm install reported issues."
+fi
+
+# Create themes directory if it doesn't exist and build themes
+echo "Building themes for development..."
+mkdir -p "public/themes"
+node_modules/.bin/lessc --js --clean-css="--s1 --advanced" src/styles/themes/main.less public/themes/main.css || {
+  echo "WARNING: Theme building failed. Styles may not load properly."
+}
+
+# Prefer CRACO if present; else yarn start; else npm start
+if [ -f "node_modules/.bin/craco" ]; then
+  exec npx craco start
+elif command -v yarn >/dev/null 2>&1; then
+  NODE_ENV=development exec yarn start
+else
+  NODE_ENV=development exec npm run start
+fi

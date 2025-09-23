@@ -89,7 +89,20 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 		logging.Fatalf("Failed to open temp database: %v", err)
 	}
 
-	store.StatsDatabase, err = statistics_gorm_sqlite.InitStore()
+	// Check if a custom statistics database path was provided
+	var statsDbPath string
+	if len(args) > 0 {
+		if path, ok := args[0].(string); ok {
+			statsDbPath = path
+		}
+	}
+
+	// Initialize statistics database with optional custom path
+	if statsDbPath != "" {
+		store.StatsDatabase, err = statistics_gorm_sqlite.InitStore(statsDbPath)
+	} else {
+		store.StatsDatabase, err = statistics_gorm_sqlite.InitStore()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}

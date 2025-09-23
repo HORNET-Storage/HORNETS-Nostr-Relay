@@ -7,6 +7,14 @@ set -e
 
 echo "🚀 Building HORNETS-Relay-Panel..."
 
+# Build the RELAY using root build.sh
+if [ ! -f "build.sh" ]; then
+  echo "ERROR: Root build.sh not found."
+  exit 1
+fi
+echo "Running root build.sh (relay)..."
+./build.sh
+
 # Remove old panel source to get latest changes
 echo "🔄 Removing old panel source..."
 rm -rf panel-source
