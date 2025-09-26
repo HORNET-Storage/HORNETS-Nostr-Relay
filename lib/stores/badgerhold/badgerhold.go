@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/nbd-wtf/go-nostr"
+	"go.uber.org/multierr"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
@@ -111,15 +113,14 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 }
 
 func (store *BadgerholdStore) Cleanup() error {
-	store.Database.Close()
-	store.TempDatabase.Close()
+	var result error
 
-	//err := os.RemoveAll(store.TempDatabasePath)
-	//if err != nil {
-	//return err
-	//}
+	result = multierr.Append(result, store.Database.Close())
+	result = multierr.Append(result, store.TempDatabase.Close())
+	result = multierr.Append(result, store.StatsDatabase.Close())
+	result = multierr.Append(result, os.RemoveAll(store.TempDatabasePath))
 
-	return nil
+	return result
 }
 
 func (store *BadgerholdStore) GetStatsStore() statistics.StatisticsStore {
