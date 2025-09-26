@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 )
 
 // DemoDataGenerator generates realistic data for the demo mode
@@ -120,9 +120,9 @@ func (g *DemoDataGenerator) SetSeed(seed int64) {
 }
 
 // GenerateAllData generates all types of demo data
-func (g *DemoDataGenerator) GenerateAllData(store statistics.StatisticsStore) error {
+func (g *DemoDataGenerator) GenerateAllData(store *badgerhold.BadgerholdStore) error {
 	// Generate user profiles
-	if err := g.GenerateUserProfiles(store); err != nil {
+	if err := g.GenerateUserProfiles(store.StatsDatabase); err != nil {
 		return fmt.Errorf("error generating user profiles: %v", err)
 	}
 
@@ -131,28 +131,33 @@ func (g *DemoDataGenerator) GenerateAllData(store statistics.StatisticsStore) er
 	g.InitialNotesPerDay = 5 // Reduced from the default (usually 50)
 
 	// Generate event kinds and files
-	if err := g.GenerateEventKinds(store); err != nil {
+	if err := g.GenerateEventKinds(store.StatsDatabase); err != nil {
 		return fmt.Errorf("error generating event kinds: %v", err)
 	}
 
 	// Generate wallet balance history
-	if err := g.GenerateWalletBalance(store); err != nil {
+	if err := g.GenerateWalletBalance(store.StatsDatabase); err != nil {
 		return fmt.Errorf("error generating wallet balance: %v", err)
 	}
 
 	// Generate wallet transactions (100 transactions)
-	if err := g.GenerateWalletTransactions(store, 100); err != nil {
+	if err := g.GenerateWalletTransactions(store.StatsDatabase, 100); err != nil {
 		return fmt.Errorf("error generating wallet transactions: %v", err)
 	}
 
 	// Generate wallet addresses (50 addresses)
-	if err := g.GenerateWalletAddresses(store, 50); err != nil {
+	if err := g.GenerateWalletAddresses(store.StatsDatabase, 50); err != nil {
 		return fmt.Errorf("error generating wallet addresses: %v", err)
 	}
 
 	// Generate a limited number of payment notifications
 	paymentCount := 20 // Fixed small number instead of percentage of users
-	if err := g.GeneratePaymentNotifications(store, paymentCount); err != nil {
+	if err := g.GeneratePaymentNotifications(store.StatsDatabase, paymentCount); err != nil {
+		return fmt.Errorf("error generating payment notifications: %v", err)
+	}
+
+	blockedNpubCount := 12
+	if err := g.GenerateBlockedNpubs(store, blockedNpubCount); err != nil {
 		return fmt.Errorf("error generating payment notifications: %v", err)
 	}
 

@@ -12,6 +12,8 @@ import (
 
 // StatisticsStore defines the interface for storing and retrieving statistical data.
 type StatisticsStore interface {
+	Close() error
+
 	// Bitcoin-related statistics
 	SaveBitcoinRate(rate float64) error
 	GetBitcoinRates(days int) ([]types.BitcoinRate, error)

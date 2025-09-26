@@ -76,6 +76,15 @@ func (store *GormStatisticsStore) Init() error {
 	return nil
 }
 
+func (store *GormStatisticsStore) Close() error {
+	db, err := store.DB.DB()
+	if err != nil {
+		return err
+	}
+
+	return db.Close()
+}
+
 func (store *GormStatisticsStore) AllocateBitcoinAddress(npub string) (*types.Address, error) {
 	// Use a dedicated mutex for address allocation
 	store.addressMutex.Lock()
