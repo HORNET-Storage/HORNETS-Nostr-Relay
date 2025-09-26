@@ -39,7 +39,7 @@ func main() {
 	// Use a separate data directory for the demo server to avoid conflicts
 	// Initialize BadgerHold store with a separate data directory for demo mode and custom statistics DB path
 	dbPath := "./data/store"
-	store, err := badgerhold.InitStore("data", dbPath)
+	store, err := badgerhold.InitStore(dbPath)
 	if err != nil {
 		logging.Fatalf("Failed to initialize BadgerHold store: %v", err)
 	}
