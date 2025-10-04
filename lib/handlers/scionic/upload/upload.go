@@ -115,21 +115,16 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			Leafs: make(map[string]*merkle_dag.DagLeaf),
 		}
 
-		packet := merkle_dag.TransmissionPacketFromSerializable(&message.Packet)
+		packet := merkle_dag.BatchedTransmissionPacketFromSerializable(&message.Packet)
 
-		err = packet.Leaf.VerifyRootLeaf()
-		if err != nil {
-			write(lib_stream.BuildErrorMessage("Failed to verify root leaf", err))
-			return
-		}
-
-		err = dag.ApplyAndVerifyTransmissionPacket(packet)
+		err = dag.ApplyAndVerifyBatchedTransmissionPacket(packet)
 		if err != nil {
 			write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
 			return
 		}
 
-		if !canUploadDag(packet.Leaf, &message.PublicKey, &message.Signature) {
+		rootLeaf := packet.GetRootLeaf()
+		if !canUploadDag(rootLeaf, &message.PublicKey, &message.Signature) {
 			write(lib_stream.BuildErrorMessage("Not allowed to upload this", nil))
 			return
 		}
@@ -153,9 +148,9 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 					return
 				}
 
-				packet := merkle_dag.TransmissionPacketFromSerializable(&message.Packet)
+				packet := merkle_dag.BatchedTransmissionPacketFromSerializable(&message.Packet)
 
-				err = dag.ApplyAndVerifyTransmissionPacket(packet)
+				err = dag.ApplyAndVerifyBatchedTransmissionPacket(packet)
 				if err != nil {
 					write(lib_stream.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
 					return

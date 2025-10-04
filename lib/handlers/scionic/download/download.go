@@ -7,11 +7,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
-	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
 	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
 )
@@ -86,15 +86,16 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 				return
 			}
 
-			sequence := partialDag.GetLeafSequence()
+			sequence := partialDag.GetBatchedLeafSequence()
 
 			for _, packet := range sequence {
-				message := types.UploadMessage{
+				message := lib_types.UploadMessage{
 					Root:   dag.Root,
 					Packet: *packet.ToSerializable(),
 				}
 
-				if packet.Leaf.Hash == dag.Root {
+				rootLeaf := packet.GetRootLeaf()
+				if rootLeaf != nil {
 					message.PublicKey = dagData.PublicKey
 					message.Signature = dagData.Signature
 				}
@@ -123,15 +124,16 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 				}
 			}
 		} else {
-			sequence := dag.GetLeafSequence()
+			sequence := dag.GetBatchedLeafSequence()
 
 			for _, packet := range sequence {
-				message := types.UploadMessage{
+				message := lib_types.UploadMessage{
 					Root:   dag.Root,
 					Packet: *packet.ToSerializable(),
 				}
 
-				if packet.Leaf.Hash == dag.Root {
+				rootLeaf := packet.GetRootLeaf()
+				if rootLeaf != nil {
 					message.PublicKey = dagData.PublicKey
 					message.Signature = dagData.Signature
 				}

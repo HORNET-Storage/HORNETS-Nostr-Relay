@@ -3,8 +3,8 @@ module github.com/HORNET-Storage/hornet-storage
 go 1.22.1
 
 require (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.2.6
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20250820033743-c323deefba49
+	github.com/HORNET-Storage/Scionic-Merkle-Tree v1.3.7
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20251004023144-d6cdba06bcbc
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/fsnotify/fsnotify v1.7.0
@@ -22,6 +22,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/timshannon/badgerhold/v4 v4.0.3
 	go.etcd.io/bbolt v1.3.10
+	go.uber.org/multierr v1.11.0
 	golang.org/x/sync v0.8.0
 	golang.org/x/text v0.19.0
 	gorm.io/driver/sqlite v1.5.7
@@ -153,7 +154,6 @@ require (
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/fx v1.22.0 // indirect
 	go.uber.org/mock v0.4.0 // indirect
-	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/mod v0.18.0 // indirect
 	golang.org/x/net v0.30.0 // indirect
