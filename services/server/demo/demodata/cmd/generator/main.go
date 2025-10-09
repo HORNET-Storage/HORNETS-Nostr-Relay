@@ -11,51 +11,25 @@ import (
 	"time"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/services/server/demo/demodata"
 )
 
 func main() {
-	// Find project root and set default DB path to project root
-	projectRoot, err := findProjectRoot()
-	if err != nil {
-		logging.Infof("Warning: Could not determine project root: %v\n", err)
-		logging.Infof("Using current directory as a fallback.")
-		projectRoot, _ = os.Getwd()
-	}
-	// Use the same path structure as the main relay
-	defaultDBPath := filepath.Join(projectRoot, "data", "statistics", "statistics.db")
+	dbPath := "./data/store"
 
-	// Ensure the directory exists
-	dbDir := filepath.Dir(defaultDBPath)
-	if err := os.MkdirAll(dbDir, os.ModePerm); err != nil {
-		logging.Infof("Warning: Could not create statistics directory: %v\n", err)
-	}
-
-	// Parse command line flags
-	dbPathPtr := flag.String("db", defaultDBPath, "Path to SQLite database (same as used by the relay)")
+	dbPathPtr := flag.String("db", dbPath, "Path to SQLite database (same as used by the relay)")
 	autoPtr := flag.Bool("auto", false, "Run with default settings without interaction")
 	flag.Parse()
 
-	dbPath := *dbPathPtr
-
-	// Get absolute path for display
-	absDBPath, err := filepath.Abs(dbPath)
-	if err != nil {
-		absDBPath = dbPath // fallback to relative path if absolute fails
-	}
-
-	logging.Infof("HORNETS-Nostr-Relay Demo Data Generator")
-	logging.Infof("=======================================")
-	logging.Infof("Using database: %s\n\n", absDBPath)
-
 	// Initialize the SQLite store with the specified path
-	store, err := sqlite.InitStore(dbPath)
+
+	store, err := badgerhold.InitStore(*dbPathPtr)
 	if err != nil {
-		logging.Infof("Error initializing SQLite demo store: %v\n", err)
-		os.Exit(1)
+		logging.Fatalf("Failed to initialize BadgerHold store: %v", err)
 	}
+
+	defer store.Cleanup()
 
 	// Create the generator
 	generator := demodata.NewDemoDataGenerator()
@@ -70,23 +44,20 @@ func main() {
 		}
 		logging.Infof("Data generation complete!")
 		logging.Infof("\n=======================================")
-		logging.Infof("Database file created at:")
-		logging.Infof("%s", absDBPath)
-		logging.Infof("=======================================\n")
 		return
 	}
 
 	// Otherwise, start the interactive CLI
-	runInteractiveCLI(generator, store, absDBPath)
+	runInteractiveCLI(generator, store, *dbPathPtr)
 }
 
 // generateAllData generates all types of data
-func generateAllData(generator *demodata.DemoDataGenerator, store statistics.StatisticsStore) error {
+func generateAllData(generator *demodata.DemoDataGenerator, store *badgerhold.BadgerholdStore) error {
 	return generator.GenerateAllData(store)
 }
 
 // runInteractiveCLI runs the interactive command-line interface
-func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.StatisticsStore, dbPath string) {
+func runInteractiveCLI(generator *demodata.DemoDataGenerator, store *badgerhold.BadgerholdStore, dbPath string) {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
@@ -109,7 +80,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 			}
 
 		case "2":
-			err := generator.GenerateUserProfiles(store)
+			err := generator.GenerateUserProfiles(store.StatsDatabase)
 			if err != nil {
 				logging.Infof("Error generating user profiles: %v\n", err)
 			} else {
@@ -117,7 +88,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 			}
 
 		case "3":
-			err := generator.GenerateEventKinds(store)
+			err := generator.GenerateEventKinds(store.StatsDatabase)
 			if err != nil {
 				logging.Infof("Error generating event kinds: %v\n", err)
 			} else {
@@ -135,7 +106,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 				}
 			}
 
-			err := generator.GeneratePaymentNotifications(store, count)
+			err := generator.GeneratePaymentNotifications(store.StatsDatabase, count)
 			if err != nil {
 				logging.Infof("Error generating payment notifications: %v\n", err)
 			} else {
@@ -143,7 +114,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 			}
 
 		case "5":
-			err := generator.GenerateWalletBalance(store)
+			err := generator.GenerateWalletBalance(store.StatsDatabase)
 			if err != nil {
 				logging.Infof("Error generating wallet balance history: %v\n", err)
 			} else {
@@ -161,7 +132,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 				}
 			}
 
-			err := generator.GenerateWalletTransactions(store, count)
+			err := generator.GenerateWalletTransactions(store.StatsDatabase, count)
 			if err != nil {
 				logging.Infof("Error generating wallet transactions: %v\n", err)
 			} else {
@@ -179,7 +150,7 @@ func runInteractiveCLI(generator *demodata.DemoDataGenerator, store statistics.S
 				}
 			}
 
-			err := generator.GenerateWalletAddresses(store, count)
+			err := generator.GenerateWalletAddresses(store.StatsDatabase, count)
 			if err != nil {
 				logging.Infof("Error generating wallet addresses: %v\n", err)
 			} else {

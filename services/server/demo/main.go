@@ -38,13 +38,13 @@ func main() {
 
 	// Use a separate data directory for the demo server to avoid conflicts
 	// Initialize BadgerHold store with a separate data directory for demo mode and custom statistics DB path
-	dbPath := "./data/statistics/statistics.db"
-	store, err := badgerhold.InitStore("demo-data", dbPath)
+	dbPath := "./data/store"
+	store, err := badgerhold.InitStore(dbPath)
 	if err != nil {
 		logging.Fatalf("Failed to initialize BadgerHold store: %v", err)
 	}
 
-	logging.Info("Demo server is using a separate statistics database (./data/statistics/statistics.db)")
+	defer store.Cleanup()
 
 	// Check if the database is empty and generate demo data if needed
 	isEmpty, count, err := databaseIsEmptyWithCount(dbPath)
@@ -52,7 +52,7 @@ func main() {
 		logging.Infof("Warning: Failed to check if database is empty: %v", err)
 	} else if isEmpty {
 		logging.Info("Statistics database is empty, generating demo data...")
-		if err := generateDemoData(dbPath); err != nil {
+		if err := generateDemoData(store); err != nil {
 			logging.Infof("Warning: Failed to generate demo data: %v", err)
 			logging.Info("Demo charts may not display correctly without data")
 		} else {
@@ -110,15 +110,9 @@ func databaseIsEmptyWithCount(dbPath string) (bool, int, error) {
 }
 
 // generateDemoData creates demo data in the statistics database
-func generateDemoData(dbPath string) error {
+func generateDemoData(store *badgerhold.BadgerholdStore) error {
 	// Create a new generator with default settings
 	generator := demodata.NewDemoDataGenerator()
-
-	// Initialize the SQLite store with the specified path
-	store, err := sqlite.InitStore(dbPath)
-	if err != nil {
-		return fmt.Errorf("error initializing SQLite store: %v", err)
-	}
 
 	// Generate all types of demo data
 	if err := generator.GenerateAllData(store); err != nil {
