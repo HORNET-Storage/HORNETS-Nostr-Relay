@@ -104,46 +104,46 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 		}
 	}
 
+	// Determine file name based on whether Kind 117 event exists
+	var name string
+
 	if len(matchingEvents) == 0 {
-		logging.Infof("Blossom upload: No matching kind 117 event found for hash %s from author %s", encodedHash, pubkey)
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "no matching kind 117 event found",
-			"detail":  fmt.Sprintf("Please create a kind 117 event with blossom_hash tag '%s' before uploading", encodedHash),
-		})
-	}
+		// No Kind 117 event found - proceed with upload anyway
+		logging.Infof("Blossom upload: No kind 117 event found for hash %s from author %s, proceeding without metadata", encodedHash, pubkey)
+		name = encodedHash // Use hash as filename when no Kind 117 event exists
+	} else {
+		// Kind 117 event found - validate and extract metadata
+		event := matchingEvents[0]
 
-	// Use the first matching event (most recent due to how events are typically ordered)
-	events := matchingEvents
+		fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
+		if fileHash == nil {
+			// This is theoretically impossible but rather have it than not
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "matching event blossom_hash mismatch"})
+		}
 
-	event := events[0]
+		// Check the submitted hash matches the data being submitted
+		if encodedHash != fileHash.Value() {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"message": "hash mismatch",
+				"detail":  fmt.Sprintf("calculated hash %s does not match event hash %s", encodedHash, fileHash.Value()),
+			})
+		}
 
-	fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
-	if fileHash == nil {
-		// This is theoretically impossible but rather have it than not
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "matching event blossom_hash mismatch"})
-	}
+		// Extract the file name from the kind 117 file information event
+		nameTag := event.Tags.GetFirst([]string{"name"})
+		if nameTag == nil {
+			name = encodedHash // Fallback to hash if no name tag
+		} else {
+			name = nameTag.Value()
+		}
 
-	// Check the submitted hash matches the data being submitted
-	if encodedHash != fileHash.Value() {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "hash mismatch",
-			"detail":  fmt.Sprintf("calculated hash %s does not match event hash %s", encodedHash, fileHash.Value()),
-		})
+		logging.Infof("Blossom upload: Using metadata from kind 117 event - Name: %s, Hash: %s", name, encodedHash)
 	}
 
 	// Store the blob
 	err = s.storage.StoreBlob(data, checkHash[:], pubkey)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to store blob"})
-	}
-
-	// Extract the file name from the kind 117 file information event
-	var name string
-	nameTag := event.Tags.GetFirst([]string{"name"})
-	if nameTag == nil {
-		name = "Unknown"
-	} else {
-		name = nameTag.Value()
 	}
 
 	// Store the file in the statistics database
