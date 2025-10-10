@@ -156,13 +156,19 @@ func (ps *PushService) ProcessEvent(event *nostr.Event) {
 		return
 	}
 
+	// Log incoming event for push notification processing
+	logging.Infof("🔔 Processing event for push notifications - Kind: %d, Event ID: %s, Author: %s",
+		event.Kind, event.ID, event.PubKey)
+
 	// Check if this event type should trigger notifications
 	if !ps.shouldNotify(event) {
+		logging.Debugf("Event kind %d does not trigger notifications", event.Kind)
 		return
 	}
 
 	// Get users who should be notified for this event
 	recipients := ps.getNotificationRecipients(event)
+	logging.Infof("📬 Found %d recipients for notification (Kind: %d)", len(recipients), event.Kind)
 
 	for _, pubkey := range recipients {
 		// Get devices for this user
@@ -189,10 +195,16 @@ func (ps *PushService) ProcessEvent(event *nostr.Event) {
 			select {
 			case ps.queue <- task:
 				// Successfully queued
+				logging.Infof("✉️ Queued push notification for %s on %s (Queue size: %d/%d)",
+					pubkey[:8], device.Platform, len(ps.queue), cap(ps.queue))
+				logging.Infof("✉️ Notification details - Event: %s, Kind: %d, Title: %s",
+					event.ID, event.Kind, message.Title)
 			case <-ps.ctx.Done():
+				logging.Infof("⚠️ Push service shutting down, notification not queued")
 				return
 			default:
-				logging.Warnf("Push notification queue is full, dropping notification for %s", pubkey)
+				logging.Warnf("⚠️ Push notification queue is full (%d/%d), dropping notification for %s",
+					cap(ps.queue), cap(ps.queue), pubkey)
 			}
 		}
 	}
@@ -203,14 +215,22 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 	// Based on the plan, we focus on specific event kinds
 	switch event.Kind {
 	case 1808: // Audio notes (mentions and replies)
+		logging.Infof("✅ Event kind 1808 (Audio note) will trigger notifications")
+		return true
+	case 1809: // Audio post repost
+		logging.Infof("✅ Event kind 1809 (Audio post repost) will trigger notifications")
 		return true
 	case 3: // Contact lists (new followers)
+		logging.Infof("✅ Event kind 3 (Contact list) will trigger notifications")
 		return true
 	case 4: // DMs
+		logging.Infof("✅ Event kind 4 (DM) will trigger notifications")
 		return true
 	case 6: // Reposts
+		logging.Infof("✅ Event kind 6 (Repost) will trigger notifications")
 		return true
 	case 7: // Reactions
+		logging.Infof("✅ Event kind 7 (Reaction) will trigger notifications")
 		return true
 	default:
 		return false
@@ -227,6 +247,16 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
 				recipients = append(recipients, tag[1])
+				logging.Infof("👤 Added recipient for audio note mention: %s", tag[1])
+			}
+		}
+
+	case 1809: // Audio post repost
+		// Notify the original author from p tags
+		for _, tag := range event.Tags {
+			if len(tag) >= 2 && tag[0] == "p" {
+				recipients = append(recipients, tag[1])
+				logging.Infof("👤 Added recipient for audio repost: %s", tag[1])
 			}
 		}
 
@@ -234,6 +264,7 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
 				recipients = append(recipients, tag[1])
+				logging.Infof("👤 Added recipient for new follower: %s", tag[1])
 			}
 		}
 
@@ -241,6 +272,7 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
 				recipients = append(recipients, tag[1])
+				logging.Infof("👤 Added recipient for DM: %s", tag[1])
 			}
 		}
 
@@ -249,6 +281,7 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 			if len(tag) >= 2 && tag[0] == "e" {
 				// We would need to look up the author of the referenced event
 				// For now, skip this complex lookup
+				logging.Debugf("⚠️ Event reference found but author lookup not implemented: %s", tag[1])
 			}
 		}
 	}
@@ -257,7 +290,7 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 }
 
 // formatNotificationMessage formats a push notification message for an event
-func (ps *PushService) formatNotificationMessage(event *nostr.Event, _ string) *PushMessage {
+func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient string) *PushMessage {
 	message := &PushMessage{
 		Badge:    1,
 		Sound:    "default",
@@ -273,6 +306,10 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, _ string) *
 	case 1808: // Audio note
 		message.Title = "New Audio Note"
 		message.Body = "You were mentioned in an audio note"
+
+	case 1809: // Audio post repost
+		message.Title = "Audio Repost"
+		message.Body = "Someone reposted your audio post"
 
 	case 3: // Contact list
 		message.Title = "New Follower"
@@ -294,6 +331,9 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, _ string) *
 		message.Title = "New Notification"
 		message.Body = "You have a new notification"
 	}
+
+	logging.Infof("📱 Formatted notification - Title: %s, Body: %s, Recipient: %s",
+		message.Title, message.Body, recipient)
 
 	return message
 }
