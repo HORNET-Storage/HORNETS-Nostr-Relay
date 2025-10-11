@@ -72,7 +72,7 @@ Required for building C-based dependencies via `cgo`.
 
 ---
 
-### 🚀 **Building Relay with Panel** (When Needing to Pull Latest Panel Version)
+### 🚀 **QUICK SETUP: Building Relay with Panel** (When Needing to Pull Latest)
 
 After cloning the repository,
 
