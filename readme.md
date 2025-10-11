@@ -100,7 +100,7 @@ The compiled binary (hornet-storage or hornet-storage.exe) will be created in th
 ---
 
 
-### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode If Modifying Panel In Subfolder /panel-source):
+### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode If Modifying Panel In /panel-source)
 
 After cloning the repository,
 
