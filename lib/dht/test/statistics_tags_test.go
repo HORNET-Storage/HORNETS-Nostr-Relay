@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

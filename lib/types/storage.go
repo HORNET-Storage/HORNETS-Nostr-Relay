@@ -4,7 +4,7 @@ package types
 import (
 	"time"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 )
 
 // WrappedLeaf represents a leaf in the Merkle DAG structure
@@ -17,9 +17,10 @@ type WrappedLeaf struct {
 	ContentHash       []byte
 	ClassicMerkleRoot []byte
 	CurrentLinkCount  int
-	LatestLabel       string
 	LeafCount         int
-	Links             map[string]string
+	ContentSize       int64
+	DagSize           int64
+	Links             []string
 	ParentHash        string
 	AdditionalData    map[string]string
 }

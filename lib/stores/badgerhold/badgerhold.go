@@ -20,7 +20,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 	"go.uber.org/multierr"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
@@ -1066,8 +1066,9 @@ func WrapLeaf(leaf *types.DagLeafData) *types.WrappedLeaf {
 		ContentHash:       leaf.Leaf.ContentHash,
 		ClassicMerkleRoot: leaf.Leaf.ClassicMerkleRoot,
 		CurrentLinkCount:  leaf.Leaf.CurrentLinkCount,
-		LatestLabel:       leaf.Leaf.LatestLabel,
 		LeafCount:         leaf.Leaf.LeafCount,
+		ContentSize:       leaf.Leaf.ContentSize,
+		DagSize:           leaf.Leaf.DagSize,
 		Links:             leaf.Leaf.Links,
 		ParentHash:        leaf.Leaf.ParentHash,
 		AdditionalData:    leaf.Leaf.AdditionalData,
@@ -1089,8 +1090,9 @@ func UnwrapLeaf(leaf *types.WrappedLeaf) *types.DagLeafData {
 			ContentHash:       leaf.ContentHash,
 			ClassicMerkleRoot: leaf.ClassicMerkleRoot,
 			CurrentLinkCount:  leaf.CurrentLinkCount,
-			LatestLabel:       leaf.LatestLabel,
 			LeafCount:         leaf.LeafCount,
+			ContentSize:       leaf.ContentSize,
+			DagSize:           leaf.DagSize,
 			Links:             leaf.Links,
 			ParentHash:        leaf.ParentHash,
 			AdditionalData:    leaf.AdditionalData,

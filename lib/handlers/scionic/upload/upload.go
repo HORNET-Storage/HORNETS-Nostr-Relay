@@ -11,7 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
@@ -84,29 +84,40 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
+		logging.Infof("[Upload] Received upload - Root: %s, PubKey: %s, Signature: %s",
+			message.Root, message.PublicKey, message.Signature)
+
 		publicKey, err := signing.DeserializePublicKey(message.PublicKey)
 		if err != nil {
+			logging.Infof("[Upload Error] Failed to deserialize public key: %v", err)
 			write(lib_stream.BuildErrorMessage("Failed to deserialize public key", err))
 			return
 		}
 
 		signatureBytes, err := hex.DecodeString(message.Signature)
 		if err != nil {
+			logging.Infof("[Upload Error] Failed to decode signature hex: %v", err)
 			write(lib_stream.BuildErrorMessage("Failed to deserialize signature", err))
 			return
 		}
 
 		signature, err := schnorr.ParseSignature(signatureBytes)
 		if err != nil {
+			logging.Infof("[Upload Error] Failed to parse schnorr signature: %v", err)
 			write(lib_stream.BuildErrorMessage("Failed to deserialize signature", err))
 			return
 		}
 
 		err = signing.VerifySerializedCIDSignature(signature, message.Root, publicKey)
 		if err != nil {
+			logging.Infof("[Upload Error] Signature failed to verify: %v", err)
+			logging.Infof("[Upload Error] Root: %s, PubKey: %s, Signature: %s",
+				message.Root, message.PublicKey, message.Signature)
 			write(lib_stream.BuildErrorMessage("Signature failed to verify", err))
 			return
 		}
+
+		logging.Infof("[Upload] Signature verified successfully!")
 
 		logging.Infof("Dag uploading: " + message.Root)
 
@@ -140,7 +151,9 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			Signature: message.Signature,
 		}
 
-		if dag.Leafs[dag.Root].LeafCount > 0 {
+		// Check if this is already the final packet
+		if !message.IsFinalPacket {
+			// Continue receiving packets until we get the final one
 			for {
 				message, err := read()
 				if err != nil {
@@ -162,7 +175,8 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 					break
 				}
 
-				if len(dag.Leafs) >= (dag.Leafs[dag.Root].LeafCount + 1) {
+				// Check if this is the final packet
+				if message.IsFinalPacket {
 					logging.Infof("All leaves receieved")
 					break
 				}

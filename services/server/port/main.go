@@ -79,7 +79,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 )

@@ -7,7 +7,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	"github.com/nbd-wtf/go-nostr"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 )
 
 // StatisticsStore defines the interface for storing and retrieving statistical data.

@@ -2,11 +2,12 @@ package download
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -46,13 +47,8 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 
 		rootLeaf := rootData.Leaf
 
-		err = rootLeaf.VerifyRootLeaf()
-		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to verify root leaf", err)
-
-			stream.Close()
-			return
-		}
+		// Don't verify the root leaf here - we only have the root, not the full tree
+		// The full DAG will be built from store below and verified then
 
 		if !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
 			lib_stream.WriteErrorToStream(libp2pStream, "Not allowed to download this", nil)
@@ -78,7 +74,17 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 		dag := dagData.Dag
 
 		if message.Filter != nil && message.Filter.LeafRanges != nil {
-			partialDag, err := dag.GetPartial(message.Filter.LeafRanges.From, message.Filter.LeafRanges.To)
+			dag.CalculateLabels()
+
+			hashes, err := dag.GetHashesByLabelRange(strconv.Itoa(message.Filter.LeafRanges.From), strconv.Itoa(message.Filter.LeafRanges.To))
+			if err != nil {
+				lib_stream.WriteErrorToStream(libp2pStream, "Failed to get hash range from label range %e", err)
+
+				stream.Close()
+				return
+			}
+
+			partialDag, err := dag.GetPartial(hashes, true)
 			if err != nil {
 				lib_stream.WriteErrorToStream(libp2pStream, "Failed to build partial dag %e", err)
 
@@ -87,11 +93,13 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			}
 
 			sequence := partialDag.GetBatchedLeafSequence()
+			total := len(sequence)
 
-			for _, packet := range sequence {
+			for i, packet := range sequence {
 				message := lib_types.UploadMessage{
-					Root:   dag.Root,
-					Packet: *packet.ToSerializable(),
+					Root:          dag.Root,
+					Packet:        *packet.ToSerializable(),
+					IsFinalPacket: i == total-1, // Mark the last packet
 				}
 
 				rootLeaf := packet.GetRootLeaf()
@@ -125,11 +133,13 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 			}
 		} else {
 			sequence := dag.GetBatchedLeafSequence()
+			total := len(sequence)
 
-			for _, packet := range sequence {
+			for i, packet := range sequence {
 				message := lib_types.UploadMessage{
-					Root:   dag.Root,
-					Packet: *packet.ToSerializable(),
+					Root:          dag.Root,
+					Packet:        *packet.ToSerializable(),
+					IsFinalPacket: i == total-1, // Mark the last packet
 				}
 
 				rootLeaf := packet.GetRootLeaf()

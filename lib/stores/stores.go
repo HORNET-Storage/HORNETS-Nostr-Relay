@@ -1,7 +1,7 @@
 package stores
 
 import (
-	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/dag"
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -75,13 +75,16 @@ type Store interface {
 }
 
 func BuildDagFromStore(store Store, root string, includeContent bool, temp bool) (*types.DagData, error) {
-	builder := merkle_dag.CreateDagBuilder()
+	dag := &merkle_dag.Dag{
+		Root:  root,
+		Leafs: make(map[string]*merkle_dag.DagLeaf),
+	}
 
 	var publicKey *string
 	var signature *string
-	var addLeavesRecursively func(builder *merkle_dag.DagBuilder, hash string) error
+	var addLeavesRecursively func(hash string) error
 
-	addLeavesRecursively = func(builder *merkle_dag.DagBuilder, hash string) error {
+	addLeavesRecursively = func(hash string) error {
 		data, err := store.RetrieveLeaf(root, hash, includeContent, temp)
 		if err != nil {
 			logging.Infof("Unable to find leaf in the database:%s", err)
@@ -93,49 +96,37 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 		if leaf.Hash == root {
 			publicKey = &data.PublicKey
 			signature = &data.Signature
-
-			err = leaf.VerifyRootLeaf()
-			if err != nil {
-				err = nil
-			}
-		} else {
-			err = leaf.VerifyLeaf()
-			if err != nil {
-				err = nil
-			}
 		}
 
 		if !includeContent {
 			if leaf.Type == merkle_dag.FileLeafType {
-				leaf.Links = make(map[string]string)
-
-				builder.AddLeaf(&leaf, nil)
-
-				return nil
+				// Clear links but keep the leaf
+				leaf.Links = []string{}
 			}
 		}
 
-		builder.AddLeaf(&leaf, nil)
+		dag.Leafs[leaf.Hash] = &leaf
 
+		// Recursively add children
 		for _, childHash := range leaf.Links {
-			if err := addLeavesRecursively(builder, childHash); err != nil {
-				logging.Infof("Error adding child leaf:%s", err)
+			// Skip if already added (in case of shared children)
+			if _, exists := dag.Leafs[childHash]; !exists {
+				if err := addLeavesRecursively(childHash); err != nil {
+					logging.Infof("Error adding child leaf:%s", err)
+				}
 			}
 		}
 
 		return nil
 	}
 
-	if err := addLeavesRecursively(builder, root); err != nil {
+	if err := addLeavesRecursively(root); err != nil {
 		logging.Infof("Failed to add leaves from database:%s", err)
 		return nil, err
 	}
 
-	dag := builder.BuildDag(root)
-
 	err := dag.Verify()
 	if err != nil {
-		logging.Infof("Failed to verify full dag")
 		return nil, err
 	}
 
@@ -156,7 +147,6 @@ func StoreDag(store Store, dag *types.DagData, temp bool) error {
 			Leaf:      *leaf,
 		}, temp)
 		if err != nil {
-			logging.Infof("Failed to store leaf: " + err.Error())
 			return err
 		}
 
