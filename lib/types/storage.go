@@ -27,7 +27,7 @@ type WrappedLeaf struct {
 
 // AdditionalDataEntry represents additional metadata for DAG entries
 type AdditionalDataEntry struct {
-	Hash  string
+	Hash  []byte
 	Key   string `badgerhold:"index"`
 	Value string
 }
@@ -71,7 +71,8 @@ type LeafLabelRange struct {
 // DownloadFilter represents filtering options for downloads
 type DownloadFilter struct {
 	LeafRanges     *LeafLabelRange
-	IncludeContent bool // IncludeContent from LeafLabelRange always overrides this
+	LeafHashes     []string // Specific leaf hashes to download
+	IncludeContent bool     // IncludeContent from LeafLabelRange always overrides this
 }
 
 // BlockData represents data for a block in the DAG

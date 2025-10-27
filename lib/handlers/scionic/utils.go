@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
 )
 
 type DagWriter func(message interface{}) error
@@ -140,4 +142,14 @@ func GetMediaTypeInfo(filename, mimeType string) (mediaType string, definition *
 	}
 
 	return "unknown", nil
+}
+
+func BuildErrorMessage(message string, err error) lib_types.ErrorMessage {
+	if err != nil {
+		logging.Errorf("[ERROR] %s | %s", message, err)
+	} else {
+		logging.Errorf("[ERROR] %s", message)
+	}
+
+	return lib_stream.BuildErrorMessage(message, err)
 }

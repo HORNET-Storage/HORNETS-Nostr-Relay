@@ -8,7 +8,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
@@ -24,156 +24,118 @@ func AddDownloadHandler(libp2phost host.Host, store stores.Store, canDownloadDag
 func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) func(network.Stream) {
 	downloadStreamHandler := func(stream network.Stream) {
 		ctx := context.Background()
-
 		libp2pStream := libp2p_stream.New(stream, ctx)
 
+		defer stream.Close()
+
+		// Receive download request
 		message, err := lib_stream.WaitForDownloadMessage(libp2pStream)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", nil)
-
-			stream.Close()
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to receive download message", err)
 			return
 		}
 
-		logging.Infof("Downloading Dag: " + message.Root)
-
-		rootData, err := store.RetrieveLeaf(message.Root, message.Root, true, false)
+		// Retrieve root leaf for authorization check
+		rootData, err := store.RetrieveLeaf(message.Root, message.Root, false)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Node does not have root leaf", nil)
-
-			stream.Close()
+			lib_stream.WriteErrorToStream(libp2pStream, "Node does not have root leaf", err)
 			return
 		}
 
 		rootLeaf := rootData.Leaf
 
-		// Don't verify the root leaf here - we only have the root, not the full tree
-		// The full DAG will be built from store below and verified then
-
-		if !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
+		// Check authorization
+		if canDownloadDag != nil && !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
 			lib_stream.WriteErrorToStream(libp2pStream, "Not allowed to download this", nil)
-
-			stream.Close()
 			return
 		}
 
+		// Determine content inclusion from filter
 		includeContent := true
-
 		if message.Filter != nil {
 			includeContent = message.Filter.IncludeContent
 		}
 
-		dagData, err := store.BuildDagFromStore(message.Root, includeContent, false)
-		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to build dag from root %e", err)
+		var dagData *types.DagData
 
-			stream.Close()
-			return
-		}
+		// Handle filtered/partial DAG requests
+		if message.Filter != nil && (message.Filter.LeafRanges != nil || len(message.Filter.LeafHashes) > 0) {
+			var leafHashes []string
 
-		dag := dagData.Dag
+			// Handle LeafHashes (direct hash specification)
+			if len(message.Filter.LeafHashes) > 0 {
+				leafHashes = message.Filter.LeafHashes
+			} else if message.Filter.LeafRanges != nil {
+				// Handle LeafRanges (label range specification)
+				// Retrieve cached labels
+				labels, err := store.RetrieveLabels(message.Root)
+				if err != nil {
+					lib_stream.WriteErrorToStream(libp2pStream, "Failed to retrieve cached labels", err)
+					return
+				}
 
-		if message.Filter != nil && message.Filter.LeafRanges != nil {
-			dag.CalculateLabels()
-
-			hashes, err := dag.GetHashesByLabelRange(strconv.Itoa(message.Filter.LeafRanges.From), strconv.Itoa(message.Filter.LeafRanges.To))
-			if err != nil {
-				lib_stream.WriteErrorToStream(libp2pStream, "Failed to get hash range from label range %e", err)
-
-				stream.Close()
-				return
+				// Convert label range to hash array
+				for i := message.Filter.LeafRanges.From; i <= message.Filter.LeafRanges.To; i++ {
+					label := strconv.Itoa(i)
+					if hash, exists := labels[label]; exists {
+						leafHashes = append(leafHashes, hash)
+					} else {
+						lib_stream.WriteErrorToStream(libp2pStream, "Label not found in cached labels", nil)
+						return
+					}
+				}
 			}
 
-			partialDag, err := dag.GetPartial(hashes, true)
+			// Build partial DAG directly from store (efficient!)
+			dagData, err = store.BuildPartialDagFromStore(message.Root, leafHashes, includeContent, true)
 			if err != nil {
-				lib_stream.WriteErrorToStream(libp2pStream, "Failed to build partial dag %e", err)
-
-				stream.Close()
+				lib_stream.WriteErrorToStream(libp2pStream, "Failed to build partial dag from store", err)
 				return
-			}
-
-			sequence := partialDag.GetBatchedLeafSequence()
-			total := len(sequence)
-
-			for i, packet := range sequence {
-				message := lib_types.UploadMessage{
-					Root:          dag.Root,
-					Packet:        *packet.ToSerializable(),
-					IsFinalPacket: i == total-1, // Mark the last packet
-				}
-
-				rootLeaf := packet.GetRootLeaf()
-				if rootLeaf != nil {
-					message.PublicKey = dagData.PublicKey
-					message.Signature = dagData.Signature
-				}
-
-				err := lib_stream.WriteMessageToStream(libp2pStream, message)
-				if err != nil {
-					lib_stream.WriteErrorToStream(libp2pStream, "Failed to encode partial dag %e", err)
-
-					stream.Close()
-					return
-				}
-
-				resp, err := lib_stream.WaitForResponse(libp2pStream)
-				if err != nil {
-					lib_stream.WriteErrorToStream(libp2pStream, "Failed to wait for response %e", err)
-
-					stream.Close()
-					return
-				}
-
-				if !resp.Ok {
-					lib_stream.WriteErrorToStream(libp2pStream, "client responded withg false", nil)
-
-					stream.Close()
-					return
-				}
 			}
 		} else {
-			sequence := dag.GetBatchedLeafSequence()
-			total := len(sequence)
-
-			for i, packet := range sequence {
-				message := lib_types.UploadMessage{
-					Root:          dag.Root,
-					Packet:        *packet.ToSerializable(),
-					IsFinalPacket: i == total-1, // Mark the last packet
-				}
-
-				rootLeaf := packet.GetRootLeaf()
-				if rootLeaf != nil {
-					message.PublicKey = dagData.PublicKey
-					message.Signature = dagData.Signature
-				}
-
-				err := lib_stream.WriteMessageToStream(libp2pStream, message)
-				if err != nil {
-					lib_stream.WriteErrorToStream(libp2pStream, "Failed to encode partial dag %e", err)
-
-					stream.Close()
-					return
-				}
-
-				resp, err := lib_stream.WaitForResponse(libp2pStream)
-				if err != nil {
-					lib_stream.WriteErrorToStream(libp2pStream, "Failed to wait for response %e", err)
-
-					stream.Close()
-					return
-				}
-
-				if !resp.Ok {
-					lib_stream.WriteErrorToStream(libp2pStream, "client responded with false", nil)
-
-					stream.Close()
-					return
-				}
+			// Build full DAG from store
+			dagData, err = store.BuildDagFromStore(message.Root, includeContent)
+			if err != nil {
+				lib_stream.WriteErrorToStream(libp2pStream, "Failed to build dag from store", err)
+				return
 			}
 		}
 
-		stream.Close()
+		// Send DAG in batched packets
+		sequence := dagData.Dag.GetBatchedLeafSequence()
+		total := len(sequence)
+
+		for i, packet := range sequence {
+			uploadMsg := lib_types.UploadMessage{
+				Root:          dagData.Dag.Root,
+				Packet:        *packet.ToSerializable(),
+				IsFinalPacket: i == total-1,
+			}
+
+			// Include public key and signature in first packet (contains root)
+			if packet.GetRootLeaf() != nil {
+				uploadMsg.PublicKey = dagData.PublicKey
+				uploadMsg.Signature = dagData.Signature
+			}
+
+			err := lib_stream.WriteMessageToStream(libp2pStream, uploadMsg)
+			if err != nil {
+				lib_stream.WriteErrorToStream(libp2pStream, "Failed to send packet", err)
+				return
+			}
+
+			// Wait for client acknowledgment
+			resp, err := lib_stream.WaitForResponse(libp2pStream)
+			if err != nil {
+				lib_stream.WriteErrorToStream(libp2pStream, "Failed to receive acknowledgment", err)
+				return
+			}
+
+			if !resp.Ok {
+				lib_stream.WriteErrorToStream(libp2pStream, "Client rejected packet", nil)
+				return
+			}
+		}
 	}
 
 	return downloadStreamHandler

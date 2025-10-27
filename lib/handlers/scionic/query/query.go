@@ -33,7 +33,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 			return
 		}
 
-		hashes, err := store.QueryDag(message.Filter, false)
+		hashes, err := store.QueryDag(message.Filter)
 		if err != nil {
 			lib_stream.WriteErrorToStream(libp2pStream, "Failed to query database", nil)
 

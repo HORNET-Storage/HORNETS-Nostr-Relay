@@ -95,7 +95,7 @@ func HandleGetFilesByType(c *fiber.Ctx, store stores.Store) error {
 				files = append(files, data)
 			}
 		} else {
-			dag, err := store.BuildDagFromStore(record.Root, true, false)
+			dag, err := store.BuildDagFromStore(record.Root, true)
 			if err != nil {
 				leaf, ok := dag.Dag.Leafs[record.Hash]
 				if ok {

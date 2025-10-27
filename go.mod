@@ -6,9 +6,10 @@ toolchain go1.24.1
 
 require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree/v2 v2.0.2
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20251023010321-2c0d3f97c8a9
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20251027082313-77b506a0232d
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
+	github.com/dgraph-io/badger/v4 v4.1.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/gabriel-vasile/mimetype v1.4.6
@@ -53,7 +54,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
-	github.com/dgraph-io/badger/v4 v4.1.0 // indirect
 	github.com/dgraph-io/ristretto v0.1.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

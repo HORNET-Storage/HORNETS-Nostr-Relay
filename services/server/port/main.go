@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,8 +22,6 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/ipfs/go-cid"
 	"github.com/spf13/viper"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -422,34 +419,7 @@ func main() {
 		return true
 	})
 
-	canUpload := func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
-		decodedSignature, err := hex.DecodeString(*signature)
-		if err != nil {
-			return false
-		}
-
-		parsedSignature, err := schnorr.ParseSignature(decodedSignature)
-		if err != nil {
-			return false
-		}
-
-		contentID, err := cid.Parse(rootLeaf.Hash)
-		if err != nil {
-			return false
-		}
-
-		publicKey, err := signing.DeserializePublicKey(*pubKey)
-		if err != nil {
-			return false
-		}
-
-		err = signing.VerifyCIDSignature(parsedSignature, contentID, publicKey)
-		return err == nil
-	}
-
-	handleUpload := func(dag *merkle_dag.Dag, pubKey *string) {}
-
-	upload.AddUploadHandlerForLibp2p(ctx, host, store, canUpload, handleUpload)
+	upload.AddUploadHandlerForLibp2p(ctx, host, store, nil, nil)
 	query.AddQueryHandler(host, store)
 
 	logging.Infof("Host started with id: %s\n", host.ID())

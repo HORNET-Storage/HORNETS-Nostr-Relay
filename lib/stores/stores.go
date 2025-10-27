@@ -1,11 +1,15 @@
 package stores
 
 import (
+	"fmt"
+
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
+	merkle_tree "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/tree"
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
+	"github.com/ipfs/go-cid"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -16,12 +20,16 @@ type Store interface {
 	GetStatsStore() statistics.StatisticsStore
 
 	// Hornet Storage
-	StoreLeaf(root string, leafData *types.DagLeafData, temp bool) error
-	RetrieveLeaf(root string, hash string, includeContent bool, temp bool) (*types.DagLeafData, error)
-	QueryDag(filter lib_types.QueryFilter, temp bool) ([]string, error)
-	StoreDag(dag *types.DagData, temp bool) error
-	BuildDagFromStore(root string, includeContent bool, temp bool) (*types.DagData, error)
-	RetrieveLeafContent(contentHash []byte, temp bool) ([]byte, error)
+	StoreLeaf(root string, leafData *types.DagLeafData) error
+	RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error)
+	QueryDag(filter lib_types.QueryFilter) ([]string, error)
+	StoreDag(dag *types.DagData) error
+	BuildDagFromStore(root string, includeContent bool) (*types.DagData, error)
+	BuildPartialDagFromStore(root string, leafHashes []string, includeContent bool, pruneLinks bool) (*types.DagData, error)
+	RetrieveContent(rootCID cid.Cid, contentHash []byte) ([]byte, error)
+	DeleteDag(root string) error
+	CacheLabels(dag *merkle_dag.Dag) error
+	RetrieveLabels(root string) (map[string]string, error)
 
 	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
@@ -74,7 +82,7 @@ type Store interface {
 	// NIP Mapping methods moved to config package
 }
 
-func BuildDagFromStore(store Store, root string, includeContent bool, temp bool) (*types.DagData, error) {
+func BuildDagFromStore(store Store, root string, includeContent bool) (*types.DagData, error) {
 	dag := &merkle_dag.Dag{
 		Root:  root,
 		Leafs: make(map[string]*merkle_dag.DagLeaf),
@@ -85,7 +93,7 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 	var addLeavesRecursively func(hash string) error
 
 	addLeavesRecursively = func(hash string) error {
-		data, err := store.RetrieveLeaf(root, hash, includeContent, temp)
+		data, err := store.RetrieveLeaf(root, hash, includeContent)
 		if err != nil {
 			logging.Infof("Unable to find leaf in the database:%s", err)
 			return err
@@ -139,19 +147,224 @@ func BuildDagFromStore(store Store, root string, includeContent bool, temp bool)
 	return data, nil
 }
 
-func StoreDag(store Store, dag *types.DagData, temp bool) error {
+// Returns a partial DAG with merkle proofs for verification.
+func BuildPartialDagFromStore(store Store, root string, leafHashes []string, includeContent bool, pruneLinks bool) (*types.DagData, error) {
+	if len(leafHashes) == 0 {
+		return nil, fmt.Errorf("no leaf hashes provided")
+	}
+
+	partialDag := &merkle_dag.Dag{
+		Leafs: make(map[string]*merkle_dag.DagLeaf),
+		Root:  root,
+	}
+
+	var publicKey *string
+	var signature *string
+
+	// Track hashes that are relevant for verification
+	relevantHashes := make(map[string]bool)
+	relevantHashes[root] = true
+
+	// Track which leaves we've already retrieved to avoid duplicates
+	retrievedLeaves := make(map[string]*types.DagLeafData)
+
+	// Process each requested leaf hash
+	for _, requestedHash := range leafHashes {
+		// Retrieve the target leaf (without content initially)
+		targetLeafData, err := store.RetrieveLeaf(root, requestedHash, false)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve leaf %s: %w", requestedHash, err)
+		}
+
+		retrievedLeaves[requestedHash] = targetLeafData
+		relevantHashes[requestedHash] = true
+
+		// If this is the root, capture public key and signature
+		if requestedHash == root {
+			publicKey = &targetLeafData.PublicKey
+			signature = &targetLeafData.Signature
+		}
+
+		// Walk up to root using ParentHash, building verification path
+		currentHash := requestedHash
+		currentLeafData := targetLeafData
+
+		for currentHash != root {
+			parentHash := currentLeafData.Leaf.ParentHash
+			if parentHash == "" {
+				return nil, fmt.Errorf("leaf %s has no parent hash (broken path to root)", currentHash)
+			}
+
+			// Retrieve parent if we haven't already
+			if _, exists := retrievedLeaves[parentHash]; !exists {
+				parentLeafData, err := store.RetrieveLeaf(root, parentHash, false)
+				if err != nil {
+					return nil, fmt.Errorf("failed to retrieve parent %s: %w", parentHash, err)
+				}
+				retrievedLeaves[parentHash] = parentLeafData
+
+				// Capture root's public key and signature
+				if parentHash == root {
+					publicKey = &parentLeafData.PublicKey
+					signature = &parentLeafData.Signature
+				}
+			}
+
+			relevantHashes[parentHash] = true
+
+			// Move up the tree
+			currentHash = parentHash
+			currentLeafData = retrievedLeaves[parentHash]
+		}
+	}
+
+	// Now we have all leaves in the verification paths
+	// Build merkle proofs for parents with multiple children
+	for hash, leafData := range retrievedLeaves {
+		leaf := &leafData.Leaf
+
+		// Generate proofs for children if this leaf has multiple children
+		if leaf.CurrentLinkCount > 1 && len(leaf.Links) > 0 {
+			// Build merkle tree from links (which contain all child hashes)
+			builder := merkle_tree.CreateTree()
+			for _, linkHash := range leaf.Links {
+				builder.AddLeaf(linkHash, linkHash)
+			}
+
+			merkleTree, _, err := builder.Build()
+			if err != nil {
+				return nil, fmt.Errorf("failed to build merkle tree for leaf %s: %w", hash, err)
+			}
+
+			// Generate proofs for any children that are in our retrieved set
+			if leaf.Proofs == nil {
+				leaf.Proofs = make(map[string]*merkle_dag.ClassicTreeBranch)
+			}
+
+			for _, childHash := range leaf.Links {
+				// Only generate proof if this child is in our verification path
+				if _, inPath := retrievedLeaves[childHash]; inPath {
+					index, exists := merkleTree.GetIndexForKey(childHash)
+					if !exists {
+						return nil, fmt.Errorf("unable to find index for child %s in parent %s", childHash, hash)
+					}
+
+					proof := &merkle_dag.ClassicTreeBranch{
+						Leaf:  childHash,
+						Proof: merkleTree.Proofs[index],
+					}
+
+					leaf.Proofs[childHash] = proof
+				}
+			}
+		}
+	}
+
+	// Now handle content retrieval if requested
+	if includeContent {
+		for hash, leafData := range retrievedLeaves {
+			leaf := &leafData.Leaf
+
+			// If leaf has content hash, retrieve the content
+			if leaf.ContentHash != nil {
+				rootCID, err := cid.Decode(root)
+				if err != nil {
+					return nil, fmt.Errorf("invalid root CID: %w", err)
+				}
+
+				content, err := store.RetrieveContent(rootCID, leaf.ContentHash)
+				if err != nil {
+					return nil, fmt.Errorf("failed to retrieve content for leaf %s: %w", hash, err)
+				}
+				leaf.Content = content
+			}
+
+			// If leaf has links and is a file type, it might be chunked
+			// Retrieve chunk children and their content
+			if leaf.Type == merkle_dag.FileLeafType && len(leaf.Links) > 0 {
+				for _, chunkHash := range leaf.Links {
+					// Skip if we already retrieved this chunk
+					if _, exists := retrievedLeaves[chunkHash]; exists {
+						continue
+					}
+
+					// Retrieve chunk leaf with content
+					chunkLeafData, err := store.RetrieveLeaf(root, chunkHash, false)
+					if err != nil {
+						return nil, fmt.Errorf("failed to retrieve chunk %s: %w", chunkHash, err)
+					}
+
+					// Retrieve chunk content
+					if chunkLeafData.Leaf.ContentHash != nil {
+						rootCID, err := cid.Decode(root)
+						if err != nil {
+							return nil, fmt.Errorf("invalid root CID: %w", err)
+						}
+
+						content, err := store.RetrieveContent(rootCID, chunkLeafData.Leaf.ContentHash)
+						if err != nil {
+							return nil, fmt.Errorf("failed to retrieve content for chunk %s: %w", chunkHash, err)
+						}
+						chunkLeafData.Leaf.Content = content
+					}
+
+					retrievedLeaves[chunkHash] = chunkLeafData
+					relevantHashes[chunkHash] = true
+				}
+			}
+		}
+	}
+
+	// Add all retrieved leaves to the partial DAG
+	for hash, leafData := range retrievedLeaves {
+		partialDag.Leafs[hash] = &leafData.Leaf
+	}
+
+	// Optionally prune irrelevant links
+	if pruneLinks {
+		for _, leaf := range partialDag.Leafs {
+			prunedLinks := make([]string, 0, len(leaf.Links))
+			for _, linkHash := range leaf.Links {
+				if relevantHashes[linkHash] {
+					prunedLinks = append(prunedLinks, linkHash)
+				}
+			}
+			leaf.Links = prunedLinks
+		}
+	}
+
+	// Verify public key and signature are set
+	if publicKey == nil || signature == nil {
+		return nil, fmt.Errorf("failed to retrieve root leaf for public key and signature")
+	}
+
+	data := &types.DagData{
+		PublicKey: *publicKey,
+		Signature: *signature,
+		Dag:       *partialDag,
+	}
+
+	return data, nil
+}
+
+func StoreDag(store Store, dag *types.DagData) error {
 	err := dag.Dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) error {
 		err := store.StoreLeaf(dag.Dag.Root, &types.DagLeafData{
 			PublicKey: dag.PublicKey,
 			Signature: dag.Signature,
 			Leaf:      *leaf,
-		}, temp)
+		})
 		if err != nil {
 			return err
 		}
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	err = store.CacheLabels(&dag.Dag)
 	if err != nil {
 		return err
 	}

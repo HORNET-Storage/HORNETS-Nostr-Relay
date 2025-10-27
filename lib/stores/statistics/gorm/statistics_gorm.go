@@ -481,26 +481,27 @@ func (store *GormStatisticsStore) QueryFiles(criteria map[string]interface{}) ([
 }
 
 func (store *GormStatisticsStore) SaveTags(root string, leaf *merkle_dag.DagLeaf) error {
-	for key, value := range leaf.AdditionalData {
-		tag := types.FileTag{
-			Root:  root,
-			Key:   key,
-			Value: value,
+	return store.DB.Transaction(func(tx *gorm.DB) error {
+		for key, value := range leaf.AdditionalData {
+			tag := types.FileTag{
+				Root:  root,
+				Key:   key,
+				Value: value,
+			}
+
+			result := tx.Where(&types.FileTag{
+				Root:  root,
+				Key:   key,
+				Value: value,
+			}).FirstOrCreate(&tag)
+
+			if result.Error != nil {
+				return result.Error
+			}
 		}
 
-		// Use pointer and specify search conditions for FirstOrCreate
-		result := store.DB.Where(&types.FileTag{
-			Root:  root,
-			Key:   key,
-			Value: value,
-		}).FirstOrCreate(&tag)
-
-		if result.Error != nil {
-			return result.Error
-		}
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (store *GormStatisticsStore) QueryTags(tags map[string]string) ([]string, error) {
