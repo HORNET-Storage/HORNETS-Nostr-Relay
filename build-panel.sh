@@ -40,6 +40,7 @@ GENERATE_SOURCEMAP=false NODE_ENV=production yarn build
 # Copy built files to web directory
 echo "📋 Copying files to web directory..."
 cd ..
+mkdir -p web
 rm -rf web/*
 cp -r panel-source/build/* web/
 
