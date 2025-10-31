@@ -4,6 +4,8 @@ go 1.24.0
 
 toolchain go1.24.1
 
+replace github.com/HORNET-Storage/go-hornet-storage-lib => ../go-hornet-storage-lib
+
 require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree/v2 v2.0.4
 	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20251027082313-77b506a0232d
