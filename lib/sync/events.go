@@ -345,17 +345,6 @@ func listenNegentropy(neg *negentropy.Negentropy, stream network.Stream, hostId 
 					logging.Infof("Could not store event %+v skipping", event)
 					continue
 				}
-				// TODO: this needs to be more thoroughly tested
-				if event.Kind == 117 {
-					// do leaf sync
-					root, found := GetScionicRoot(event)
-					if !found {
-						logging.Infof("Event of type 117 with no 'scionic_root' tag, skipping tree download %+v", event)
-						continue
-					}
-
-					DownloadDag(root)
-				}
 			}
 			if final {
 				if err = SendNegentropyMessage(hostId, stream, "NEG-CLOSE", nostr.Filter{}, []byte{}, "", []string{}, []byte{}); err != nil {

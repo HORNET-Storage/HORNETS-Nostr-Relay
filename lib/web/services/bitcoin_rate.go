@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -105,19 +106,19 @@ func fetchBitcoinPrice(apiIndex int) (float64, int, error) {
 		if err == nil {
 			return price, (index + 1) % len(apis), nil
 		}
-		logging.Infof("Error fetching price from API", index, ":", err)
+		logging.Infof("Error fetching price from API %d: %v", index, err)
 	}
 	return 0, apiIndex, fmt.Errorf("all API calls failed")
 }
 
-func PullBitcoinPrice(store stores.Store) {
+func PullBitcoinPrice(store stores.Store, ctx context.Context) {
 	// Fetch the initial Bitcoin rate immediately
 	apiIndex := 0
 	price, newIndex, err := fetchBitcoinPrice(apiIndex)
 	if err != nil {
-		logging.Infof("Error:", err)
+		logging.Infof("Error fetching initial Bitcoin price: %v", err)
 	} else {
-		logging.Infof("Initial Bitcoin Price from APIs: $%.2f\n", price)
+		logging.Infof("Initial Bitcoin Price from APIs: $%.2f", price)
 		apiIndex = newIndex
 		store.GetStatsStore().SaveBitcoinRate(price)
 	}
@@ -126,14 +127,20 @@ func PullBitcoinPrice(store stores.Store) {
 	ticker := time.NewTicker(7 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		price, newIndex, err := fetchBitcoinPrice(apiIndex)
-		if err != nil {
-			logging.Infof("Error:", err)
-		} else {
-			logging.Infof("Bitcoin Price from APIs: $%.2f\n", price)
-			apiIndex = newIndex
-			store.GetStatsStore().SaveBitcoinRate(price)
+	for {
+		select {
+		case <-ticker.C:
+			price, newIndex, err := fetchBitcoinPrice(apiIndex)
+			if err != nil {
+				logging.Infof("Error fetching Bitcoin price: %v", err)
+			} else {
+				logging.Infof("Bitcoin Price from APIs: $%.2f", price)
+				apiIndex = newIndex
+				store.GetStatsStore().SaveBitcoinRate(price)
+			}
+		case <-ctx.Done():
+			logging.Info("Bitcoin rate fetcher stopping...")
+			return
 		}
 	}
 }

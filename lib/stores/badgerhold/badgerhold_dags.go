@@ -96,31 +96,30 @@ func (store *BadgerholdStore) RetrieveLabels(root string) (map[string]string, er
 }
 
 func (store *BadgerholdStore) DeleteDag(root string) error {
+	// Delete all ownership records with matching root using BadgerHold's indexed query
+	err := store.Database.DeleteMatching(&types.DagOwnership{}, badgerhold.Where("Root").Eq(root))
+	if err != nil && err != badgerhold.ErrNotFound {
+		return fmt.Errorf("failed to delete ownership records: %w", err)
+	}
+
+	// Delete all tags for this root using prefix scan
 	db := store.Database.Badger()
-
-	prefixes := []string{"leaf_", "tags_"}
-
-	return db.Update(func(tx *badger.Txn) error {
+	err = db.Update(func(tx *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
 
-		// Delete leaves and tags by prefix
-		for _, p := range prefixes {
-			prefix := []byte(fmt.Sprintf("%s%s_", p, root))
-			it := tx.NewIterator(opts)
+		// Delete tags with this root prefix
+		prefix := makeKey("tags", root)
+		it := tx.NewIterator(opts)
+		defer it.Close()
 
-			defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			key := item.KeyCopy(nil)
 
-			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-				item := it.Item()
-				key := item.KeyCopy(nil)
-
-				if err := tx.Delete(key); err != nil {
-					return err
-				}
+			if err := tx.Delete(key); err != nil {
+				return err
 			}
-
-			it.Close()
 		}
 
 		// Delete cached labels
@@ -131,6 +130,8 @@ func (store *BadgerholdStore) DeleteDag(root string) error {
 
 		return nil
 	})
+
+	return err
 }
 
 func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData) error {
@@ -170,11 +171,51 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 			leafData.Leaf.Content = nil
 		}
 
-		wrappedLeaf := WrapLeaf(leafData)
+		// Store leaf content once (content-addressed by hash only)
+		leafContent := types.LeafContent{
+			Hash:              leafData.Leaf.Hash,
+			ItemName:          leafData.Leaf.ItemName,
+			Type:              leafData.Leaf.Type,
+			ContentHash:       leafData.Leaf.ContentHash,
+			ClassicMerkleRoot: leafData.Leaf.ClassicMerkleRoot,
+			CurrentLinkCount:  leafData.Leaf.CurrentLinkCount,
+			LeafCount:         leafData.Leaf.LeafCount,
+			ContentSize:       leafData.Leaf.ContentSize,
+			DagSize:           leafData.Leaf.DagSize,
+			Links:             leafData.Leaf.Links,
+			ParentHash:        leafData.Leaf.ParentHash,
+			AdditionalData:    leafData.Leaf.AdditionalData,
+		}
 
-		err = store.Database.TxUpsert(tx, makeKey("leaf", rootCID.Bytes(), leafCID.Bytes()), wrappedLeaf)
+		// Store leaf content with hash as key (enables BadgerHold indexing)
+		err = store.Database.TxInsert(tx, leafData.Leaf.Hash, leafContent)
 		if err != nil {
-			return err
+			if err == badgerhold.ErrKeyExists {
+				// Leaf already exists, update it (in case metadata changed)
+				err = store.Database.TxUpdate(tx, leafData.Leaf.Hash, leafContent)
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		// Store ownership record (root + pubkey + leaf hash)
+		ownership := types.DagOwnership{
+			Root:      root,
+			PublicKey: leafData.PublicKey,
+			Signature: leafData.Signature,
+			LeafHash:  leafData.Leaf.Hash,
+		}
+
+		ownershipKey := makeKey("ownership", root, leafData.PublicKey, leafData.Leaf.Hash)
+		err = store.Database.TxInsert(tx, ownershipKey, ownership)
+		if err != nil {
+			if err == badgerhold.ErrKeyExists {
+				err = store.Database.TxUpdate(tx, ownershipKey, ownership)
+			}
+			if err != nil {
+				return err
+			}
 		}
 
 		for key, value := range leafData.Leaf.AdditionalData {
@@ -184,9 +225,16 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 				Value: value,
 			}
 
-			err = store.Database.TxUpsert(tx, makeKey("tags", rootCID.Bytes(), leafCID.Bytes(), key), entry)
+			// Store tags with indexed keys for efficient queries
+			tagKey := makeKey("tags", root, leafData.PublicKey, leafData.Leaf.Hash, key)
+			err = store.Database.TxInsert(tx, tagKey, entry)
 			if err != nil {
-				return err
+				if err == badgerhold.ErrKeyExists {
+					err = store.Database.TxUpdate(tx, tagKey, entry)
+				}
+				if err != nil {
+					return err
+				}
 			}
 		}
 
@@ -219,34 +267,58 @@ func (store *BadgerholdStore) StoreLeaf(root string, leafData *types.DagLeafData
 	})
 }
 
-// RetrieveLeaf retrieves a single DAG leaf from Badgerhold using the binary-safe key format.
+// RetrieveLeaf retrieves a single DAG leaf, optionally filtering by public key.
+// If pubKey is empty and multiple signatures exist, returns the first one found.
 func (store *BadgerholdStore) RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error) {
 	rootCID, err := cid.Decode(root)
 	if err != nil {
 		return nil, fmt.Errorf("invalid root CID: %w", err)
 	}
 
-	leafCID := rootCID
-	if root != hash {
-		leafCID, err = cid.Decode(hash)
-		if err != nil {
-			return nil, fmt.Errorf("invalid leaf CID: %w", err)
-		}
-	}
-
-	key := makeKey("leaf", rootCID.Bytes(), leafCID.Bytes())
-
-	var wrappedLeaf types.WrappedLeaf
-
-	err = store.Database.Get(key, &wrappedLeaf)
+	// Retrieve the leaf content (content-addressed)
+	var leafContent types.LeafContent
+	err = store.Database.Get(hash, &leafContent)
 	if err != nil {
 		if errors.Is(err, badgerhold.ErrNotFound) {
-			return nil, fmt.Errorf("leaf not found for root %s, hash %s", root, hash)
+			return nil, fmt.Errorf("leaf not found for hash %s", hash)
 		}
-		return nil, fmt.Errorf("failed to retrieve leaf: %w", err)
+		return nil, fmt.Errorf("failed to retrieve leaf content: %w", err)
 	}
 
-	data := UnwrapLeaf(&wrappedLeaf)
+	// Find ownership record for this root+hash
+	// Try to find ownership records matching this root and leaf hash
+	var ownerships []types.DagOwnership
+	err = store.Database.Find(&ownerships, badgerhold.Where("Root").Eq(root).And("LeafHash").Eq(hash))
+	if err != nil && err != badgerhold.ErrNotFound {
+		return nil, fmt.Errorf("failed to query ownership: %w", err)
+	}
+
+	if len(ownerships) == 0 {
+		return nil, fmt.Errorf("no ownership record found for root %s, hash %s", root, hash)
+	}
+
+	// Use the first ownership record (fallback behavior when pubKey not specified)
+	ownership := ownerships[0]
+
+	// Construct DagLeafData
+	data := &types.DagLeafData{
+		PublicKey: ownership.PublicKey,
+		Signature: ownership.Signature,
+		Leaf: merkle_dag.DagLeaf{
+			Hash:              leafContent.Hash,
+			ItemName:          leafContent.ItemName,
+			Type:              leafContent.Type,
+			ContentHash:       leafContent.ContentHash,
+			ClassicMerkleRoot: leafContent.ClassicMerkleRoot,
+			CurrentLinkCount:  leafContent.CurrentLinkCount,
+			LeafCount:         leafContent.LeafCount,
+			ContentSize:       leafContent.ContentSize,
+			DagSize:           leafContent.DagSize,
+			Links:             leafContent.Links,
+			ParentHash:        leafContent.ParentHash,
+			AdditionalData:    leafContent.AdditionalData,
+		},
+	}
 
 	if includeContent && data.Leaf.ContentHash != nil {
 		content, err := store.RetrieveContent(rootCID, data.Leaf.ContentHash)
@@ -260,11 +332,9 @@ func (store *BadgerholdStore) RetrieveLeaf(root string, hash string, includeCont
 }
 
 func (store *BadgerholdStore) QueryDag(filter lib_types.QueryFilter) ([]string, error) {
-	var results []types.WrappedLeaf
-
-	// Start query with a dummy condition
-	query := badgerhold.Where("Hash").Ne("") // Ensures chaining works
-	first := true
+	var ownerships []types.DagOwnership
+	var query *badgerhold.Query
+	hasFilter := false
 
 	// Add filtering by PublicKey
 	if len(filter.PubKeys) > 0 {
@@ -272,74 +342,91 @@ func (store *BadgerholdStore) QueryDag(filter lib_types.QueryFilter) ([]string, 
 		for i, pubKey := range filter.PubKeys {
 			pubKeysAsInterface[i] = pubKey
 		}
-
-		if first {
-			query = badgerhold.Where("PublicKey").In(pubKeysAsInterface...)
-			first = false
-		} else {
-			query = query.And("PublicKey").In(pubKeysAsInterface...)
-		}
+		query = badgerhold.Where("PublicKey").In(pubKeysAsInterface...)
+		hasFilter = true
 	}
 
-	// Add filtering by ItemName
-	if len(filter.Names) > 0 {
-		namesAsInterface := make([]interface{}, len(filter.Names))
-		for i, name := range filter.Names {
-			namesAsInterface[i] = name
-		}
-
-		if first {
-			query = badgerhold.Where("ItemName").In(namesAsInterface...)
-			first = false
-		} else {
-			query = query.And("ItemName").In(namesAsInterface...)
-		}
+	// If no pubkey filter, get all ownership records
+	if !hasFilter {
+		query = badgerhold.Where("Root").Ne("")
 	}
 
-	// Execute the primary query
-	err := store.Database.Find(&results, query)
+	// Execute ownership query
+	err := store.Database.Find(&ownerships, query)
 	if err != nil && err != badgerhold.ErrNotFound {
-		return nil, fmt.Errorf("failed to query WrappedLeaf: %w", err)
+		return nil, fmt.Errorf("failed to query ownership records: %w", err)
 	}
 
-	// Extract hashes from primary results
-	hashSet := make(map[string]struct{})
-	for _, leaf := range results {
-		hashSet[leaf.Hash] = struct{}{}
+	// Get unique leaf hashes from ownership records
+	leafHashes := make(map[string]struct{})
+	for _, ownership := range ownerships {
+		leafHashes[ownership.LeafHash] = struct{}{}
 	}
 
-	var entries []types.AdditionalDataEntry
-	err = store.Database.Find(&entries, badgerhold.Where("Key").Ne(""))
-	if err != nil {
-		return nil, err
+	// Now filter by ItemName if needed (requires querying LeafContent)
+	if len(filter.Names) > 0 {
+		nameFilter := make(map[string]bool)
+		for _, name := range filter.Names {
+			nameFilter[name] = true
+		}
+
+		filteredHashes := make(map[string]struct{})
+		for hash := range leafHashes {
+			var leafContent types.LeafContent
+			err := store.Database.Get(hash, &leafContent)
+			if err != nil {
+				continue // Skip if not found
+			}
+
+			if nameFilter[leafContent.ItemName] {
+				filteredHashes[hash] = struct{}{}
+			}
+		}
+		leafHashes = filteredHashes
 	}
 
-	// If we have tag filters, run a secondary query to filter based on tags
+	// If we have tag filters, apply them
 	if len(filter.Tags) > 0 {
+		tagMatchMap := make(map[string]int) // hash -> count of matching tags
+		requiredMatches := len(filter.Tags)
+
 		for tagKey, tagValue := range filter.Tags {
 			var tagEntries []types.AdditionalDataEntry
 
+			// Query tags using indexed fields (Key and Value)
 			err := store.Database.Find(&tagEntries, badgerhold.Where("Key").Eq(tagKey).And("Value").Eq(tagValue))
 			if err != nil && err != badgerhold.ErrNotFound {
 				return nil, fmt.Errorf("failed to query AdditionalDataEntry for key=%s, value=%s: %w", tagKey, tagValue, err)
 			}
 
-			// Keep only hashes that match the tag query
-			tempHashSet := make(map[string]struct{})
+			// Count matching tags for each hash
 			for _, entry := range tagEntries {
-				// Convert entry.Hash ([]byte) to string for map lookup
-				hashStr := string(entry.Hash)
-				if _, exists := hashSet[hashStr]; exists { // Keep only those already in our result set
-					tempHashSet[hashStr] = struct{}{}
+				hashCID, err := cid.Cast(entry.Hash)
+				if err != nil {
+					continue // Skip invalid hashes
+				}
+				hashStr := hashCID.String()
+
+				// Only count if this hash is in our result set
+				if _, inSet := leafHashes[hashStr]; inSet {
+					tagMatchMap[hashStr]++
 				}
 			}
-			hashSet = tempHashSet // Update result set to only include tag-matching hashes
 		}
+
+		// Keep only hashes that matched ALL required tags
+		filteredHashes := make(map[string]struct{})
+		for hash, count := range tagMatchMap {
+			if count == requiredMatches {
+				filteredHashes[hash] = struct{}{}
+			}
+		}
+		leafHashes = filteredHashes
 	}
 
 	// Convert hashSet to a slice of strings
-	hashes := make([]string, 0, len(hashSet))
-	for hash := range hashSet {
+	hashes := make([]string, 0, len(leafHashes))
+	for hash := range leafHashes {
 		hashes = append(hashes, hash)
 	}
 

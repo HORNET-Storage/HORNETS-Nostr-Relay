@@ -8,7 +8,6 @@ import (
 
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/fiber/v2"
-	"github.com/nbd-wtf/go-nostr"
 	"github.com/spf13/viper"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
@@ -80,7 +79,7 @@ func UploadRelayIcon(c *fiber.Ctx, store stores.Store) error {
 
 	logging.Infof("Processing relay icon upload - Hash: %s, Type: %s, Size: %d", encodedHash, mtype.String(), len(data))
 
-	// Get relay private key for creating Kind 117 event
+	// Get relay private key for signing
 	serializedPrivateKey := viper.GetString("relay.private_key")
 	if len(serializedPrivateKey) <= 0 {
 		logging.Error("No private key found in configuration")
@@ -89,7 +88,7 @@ func UploadRelayIcon(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	privateKey, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
+	_, publicKey, err := signing.DeserializePrivateKey(serializedPrivateKey)
 	if err != nil {
 		logging.Infof("Error deserializing private key: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -97,36 +96,7 @@ func UploadRelayIcon(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	// Create Kind 117 event for the relay icon
 	publicKeyHex := hex.EncodeToString(publicKey.SerializeCompressed())
-	event := &nostr.Event{
-		Kind:      117,
-		PubKey:    publicKeyHex,
-		CreatedAt: nostr.Now(),
-		Tags: nostr.Tags{
-			{"blossom_hash", encodedHash},
-			{"name", "relay-icon"},
-			{"type", mtype.String()},
-			{"size", fmt.Sprintf("%d", len(data))},
-		},
-		Content: "Relay icon uploaded via admin panel",
-	}
-
-	// Sign the event
-	if err := event.Sign(hex.EncodeToString(privateKey.Serialize())); err != nil {
-		logging.Infof("Error signing Kind 117 event: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to create upload authorization",
-		})
-	}
-
-	// Store the Kind 117 event
-	if err := store.StoreEvent(event); err != nil {
-		logging.Infof("Error storing Kind 117 event: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to store upload authorization",
-		})
-	}
 
 	// Store the blob in Blossom
 	if err := store.StoreBlob(data, checkHash[:], publicKeyHex); err != nil {

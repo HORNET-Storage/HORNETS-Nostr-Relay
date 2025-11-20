@@ -597,7 +597,7 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
-		117, 1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
+		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
 		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds
 		10411,        // Relay info kind (NO 10011 or 10022 handlers)
@@ -709,7 +709,6 @@ func setDefaults() {
 		"1063": "94", // File metadata
 
 		// Custom HORNETS NIPs
-		"117":   "888", // Blossom blob
 		"10411": "888", // Subscription info
 		"11888": "888", // Custom HORNETS protocol
 		"11011": "888", // Custom HORNETS

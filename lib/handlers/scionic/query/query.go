@@ -27,7 +27,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 
 		message, err := lib_stream.WaitForAdvancedQueryMessage(libp2pStream)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", nil)
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", err)
 
 			stream.Close()
 			return
@@ -35,7 +35,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 
 		hashes, err := store.QueryDag(message.Filter)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to query database", nil)
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to query database", err)
 
 			stream.Close()
 			return
@@ -48,7 +48,7 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 		}
 
 		if err := lib_stream.WriteMessageToStream(libp2pStream, response); err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to encode response", nil)
+			lib_stream.WriteErrorToStream(libp2pStream, "Failed to encode response", err)
 
 			stream.Close()
 			return

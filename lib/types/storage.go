@@ -7,10 +7,36 @@ import (
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 )
 
-// WrappedLeaf represents a leaf in the Merkle DAG structure
+// LeafContent represents the content-addressed leaf data (stored once per unique hash)
+type LeafContent struct {
+	Hash              string `badgerhold:"index"`
+	ItemName          string `badgerhold:"index"`
+	Type              merkle_dag.LeafType
+	ContentHash       []byte
+	ClassicMerkleRoot []byte
+	CurrentLinkCount  int
+	LeafCount         int
+	ContentSize       int64
+	DagSize           int64
+	Links             []string
+	ParentHash        string
+	AdditionalData    map[string]string
+}
+
+// DagOwnership represents ownership/signature for a leaf within a DAG (indexed for queries)
+type DagOwnership struct {
+	Root      string `badgerhold:"index"` // Root DAG hash
+	PublicKey string `badgerhold:"index"` // Who signed this
+	Signature string
+	LeafHash  string `badgerhold:"index"` // Which leaf this ownership record is for
+}
+
+// WrappedLeaf represents a leaf in the Merkle DAG structure (backward compatibility)
+// This combines LeafContent + DagOwnership for convenience
 type WrappedLeaf struct {
 	PublicKey         string `badgerhold:"index"`
 	Signature         string
+	Root              string `badgerhold:"index"` // Root DAG hash for efficient querying
 	Hash              string `badgerhold:"index"`
 	ItemName          string `badgerhold:"index"`
 	Type              merkle_dag.LeafType
@@ -29,7 +55,7 @@ type WrappedLeaf struct {
 type AdditionalDataEntry struct {
 	Hash  []byte
 	Key   string `badgerhold:"index"`
-	Value string
+	Value string `badgerhold:"index"`
 }
 
 // DagLeafData represents DAG leaf data with signature

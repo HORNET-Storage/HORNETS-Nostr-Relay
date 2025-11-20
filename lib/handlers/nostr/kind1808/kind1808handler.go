@@ -1,9 +1,12 @@
 package kind1808
 
 import (
+	"strings"
+
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/sync"
+	"github.com/gabriel-vasile/mimetype"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -38,15 +41,25 @@ func BuildKind1808Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			return
 		}
 
-		// Validate audio note structure
+		// Validate audio note structure and extract blossom information
 		hasAudioURL := false
 		hasDuration := false
+		var blossomHash string
+		var blossomMimeType string
+		hasBlossomTag := false
+
 		for _, tag := range env.Event.Tags {
 			if tag[0] == "url" && len(tag) >= 2 {
 				hasAudioURL = true
 			}
 			if tag[0] == "duration" && len(tag) >= 2 {
 				hasDuration = true
+			}
+			// Blossom tag format: ["blossom", "hash", "mime/type"]
+			if tag[0] == "blossom" && len(tag) >= 3 {
+				hasBlossomTag = true
+				blossomHash = tag[1]
+				blossomMimeType = tag[2]
 			}
 		}
 
@@ -59,6 +72,40 @@ func BuildKind1808Handler(store stores.Store) func(read lib_nostr.KindReader, wr
 			write("NOTICE", "Audio note must have a 'duration' tag")
 			return
 		}
+
+		if !hasBlossomTag {
+			write("NOTICE", "Audio note must have a 'blossom' tag with hash and mime type")
+			return
+		}
+
+		// Fetch the blob from storage to validate it exists and check its mime type
+		blobData, err := store.GetBlob(blossomHash)
+		if err != nil {
+			write("NOTICE", "Blossom blob not found in storage. Upload the audio file first.")
+			logging.Infof("Failed to retrieve blob %s: %v", blossomHash, err)
+			return
+		}
+
+		// Detect actual mime type from blob data
+		actualMimeType := mimetype.Detect(blobData)
+		actualMimeTypeStr := actualMimeType.String()
+
+		// Only accept audio/mp4 format
+		if !strings.HasPrefix(actualMimeTypeStr, "audio/mp4") {
+			write("NOTICE", "Invalid audio format. Only audio/mp4 (M4A/AAC) is currently accepted")
+			logging.Infof("Rejected audio note with invalid mime type: %s (expected audio/mp4)", actualMimeTypeStr)
+			return
+		}
+
+		// Verify the mime type in the tag matches the actual detected mime type
+		tagMimeBase := strings.Split(blossomMimeType, ";")[0]
+		if !strings.HasPrefix(actualMimeTypeStr, tagMimeBase) {
+			write("NOTICE", "Mime type mismatch between tag and actual blob content")
+			logging.Infof("Rejected audio note: tag claims '%s' but blob is '%s'", blossomMimeType, actualMimeTypeStr)
+			return
+		}
+
+		logging.Infof("Validated audio blob: hash=%s, mime=%s, size=%d bytes", blossomHash, actualMimeTypeStr, len(blobData))
 
 		// Store the new event
 		if err := store.StoreEvent(&env.Event); err != nil {

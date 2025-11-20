@@ -3,15 +3,14 @@ package blossom
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/web/middleware"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/fiber/v2"
-	"github.com/nbd-wtf/go-nostr"
 )
 
 type Server struct {
@@ -70,78 +69,24 @@ func (s *Server) uploadBlob(c *fiber.Ctx) error {
 
 	mtype := mimetype.Detect(data)
 
+	// Check if the MIME type is allowed by relay configuration
+	if !scionic.IsMimeTypePermitted(mtype.String()) {
+		logging.Infof("Blossom upload rejected: MIME type not permitted - Author: %s, Type: %s", pubkey, mtype.String())
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"message": "MIME type is not allowed to be stored by this relay (" + mtype.String() + ")",
+		})
+	}
+
 	checkHash := sha256.Sum256(data)
 	encodedHash := hex.EncodeToString(checkHash[:])
 
-	// WORKAROUND: Use broad search instead of tag filtering due to relay tag indexing issues
-	// The relay's tag indexing system doesn't work for blossom_hash tags, so we search broadly
-	// and manually filter the results
-	broadFilter := nostr.Filter{
-		Kinds:   []int{117},
-		Authors: []string{pubkey},
-	}
+	// Use hash as filename for content-addressed storage
+	name := encodedHash
 
-	logging.Infof("Blossom upload: Searching for kind 117 events (broad search) - Author: %s, Hash: %s", pubkey, encodedHash)
-
-	// Get all kind 117 events from this author
-	allEvents, err := s.storage.QueryEvents(broadFilter)
-	if err != nil {
-		logging.Infof("Blossom upload: Error querying events: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to query events"})
-	}
-
-	logging.Infof("Blossom upload: Found %d total kind 117 events from author, filtering for hash %s", len(allEvents), encodedHash)
-
-	// Manually filter for events with matching blossom_hash
-	var matchingEvents []*nostr.Event
-	for _, event := range allEvents {
-		for _, tag := range event.Tags {
-			if len(tag) >= 2 && tag[0] == "blossom_hash" && tag[1] == encodedHash {
-				matchingEvents = append(matchingEvents, event)
-				logging.Infof("Blossom upload: Found matching event - ID: %s, Hash: %s", event.ID, tag[1])
-				break
-			}
-		}
-	}
-
-	// Determine file name based on whether Kind 117 event exists
-	var name string
-
-	if len(matchingEvents) == 0 {
-		// No Kind 117 event found - proceed with upload anyway
-		logging.Infof("Blossom upload: No kind 117 event found for hash %s from author %s, proceeding without metadata", encodedHash, pubkey)
-		name = encodedHash // Use hash as filename when no Kind 117 event exists
-	} else {
-		// Kind 117 event found - validate and extract metadata
-		event := matchingEvents[0]
-
-		fileHash := event.Tags.GetFirst([]string{"blossom_hash"})
-		if fileHash == nil {
-			// This is theoretically impossible but rather have it than not
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "matching event blossom_hash mismatch"})
-		}
-
-		// Check the submitted hash matches the data being submitted
-		if encodedHash != fileHash.Value() {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"message": "hash mismatch",
-				"detail":  fmt.Sprintf("calculated hash %s does not match event hash %s", encodedHash, fileHash.Value()),
-			})
-		}
-
-		// Extract the file name from the kind 117 file information event
-		nameTag := event.Tags.GetFirst([]string{"name"})
-		if nameTag == nil {
-			name = encodedHash // Fallback to hash if no name tag
-		} else {
-			name = nameTag.Value()
-		}
-
-		logging.Infof("Blossom upload: Using metadata from kind 117 event - Name: %s, Hash: %s", name, encodedHash)
-	}
+	logging.Infof("Blossom upload: Storing blob - Author: %s, Hash: %s", pubkey, encodedHash)
 
 	// Store the blob
-	err = s.storage.StoreBlob(data, checkHash[:], pubkey)
+	err := s.storage.StoreBlob(data, checkHash[:], pubkey)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to store blob"})
 	}

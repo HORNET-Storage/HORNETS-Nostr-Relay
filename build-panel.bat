@@ -47,9 +47,9 @@ if errorlevel 1 (
 REM Step 6: Return to root and copy build output
 popd
 echo Copying build files to web directory...
-rmdir /S /Q web 2>nul
-mkdir web
-xcopy /E /I /Y panel-source\build\* web\ || echo Warning: Copy operation may have failed.
+rmdir /S /Q ..\..\..\web 2>nul
+mkdir ..\..\..\web
+xcopy /E /I /Y panel-source\build\* ..\..\..\web\ || echo Warning: Copy operation may have failed.
 
 REM Final message
 echo.

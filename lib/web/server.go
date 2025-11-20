@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -33,7 +34,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/web/services"
 )
 
-func StartServer(store stores.Store) error {
+func StartServer(store stores.Store, ctx context.Context) error {
 	logging.Info("Starting web server", map[string]interface{}{
 		"port": config.GetPort("web"),
 		"demo": config.IsEnabled("demo"),
@@ -456,7 +457,7 @@ func StartServer(store stores.Store) error {
 	// ================================
 	// BACKGROUND SERVICES
 	// ================================
-	go services.PullBitcoinPrice(store)
+	go services.PullBitcoinPrice(store, ctx)
 
 	// Start the server
 	port := config.GetPort("web")

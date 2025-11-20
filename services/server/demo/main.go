@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -79,7 +80,9 @@ func main() {
 	}
 
 	logging.Info("Starting demo web server...")
-	err = web.StartServer(store)
+
+	ctx := context.Background()
+	err = web.StartServer(store, ctx)
 
 	if err != nil {
 		logging.Fatalf("Fatal error occurred in demo web server: %v", err)

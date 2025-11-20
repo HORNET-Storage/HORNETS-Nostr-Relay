@@ -23,9 +23,9 @@ type NostrEvent struct {
 
 // TagEntry represents a tag entry for indexing
 type TagEntry struct {
-	EventID  string
-	TagName  string
-	TagValue string
+	EventID  string `badgerhold:"index"`
+	TagName  string `badgerhold:"index"`
+	TagValue string `badgerhold:"index"`
 }
 
 // Kind represents event kind metadata

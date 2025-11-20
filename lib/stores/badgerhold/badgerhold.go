@@ -5,16 +5,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/nbd-wtf/go-nostr"
@@ -42,10 +42,10 @@ type BadgerholdStore struct {
 	DatabasePath string
 	Database     *badgerhold.Store
 
-	TempDatabasePath string
-	TempDatabase     *badgerhold.Store
-
 	StatsDatabase statistics.StatisticsStore
+
+	closed bool
+	mu     sync.RWMutex
 }
 
 func cborEncode(value interface{}) ([]byte, error) {
@@ -66,7 +66,6 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.Ctx = context.Background()
 
 	store.DatabasePath = basepath
-	store.TempDatabasePath = filepath.Join(filepath.Dir(basepath), "temp")
 
 	options := badgerhold.DefaultOptions
 	options.Encoder = cborEncode
@@ -77,14 +76,6 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.Database, err = badgerhold.Open(options)
 	if err != nil {
 		logging.Fatalf("Failed to open main database: %v", err)
-	}
-
-	options.Dir = store.TempDatabasePath
-	options.ValueDir = store.TempDatabasePath
-
-	store.TempDatabase, err = badgerhold.Open(options)
-	if err != nil {
-		logging.Fatalf("Failed to open temp database: %v", err)
 	}
 
 	// Check if a custom statistics database path was provided
@@ -105,37 +96,79 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}
 
+	// Start background garbage collection for Badger value logs
+	// This prevents disk space from growing indefinitely due to old/deleted values
+	go runBadgerGC(store.Database.Badger(), store.Ctx, "main", 10*time.Minute)
+
 	return store, nil
 }
 
 func (store *BadgerholdStore) Cleanup() error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.closed {
+		return nil
+	}
+	store.closed = true
+
 	var result error
 
 	result = multierr.Append(result, store.Database.Close())
-	result = multierr.Append(result, store.TempDatabase.Close())
 	result = multierr.Append(result, store.StatsDatabase.Close())
-	result = multierr.Append(result, os.RemoveAll(store.TempDatabasePath))
 
 	return result
+}
+
+// IsClosed returns true if the store has been closed
+func (store *BadgerholdStore) IsClosed() bool {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return store.closed
+}
+
+// runBadgerGC runs Badger's value log garbage collection periodically.
+func runBadgerGC(db *badger.DB, ctx context.Context, name string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	logging.Infof("Started Badger value log GC for %s database (interval: %v)", name, interval)
+
+	for {
+		select {
+		case <-ticker.C:
+			// Run GC with 0.5 discard ratio (recommended by Badger team)
+			// This means: compact vlog files that are >50% garbage
+			err := db.RunValueLogGC(0.5)
+			if err == nil {
+				logging.Infof("Badger GC completed successfully for %s database", name)
+			} else if err == badger.ErrNoRewrite {
+				// No files needed compaction - this is normal and fine
+				logging.Debugf("Badger GC: No rewrite needed for %s database", name)
+			} else {
+				logging.Infof("Badger GC error for %s database: %v", name, err)
+			}
+		case <-ctx.Done():
+			logging.Infof("Stopping Badger GC for %s database", name)
+			return
+		}
+	}
 }
 
 func (store *BadgerholdStore) GetStatsStore() statistics.StatisticsStore {
 	return store.StatsDatabase
 }
 
-func (store *BadgerholdStore) GetDatabase(temp bool) *badgerhold.Store {
-	if temp {
-		return store.TempDatabase
-	} else {
-		return store.Database
-	}
-}
-
 func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
+	// Check if store is closed before attempting database operations
+	if store.IsClosed() {
+		return nil, fmt.Errorf("database is closed")
+	}
+
 	var results []types.NostrEvent
 
 	jd, _ := json.Marshal(filter)
-	logging.Infof(string(jd))
+	logging.Infof("%s", string(jd))
 
 	query := badgerhold.Where("ID").Ne("")
 	first := true
@@ -182,11 +215,6 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 
 		for tagName, tagValues := range filter.Tags {
 			var tagEntries []types.TagEntry
-
-			for _, v := range tagValues {
-				logging.Infof(v)
-			}
-			logging.Infof("")
 
 			err := store.Database.Find(&tagEntries, badgerhold.Where("TagName").Eq(strings.ReplaceAll(tagName, "#", "")).And("TagValue").In(toInterfaceSlice(tagValues)...))
 			if err != nil && err != badgerhold.ErrNotFound {
@@ -240,26 +268,13 @@ func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, 
 		events = append(events, UnwrapEvent(&event))
 	}
 
-	// logging.Infof("First check")
-	// for _, ev := range events {
-	// 	logging.Infof("Found event of kind: %d\n", ev.Kind)
-	// }
-
-	// Step 8: Apply additional filters (search term, etc.)
 	filteredEvents := postFilterEvents(events, filter)
 
-	// Step 9: Sort events (newest first)
 	sortEventsByCreatedAt(filteredEvents)
 
-	// Step 10: Apply limit if necessary
 	if filter.Limit > 0 && len(filteredEvents) > filter.Limit {
 		filteredEvents = filteredEvents[:filter.Limit]
 	}
-
-	// logging.Infof("Last check")
-	// for _, ev := range events {
-	// 	logging.Infof("Found event of kind: %d\n", ev.Kind)
-	// }
 
 	return filteredEvents, nil
 }

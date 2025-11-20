@@ -26,6 +26,9 @@ func handleCloseMessage(c *websocket.Conn, env *nostr.CloseEnvelope) {
 	responseMsg := nostr.ClosedEnvelope{SubscriptionID: subscriptionID, Reason: "Subscription closed successfully."}
 
 	if err := sendWebSocketMessage(c, responseMsg); err != nil {
-		logging.Infof("Error sending 'CLOSED' envelope over WebSocket: %v", err)
+		// Suppress logging for connection closed errors
+		if !isConnectionClosedError(err) {
+			logging.Infof("Error sending 'CLOSED' envelope over WebSocket: %v", err)
+		}
 	}
 }
