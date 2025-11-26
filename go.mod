@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree/v2 v2.0.4
-	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20251031063431-80f6e01a3c01
+	github.com/HORNET-Storage/go-hornet-storage-lib v0.0.0-20251120114039-371763572c21
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/torrent v1.48.1-0.20230103142631-c20f73d53e9f
 	github.com/dgraph-io/badger/v4 v4.1.0
@@ -21,6 +21,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.12.4
 	github.com/nbd-wtf/go-nostr v0.32.0
 	github.com/puzpuzpuz/xsync/v3 v3.1.0
+	github.com/sideshow/apns2 v0.25.0
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.9.0
 	github.com/timshannon/badgerhold/v4 v4.0.3

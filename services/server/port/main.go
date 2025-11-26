@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -47,7 +49,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1063"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind117"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16630"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1808"
@@ -490,7 +491,6 @@ func main() {
 	nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
 	nostr.RegisterHandler("kind/19842", kind19842.BuildKind19842Handler(store))
 	nostr.RegisterHandler("kind/19843", kind19843.BuildKind19843Handler(store))
-	nostr.RegisterHandler("kind/117", kind117.BuildKind117Handler(store))
 	nostr.RegisterHandler("kind/1063", kind1063.BuildKind1063Handler(store))
 
 	// Always register universal handler for unregistered kinds
@@ -548,7 +548,7 @@ func main() {
 		logging.Info("Starting with web server enabled")
 
 		go func() {
-			err = web.StartServer(store)
+			err = web.StartServer(store, ctx)
 
 			if err != nil {
 				logging.Info("Fatal error occurred in web server")
@@ -559,14 +559,15 @@ func main() {
 	}
 
 	// Nostr web sockets
+	var wsApp *fiber.App
 	if config.IsEnabled("nostr") {
 		wg.Add(1)
 
 		logging.Info("Starting with legacy nostr proxy web server enabled")
 
 		go func() {
-			app := ws.BuildServer(store)
-			err := ws.StartServer(app)
+			wsApp = ws.BuildServer(store)
+			err := ws.StartServer(wsApp)
 
 			if err != nil {
 				logging.Info("Fatal error occurred in web server")
@@ -584,10 +585,15 @@ func main() {
 		<-sigs
 		logging.Info("Received shutdown signal, cleaning up...")
 
-		// Cancel context to stop background operations
+		if wsApp != nil {
+			logging.Info("Shutting down WebSocket server...")
+			if err := wsApp.Shutdown(); err != nil {
+				logging.Errorf("Error shutting down WebSocket server: %v", err)
+			}
+		}
+
 		cancel()
 
-		// Wait for background goroutines to finish with timeout
 		done := make(chan struct{})
 		go func() {
 			bgWg.Wait()
@@ -601,12 +607,14 @@ func main() {
 			logging.Info("Timeout waiting for background operations, proceeding with cleanup")
 		}
 
-		// Cleanup push notification service
 		push.StopGlobalPushService()
 
-		// Now safe to cleanup database
-		store.Cleanup()
+		logging.Info("Closing database...")
+		if err := store.Cleanup(); err != nil {
+			logging.Errorf("Error during database cleanup: %v", err)
+		}
 
+		logging.Info("Shutdown complete")
 		os.Exit(0)
 	}()
 

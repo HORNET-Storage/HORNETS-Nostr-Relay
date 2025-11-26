@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/gofiber/contrib/websocket"
@@ -17,10 +18,27 @@ func sendWebSocketMessage(ws *websocket.Conn, msg interface{}) error {
 	}
 	// logging.Infof("Websocket message: %s", marshalledMsg)
 	if err := ws.WriteJSON(msg); err != nil {
-		logging.Infof("Error sending message over WebSocket: %v", err)
+		// Only log the first error, then suppress subsequent errors for this connection
+		// This prevents log spam when clients disconnect with large result sets pending
+		if !isConnectionClosedError(err) {
+			logging.Infof("Error sending message over WebSocket: %v", err)
+		}
 		return err
 	}
 	return nil
+}
+
+// isConnectionClosedError checks if the error is due to a closed connection
+func isConnectionClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	// Common connection closed error patterns
+	return strings.Contains(errMsg, "connection was aborted") ||
+		strings.Contains(errMsg, "forcibly closed") ||
+		strings.Contains(errMsg, "broken pipe") ||
+		strings.Contains(errMsg, "connection reset")
 }
 
 // Example of how you might parse and handle incoming messages to determine
