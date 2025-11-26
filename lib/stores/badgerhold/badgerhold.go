@@ -140,12 +140,13 @@ func runBadgerGC(db *badger.DB, ctx context.Context, name string, interval time.
 			// Run GC with 0.5 discard ratio (recommended by Badger team)
 			// This means: compact vlog files that are >50% garbage
 			err := db.RunValueLogGC(0.5)
-			if err == nil {
+			switch err {
+			case nil:
 				logging.Infof("Badger GC completed successfully for %s database", name)
-			} else if err == badger.ErrNoRewrite {
+			case badger.ErrNoRewrite:
 				// No files needed compaction - this is normal and fine
 				logging.Debugf("Badger GC: No rewrite needed for %s database", name)
-			} else {
+			default:
 				logging.Infof("Badger GC error for %s database: %v", name, err)
 			}
 		case <-ctx.Done():
