@@ -5,7 +5,30 @@ import (
 	"time"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
+	"github.com/fxamacker/cbor/v2"
 )
+
+// HashBytes is a []byte type that can unmarshal from both CBOR bytes and strings
+// for backwards compatibility with old data stored as strings
+type HashBytes []byte
+
+// UnmarshalCBOR implements custom CBOR unmarshaling to handle both string and bytes
+func (h *HashBytes) UnmarshalCBOR(data []byte) error {
+	// Try to unmarshal as bytes first
+	var bytes []byte
+	if err := cbor.Unmarshal(data, &bytes); err == nil {
+		*h = bytes
+		return nil
+	}
+
+	// Fall back to string (for backwards compatibility)
+	var str string
+	if err := cbor.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	*h = []byte(str)
+	return nil
+}
 
 // LeafContent represents the content-addressed leaf data (stored once per unique hash)
 type LeafContent struct {
@@ -53,7 +76,7 @@ type WrappedLeaf struct {
 
 // AdditionalDataEntry represents additional metadata for DAG entries
 type AdditionalDataEntry struct {
-	Hash  []byte
+	Hash  HashBytes
 	Key   string `badgerhold:"index"`
 	Value string `badgerhold:"index"`
 }
