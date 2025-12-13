@@ -10,12 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/services/server/demo/demodata"
 )
 
 func main() {
+	if err := config.InitConfig(); err != nil {
+		logging.Fatalf("Failed to initialize config: %v", err)
+	}
+
 	dbPath := "./data/store"
 
 	dbPathPtr := flag.String("db", dbPath, "Path to SQLite database (same as used by the relay)")
