@@ -73,6 +73,35 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	options.Dir = store.DatabasePath
 	options.ValueDir = store.DatabasePath
 
+	// Memory and disk optimization settings for BadgerDB.
+	// These prevent excessive RAM and disk usage during heavy operations.
+	//
+	// Memory estimates for concurrent operations:
+	// - Block cache (256 MB): Shared across all operations, speeds up reads
+	// - Index cache (128 MB): Keeps block indices in memory for fast lookups
+	// - MemTables (3 x 64 MB = 192 MB): Write buffers before flushing to disk
+	// - Total baseline: ~576 MB, scales well with 5-10 concurrent uploads/downloads
+	//
+	// Disk space optimization:
+	// - ValueLogFileSize: 256MB is a good balance (not too many files, not too large)
+	// - NumVersionsToKeep: Only keep latest version (we don't need history)
+	// - ValueThreshold: 32KB threshold - small metadata stays in LSM, large content goes to vlog
+	// - CompactL0OnClose: Compact on close to reduce startup time
+	//
+	// Note on GC: BadgerDB requires periodic GC via RunValueLogGC(). We run this:
+	// - Every 5 minutes in background
+	// - The 0.5 discard ratio means files with >50% garbage get rewritten
+	// This is normal Badger usage - GC is expected to be called periodically.
+	options.Options = options.Options.
+		WithBlockCacheSize(256 << 20).   // 256 MB block cache (good for reads)
+		WithIndexCacheSize(128 << 20).   // 128 MB index cache (caps memory)
+		WithMemTableSize(64 << 20).      // 64 MB memtable size
+		WithNumMemtables(3).             // 3 memtables
+		WithValueLogFileSize(256 << 20). // 256 MB vlog files (balance between GC granularity and file count)
+		WithNumVersionsToKeep(1).        // Only keep 1 version (saves disk space)
+		WithCompactL0OnClose(true).      // Compact level 0 on close
+		WithValueThreshold(32 << 10)     // 32 KB threshold (small metadata in LSM, content in vlog)
+
 	store.Database, err = badgerhold.Open(options)
 	if err != nil {
 		logging.Fatalf("Failed to open main database: %v", err)
@@ -127,30 +156,113 @@ func (store *BadgerholdStore) IsClosed() bool {
 	return store.closed
 }
 
+// RunGC runs garbage collection on demand. This should be called during bulk
+// write operations to prevent disk space from growing unbounded.
+// It runs with aggressive settings (lower discard ratio) to reclaim space quickly.
+// Returns the number of vlog files compacted.
+func (store *BadgerholdStore) RunGC() int {
+	if store.IsClosed() {
+		return 0
+	}
+
+	db := store.Database.Badger()
+	gcCount := 0
+
+	// Use aggressive discard ratio of 0.3 (compact files with >30% garbage)
+	// This is more aggressive than the background GC to handle bulk writes
+	for {
+		err := db.RunValueLogGC(0.3)
+		if err == badger.ErrNoRewrite {
+			break
+		}
+		if err != nil {
+			logging.Infof("GC error during bulk operation: %v", err)
+			break
+		}
+		gcCount++
+		// Allow more iterations during bulk operations
+		if gcCount >= 20 {
+			logging.Infof("GC: Stopped after %d iterations during bulk operation", gcCount)
+			break
+		}
+	}
+
+	return gcCount
+}
+
+// Compact performs a full database compaction using Badger's Flatten operation.
+// This should be called when the database has significant bloat from duplicate writes.
+// WARNING: This is an expensive operation that may take a long time for large databases.
+// Ideally no writes should be happening during this operation.
+// The workers parameter controls parallelism (recommended: number of CPU cores).
+func (store *BadgerholdStore) Compact(workers int) error {
+	if store.IsClosed() {
+		return fmt.Errorf("database is closed")
+	}
+
+	db := store.Database.Badger()
+
+	// Get current database size for logging
+	lsmBefore, vlogBefore := db.Size()
+	logging.Infof("Starting database compaction - LSM: %d MB, VLog: %d MB", lsmBefore/(1024*1024), vlogBefore/(1024*1024))
+
+	// Flatten compacts all levels and rewrites all data, deduplicating
+	// any keys that have multiple versions
+	if workers <= 0 {
+		workers = 4 // Default to 4 workers
+	}
+
+	err := db.Flatten(workers)
+	if err != nil {
+		return fmt.Errorf("flatten failed: %w", err)
+	}
+
+	// Run value log GC aggressively after flatten to reclaim space
+	gcCount := 0
+	for {
+		err := db.RunValueLogGC(0.1) // Very aggressive: compact files with >10% garbage
+		if err == badger.ErrNoRewrite {
+			break
+		}
+		if err != nil {
+			logging.Infof("GC after flatten error: %v", err)
+			break
+		}
+		gcCount++
+		if gcCount >= 100 { // Allow more iterations for cleanup
+			break
+		}
+	}
+
+	lsmAfter, vlogAfter := db.Size()
+	logging.Infof("Compaction complete - LSM: %d MB, VLog: %d MB (GC'd %d vlog files)", lsmAfter/(1024*1024), vlogAfter/(1024*1024), gcCount)
+	logging.Infof("Space reclaimed: %d MB", (vlogBefore-vlogAfter)/(1024*1024))
+
+	return nil
+}
+
+// GetDatabaseSize returns the current LSM and VLog sizes in bytes
+func (store *BadgerholdStore) GetDatabaseSize() (lsm int64, vlog int64) {
+	if store.IsClosed() {
+		return 0, 0
+	}
+	return store.Database.Badger().Size()
+}
+
 // runBadgerGC runs Badger's value log garbage collection periodically.
 func runBadgerGC(db *badger.DB, ctx context.Context, name string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	logging.Infof("Started Badger value log GC for %s database (interval: %v)", name, interval)
-
 	for {
 		select {
 		case <-ticker.C:
-			// Run GC with 0.5 discard ratio (recommended by Badger team)
-			// This means: compact vlog files that are >50% garbage
-			err := db.RunValueLogGC(0.5)
-			switch err {
-			case nil:
-				logging.Infof("Badger GC completed successfully for %s database", name)
-			case badger.ErrNoRewrite:
-				// No files needed compaction - this is normal and fine
-				logging.Debugf("Badger GC: No rewrite needed for %s database", name)
-			default:
-				logging.Infof("Badger GC error for %s database: %v", name, err)
+			for i := 0; i < 10; i++ {
+				if err := db.RunValueLogGC(0.5); err != nil {
+					break
+				}
 			}
 		case <-ctx.Done():
-			logging.Infof("Stopping Badger GC for %s database", name)
 			return
 		}
 	}

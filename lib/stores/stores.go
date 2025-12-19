@@ -30,6 +30,10 @@ type Store interface {
 	DeleteDag(root string) error
 	CacheLabels(dag *merkle_dag.Dag) error
 	RetrieveLabels(root string) (map[string]string, error)
+	CreateDagStoreForRoot(root string, publicKey string, signature string) *merkle_dag.DagStore
+	CreateDagStoreFromExisting(root string) (*merkle_dag.DagStore, error)
+	CacheRelationshipsStreaming(dagStore *merkle_dag.DagStore) error
+	CacheLabelsStreaming(dagStore *merkle_dag.DagStore) error
 
 	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
