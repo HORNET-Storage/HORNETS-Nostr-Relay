@@ -34,6 +34,7 @@ type Store interface {
 	CreateDagStoreFromExisting(root string) (*merkle_dag.DagStore, error)
 	CacheRelationshipsStreaming(dagStore *merkle_dag.DagStore) error
 	CacheLabelsStreaming(dagStore *merkle_dag.DagStore) error
+	RetrieveRelationships(root string) (map[string]string, error)
 
 	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
@@ -157,6 +158,15 @@ func BuildPartialDagFromStore(store Store, root string, leafHashes []string, inc
 		return nil, fmt.Errorf("no leaf hashes provided")
 	}
 
+	// Load the cached relationships map (childHash -> parentHash)
+	relationships, err := store.RetrieveRelationships(root)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve relationships for root %s: %w", root, err)
+	}
+	if relationships == nil {
+		return nil, fmt.Errorf("no relationships cached for root %s", root)
+	}
+
 	partialDag := &merkle_dag.Dag{
 		Leafs: make(map[string]*merkle_dag.DagLeaf),
 		Root:  root,
@@ -189,14 +199,13 @@ func BuildPartialDagFromStore(store Store, root string, leafHashes []string, inc
 			signature = &targetLeafData.Signature
 		}
 
-		// Walk up to root using ParentHash, building verification path
+		// Walk up to root using cached relationships map, building verification path
 		currentHash := requestedHash
-		currentLeafData := targetLeafData
 
 		for currentHash != root {
-			parentHash := currentLeafData.Leaf.ParentHash
-			if parentHash == "" {
-				return nil, fmt.Errorf("leaf %s has no parent hash (broken path to root)", currentHash)
+			parentHash, exists := relationships[currentHash]
+			if !exists || parentHash == "" {
+				return nil, fmt.Errorf("leaf %s has no parent in relationships map (broken path to root)", currentHash)
 			}
 
 			// Retrieve parent if we haven't already
@@ -218,7 +227,6 @@ func BuildPartialDagFromStore(store Store, root string, leafHashes []string, inc
 
 			// Move up the tree
 			currentHash = parentHash
-			currentLeafData = retrievedLeaves[parentHash]
 		}
 	}
 
