@@ -163,8 +163,24 @@ func BuildPartialDagFromStore(store Store, root string, leafHashes []string, inc
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve relationships for root %s: %w", root, err)
 	}
+
+	// If relationships aren't cached, build and cache them via streaming (one leaf at a time)
 	if relationships == nil {
-		return nil, fmt.Errorf("no relationships cached for root %s", root)
+		dagStore, err := store.CreateDagStoreFromExisting(root)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create dag store for root %s: %w", root, err)
+		}
+
+		// CacheRelationshipsStreaming builds index and caches relationships
+		if err := store.CacheRelationshipsStreaming(dagStore); err != nil {
+			return nil, fmt.Errorf("failed to cache relationships for root %s: %w", root, err)
+		}
+
+		// Now retrieve the freshly cached relationships
+		relationships, err = store.RetrieveRelationships(root)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve relationships after caching for root %s: %w", root, err)
+		}
 	}
 
 	partialDag := &merkle_dag.Dag{
