@@ -40,6 +40,7 @@ type Store interface {
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
 	StoreEvent(event *nostr.Event) error
 	DeleteEvent(eventID string) error
+	DeleteEventsByTag(tagName string, tagValue string, beforeTimestamp int64) ([]string, error)
 	QueryBlobs(mimeType string) ([]string, error)
 
 	// Moderation
