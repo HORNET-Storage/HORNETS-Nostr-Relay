@@ -18,6 +18,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
+	badgerhold_store "github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
@@ -108,165 +109,144 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			return
 		}
 
-		dag := &merkle_dag.Dag{
-			Root:  message.Root,
-			Leafs: make(map[string]*merkle_dag.DagLeaf),
-		}
-
-		packet := merkle_dag.BatchedTransmissionPacketFromSerializable(&message.Packet)
-
-		err = dag.ApplyAndVerifyBatchedTransmissionPacket(packet)
-		if err != nil {
-			write(utils.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
-			return
-		}
-
-		if canUploadDag != nil {
-			rootLeaf := packet.GetRootLeaf()
-			if !canUploadDag(rootLeaf, &message.PublicKey, &message.Signature) {
-				write(utils.BuildErrorMessage("Not allowed to upload this", nil))
-				return
-			}
-		}
-
-		// Check to see if any data in the dag is not allowed to be stored by this relay and store them
-		for _, leaf := range packet.Leaves {
-			if leaf.Type == "File" {
-				data, err := dag.GetContentFromLeaf(leaf)
-				if err != nil {
-					write(utils.BuildErrorMessage("Failed to extract content from file leaf", err))
-					return
-				}
-
-				mimeType := mimetype.Detect(data)
-
-				if !utils.IsMimeTypePermitted(mimeType.String()) {
-					write(utils.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", err))
-					return
-				}
-			}
-		}
-
-		serialiedPublicKey, err := signing.SerializePublicKey(publicKey)
+		serializedPublicKey, err := signing.SerializePublicKey(publicKey)
 		if err != nil {
 			write(utils.BuildErrorMessage("Failed to serialize public key", err))
 			return
 		}
 
-		dagData := types.DagData{
-			PublicKey: *serialiedPublicKey,
-			Signature: hex.EncodeToString(signature.Serialize()),
+		handleStreamingUpload(store, read, write, message, *serializedPublicKey, hex.EncodeToString(signature.Serialize()), canUploadDag, handleRecievedDag)
+	}
+
+	return handler
+}
+
+func handleStreamingUpload(
+	store stores.Store,
+	read utils.UploadDagReader,
+	write utils.DagWriter,
+	message *lib_types.UploadMessage,
+	publicKey string,
+	signature string,
+	canUploadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool,
+	handleRecievedDag func(dag *merkle_dag.Dag, pubKey *string),
+) {
+	dagStore := store.CreateDagStoreForRoot(message.Root, publicKey, signature)
+
+	var totalDagSize int64
+	leafCount := 0
+	packetCount := 0
+
+	packet := merkle_dag.BatchedTransmissionPacketFromSerializable(&message.Packet)
+
+	if canUploadDag != nil {
+		rootLeaf := packet.GetRootLeaf()
+		if rootLeaf == nil {
+			write(utils.BuildErrorMessage("First packet must contain root leaf", nil))
+			return
+		}
+		if !canUploadDag(rootLeaf, &message.PublicKey, &message.Signature) {
+			write(utils.BuildErrorMessage("Not allowed to upload this", nil))
+			return
+		}
+	}
+
+	packetCount++
+	if err := processPacketStreaming(dagStore, packet, &totalDagSize, &leafCount, write); err != nil {
+		return
+	}
+
+	if !message.IsFinalPacket {
+		if err := write(lib_stream.BuildResponseMessage(true)); err != nil {
+			write(utils.BuildErrorMessage("Failed to write response to stream", err))
+			return
 		}
 
-		if !message.IsFinalPacket {
-			err = write(lib_stream.BuildResponseMessage(true))
+		for {
+			msg, err := read()
 			if err != nil {
-				write(utils.BuildErrorMessage("Failed to write response to stream", err))
+				store.DeleteDag(message.Root)
+				write(utils.BuildErrorMessage("Failed to recieve upload message in time", nil))
 				return
 			}
 
-			for {
-				message, err := read()
-				if err != nil {
-					write(utils.BuildErrorMessage("Failed to recieve upload message in time", nil))
-					return
-				}
-				packet := merkle_dag.BatchedTransmissionPacketFromSerializable(&message.Packet)
+			pkt := merkle_dag.BatchedTransmissionPacketFromSerializable(&msg.Packet)
+			packetCount++
 
-				err = dag.ApplyAndVerifyBatchedTransmissionPacket(packet)
-				if err != nil {
-					write(utils.BuildErrorMessage(fmt.Sprintf("Failed to verify partial dag with %d leaves", len(dag.Leafs)), err))
-					return
-				}
+			if err := processPacketStreaming(dagStore, pkt, &totalDagSize, &leafCount, write); err != nil {
+				store.DeleteDag(message.Root)
+				return
+			}
 
-				// Check to see if any data in the dag is not allowed to be stored by this relay and store them
-				for _, leaf := range packet.Leaves {
-					if leaf.Type == "File" {
-						data, err := dag.GetContentFromLeaf(leaf)
-						if err != nil {
-							write(utils.BuildErrorMessage("Failed to extract content from file leaf", err))
-							return
-						}
+			if err := write(lib_stream.BuildResponseMessage(true)); err != nil {
+				write(utils.BuildErrorMessage("Failed to write response to stream", err))
+				break
+			}
 
-						mimeType := mimetype.Detect(data)
-
-						if !utils.IsMimeTypePermitted(mimeType.String()) {
-							write(utils.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", err))
-							return
-						}
-					}
-				}
-
-				err = write(lib_stream.BuildResponseMessage(true))
-				if err != nil {
-					write(utils.BuildErrorMessage("Failed to write response to stream", err))
-					break
-				}
-				if message.IsFinalPacket {
-					break
-				}
+			if msg.IsFinalPacket {
+				break
 			}
 		}
+	}
 
-		err = dag.Verify()
-		if err != nil {
-			write(utils.BuildErrorMessage("Failed to verify dag", err))
-			return
-		}
+	if err := dagStore.VerifyStreaming(); err != nil {
+		store.DeleteDag(message.Root)
+		write(utils.BuildErrorMessage("Failed to verify dag", err))
+		return
+	}
 
-		// Recalculate parent hashes to ensure relay can trust them for upward traversal
-		err = dag.IterateDag(func(leaf *merkle_dag.DagLeaf, parent *merkle_dag.DagLeaf) error {
-			if parent != nil {
-				// Set the parent hash for this child
-				leaf.ParentHash = parent.Hash
-			} else {
-				// Root has no parent
-				leaf.ParentHash = ""
-			}
-			return nil
-		})
-		if err != nil {
-			write(utils.BuildErrorMessage("Failed to recalculate parent hashes", err))
-			return
-		}
+	if err := store.CacheRelationshipsStreaming(dagStore); err != nil {
+		logging.Infof("Warning: Failed to cache relationships: %v", err)
+	}
 
-		dagData.Dag = *dag
+	if err := store.CacheLabelsStreaming(dagStore); err != nil {
+		logging.Infof("Warning: Failed to cache labels: %v", err)
+	}
 
-		err = store.StoreDag(&dagData)
-		if err != nil {
-			write(utils.BuildErrorMessage("Failed to commit dag to long term store", err))
-			return
-		}
+	badgerhold_store.GetAndResetSkippedLeafCount()
 
-		// Send final success response to client
-		err = write(lib_stream.BuildResponseMessage(true))
-		if err != nil {
-			write(utils.BuildErrorMessage("Failed to write final response to stream", err))
-			return
-		}
+	if err := write(lib_stream.BuildResponseMessage(true)); err != nil {
+		write(utils.BuildErrorMessage("Failed to write final response to stream", err))
+		return
+	}
 
-		// Calculate total DAG size for subscription tracking
-		var totalDagSize int64
-		for _, leaf := range dag.Leafs {
-			if leaf.Content != nil {
-				totalDagSize += int64(len(leaf.Content))
+	go func(pubKey string, size int64) {
+		subManager := subscription.GetGlobalManager()
+		if subManager != nil {
+			if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
+				logging.Infof("Warning: Failed to update storage usage for pubkey %s: %v\n", pubKey, err)
 			}
 		}
+	}(message.PublicKey, totalDagSize)
 
-		// Update subscription storage usage for the DAG upload asynchronously
-		go func(pubKey string, size int64) {
-			subManager := subscription.GetGlobalManager()
-			if subManager != nil {
-				if err := subManager.UpdateStorageUsage(pubKey, size); err != nil {
-					logging.Infof("Warning: Failed to update storage usage for pubkey %s: %v\n", pubKey, err)
-				}
-			}
-		}(message.PublicKey, totalDagSize)
-
-		if handleRecievedDag != nil {
+	if handleRecievedDag != nil {
+		dagData, err := store.BuildDagFromStore(message.Root, false)
+		if err == nil {
 			handleRecievedDag(&dagData.Dag, &message.PublicKey)
 		}
 	}
 
-	return handler
+	logging.Infof("Streaming upload complete: %d leaves, %d bytes", leafCount, totalDagSize)
+}
+
+func processPacketStreaming(dagStore *merkle_dag.DagStore, packet *merkle_dag.BatchedTransmissionPacket, totalSize *int64, leafCount *int, write utils.DagWriter) error {
+	if err := dagStore.AddBatchedTransmissionPacket(packet); err != nil {
+		write(utils.BuildErrorMessage(fmt.Sprintf("Failed to apply packet with %d leaves", len(packet.Leaves)), err))
+		return err
+	}
+
+	for _, leaf := range packet.Leaves {
+		*leafCount++
+		if leaf.Content != nil {
+			*totalSize += int64(len(leaf.Content))
+		}
+		if leaf.Type == "File" && leaf.Content != nil {
+			mimeType := mimetype.Detect(leaf.Content)
+			if !utils.IsMimeTypePermitted(mimeType.String()) {
+				write(utils.BuildErrorMessage("Mime type is not allowed to be stored by this relay ("+mimeType.String()+")", nil))
+				return fmt.Errorf("mime type not permitted: %s", mimeType.String())
+			}
+		}
+	}
+	return nil
 }

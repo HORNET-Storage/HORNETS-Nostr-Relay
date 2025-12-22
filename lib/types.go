@@ -8,6 +8,7 @@ import "github.com/HORNET-Storage/hornet-storage/lib/types"
 type (
 	LeafContent         = types.LeafContent
 	DagOwnership        = types.DagOwnership
+	LeafParentCache     = types.LeafParentCache
 	WrappedLeaf         = types.WrappedLeaf
 	AdditionalDataEntry = types.AdditionalDataEntry
 	DagLeafData         = types.DagLeafData

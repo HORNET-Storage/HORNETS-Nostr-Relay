@@ -31,9 +31,12 @@ func (h *HashBytes) UnmarshalCBOR(data []byte) error {
 }
 
 // LeafContent represents the content-addressed leaf data (stored once per unique hash)
+// NOTE: ParentHash is NOT stored here because the same leaf can have different parents
+// in different DAGs. Parent relationships are cached per-root separately.
+// NOTE: Indexes removed to reduce write amplification - lookups use composite keys directly
 type LeafContent struct {
-	Hash              string `badgerhold:"index"`
-	ItemName          string `badgerhold:"index"`
+	Hash              string
+	ItemName          string
 	Type              merkle_dag.LeafType
 	ContentHash       []byte
 	ClassicMerkleRoot []byte
@@ -42,26 +45,37 @@ type LeafContent struct {
 	ContentSize       int64
 	DagSize           int64
 	Links             []string
-	ParentHash        string
 	AdditionalData    map[string]string
 }
 
-// DagOwnership represents ownership/signature for a leaf within a DAG (indexed for queries)
+// DagOwnership represents ownership/signature for a leaf within a DAG
+// NOTE: Root and LeafHash indexes are needed for retrieval queries.
+// PublicKey index removed to reduce write amplification during uploads.
 type DagOwnership struct {
-	Root      string `badgerhold:"index"` // Root DAG hash
-	PublicKey string `badgerhold:"index"` // Who signed this
+	Root      string `badgerhold:"index"`
+	PublicKey string
 	Signature string
-	LeafHash  string `badgerhold:"index"` // Which leaf this ownership record is for
+	LeafHash  string `badgerhold:"index"`
+}
+
+// LeafParentCache caches the parent hash for a leaf within a specific DAG root
+// This is needed because the same leaf can have different parents in different DAGs
+// NOTE: Indexes removed - lookups use composite key "root:leafhash"
+type LeafParentCache struct {
+	RootHash   string
+	LeafHash   string
+	ParentHash string
 }
 
 // WrappedLeaf represents a leaf in the Merkle DAG structure (backward compatibility)
 // This combines LeafContent + DagOwnership for convenience
+// NOTE: Indexes removed to reduce write amplification
 type WrappedLeaf struct {
-	PublicKey         string `badgerhold:"index"`
+	PublicKey         string
 	Signature         string
-	Root              string `badgerhold:"index"` // Root DAG hash for efficient querying
-	Hash              string `badgerhold:"index"`
-	ItemName          string `badgerhold:"index"`
+	Root              string
+	Hash              string
+	ItemName          string
 	Type              merkle_dag.LeafType
 	ContentHash       []byte
 	ClassicMerkleRoot []byte
@@ -70,15 +84,15 @@ type WrappedLeaf struct {
 	ContentSize       int64
 	DagSize           int64
 	Links             []string
-	ParentHash        string
 	AdditionalData    map[string]string
 }
 
 // AdditionalDataEntry represents additional metadata for DAG entries
+// NOTE: Indexes removed - lookups use composite key "root:pubkey:leafhash:key"
 type AdditionalDataEntry struct {
 	Hash  HashBytes
-	Key   string `badgerhold:"index"`
-	Value string `badgerhold:"index"`
+	Key   string
+	Value string
 }
 
 // DagLeafData represents DAG leaf data with signature

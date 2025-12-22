@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof" // Import pprof for memory profiling
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -83,7 +87,15 @@ import (
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 )
 
+var (
+	compactDB      = flag.Bool("compact", false, "Run database compaction to reclaim any potential disk space before starting regular services")
+	memoryProfiler = flag.Bool("profile", false, "Run pprof memory profiler enabling memory usage debugging")
+)
+
 func init() {
+	// Parse command-line flags early
+	flag.Parse()
+
 	// Initialze config system
 	err := config.InitConfig()
 	if err != nil {
@@ -125,6 +137,16 @@ func init() {
 func main() {
 	ctx := context.Background()
 	wg := new(sync.WaitGroup)
+
+	if *memoryProfiler {
+		// Start pprof server for memory profiling on port 6060
+		go func() {
+			logging.Info("Starting pprof server on :6060", nil)
+			if err := http.ListenAndServe(":6060", nil); err != nil {
+				logging.Infof("pprof server error: %v", err)
+			}
+		}()
+	}
 
 	settings, err := config.GetConfig()
 	if err != nil {
@@ -283,6 +305,38 @@ func main() {
 	store, err := badgerhold.InitStore(config.GetPath("store"))
 	if err != nil {
 		logging.Fatal(err.Error())
+	}
+
+	// Handle --compact flag: run compaction BEFORE setting up any network services
+	// This ensures no incoming connections during compaction
+	if *compactDB {
+		logging.Info("Running compaction before starting relay services...", nil)
+		lsm, vlog := store.GetDatabaseSize()
+		logging.Info("Current database size", map[string]interface{}{
+			"lsm_mb":   lsm / (1024 * 1024),
+			"vlog_mb":  vlog / (1024 * 1024),
+			"total_mb": (lsm + vlog) / (1024 * 1024),
+		})
+
+		workers := runtime.NumCPU()
+		logging.Infof("Starting compaction with %d workers. This may take a while...", workers)
+
+		startTime := time.Now()
+		if err := store.Compact(workers); err != nil {
+			logging.Fatal("Compaction failed", map[string]interface{}{
+				"error": err,
+			})
+		}
+
+		lsmAfter, vlogAfter := store.GetDatabaseSize()
+		logging.Info("Compaction complete", map[string]interface{}{
+			"duration_seconds": time.Since(startTime).Seconds(),
+			"lsm_mb_before":    lsm / (1024 * 1024),
+			"lsm_mb_after":     lsmAfter / (1024 * 1024),
+			"vlog_mb_before":   vlog / (1024 * 1024),
+			"vlog_mb_after":    vlogAfter / (1024 * 1024),
+			"space_saved_mb":   (vlog - vlogAfter) / (1024 * 1024),
+		})
 	}
 
 	// Initialize image moderation system if enabled
