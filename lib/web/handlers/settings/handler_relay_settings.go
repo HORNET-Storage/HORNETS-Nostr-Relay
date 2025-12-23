@@ -475,8 +475,7 @@ func UpdateSettings(c *fiber.Ctx, store stores.Store) error {
 		logging.Info("Reloading push notification service with new configuration...")
 
 		// Reload the service with new configuration
-		statsStore := store.GetStatsStore()
-		if err := push.ReloadGlobalPushService(statsStore); err != nil {
+		if err := push.ReloadGlobalPushService(store); err != nil {
 			logging.Infof("Warning: Failed to reload push notification service: %v", err)
 			// Don't fail the request, just log the warning
 			// The service will pick up the new config on next restart
