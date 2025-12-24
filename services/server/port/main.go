@@ -455,7 +455,7 @@ func main() {
 
 		// Initialize push notification service
 		logging.Info("Initializing push notification service...")
-		if err := push.InitGlobalPushService(statsStore); err != nil {
+		if err := push.InitGlobalPushService(store); err != nil {
 			logging.Errorf("Failed to initialize push notification service: %v", err)
 		} else {
 			logging.Info("Push notification service initialized successfully")

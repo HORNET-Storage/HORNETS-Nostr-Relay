@@ -2,19 +2,20 @@ package push
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
-	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 	"github.com/nbd-wtf/go-nostr"
 )
 
 // PushService manages push notifications
 type PushService struct {
-	store      statistics.StatisticsStore
+	store      stores.Store
 	config     *types.PushNotificationConfig
 	queue      chan *NotificationTask
 	workers    []*Worker
@@ -58,7 +59,7 @@ type FCMClient interface {
 }
 
 // NewPushService creates a new push notification service
-func NewPushService(store statistics.StatisticsStore) (*PushService, error) {
+func NewPushService(store stores.Store) (*PushService, error) {
 	cfg, err := config.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
@@ -171,8 +172,20 @@ func (ps *PushService) ProcessEvent(event *nostr.Event) {
 	logging.Infof("📬 Found %d recipients for notification (Kind: %d)", len(recipients), event.Kind)
 
 	for _, pubkey := range recipients {
+		// Avoid notifying yourself
+		if pubkey == event.PubKey {
+			continue
+		}
+
 		// Get devices for this user
-		devices, err := ps.store.GetPushDevicesByPubkey(pubkey)
+		// Need to get StatsStore first
+		statsStore := ps.store.GetStatsStore()
+		if statsStore == nil {
+			logging.Errorf("Stats store not available")
+			continue
+		}
+
+		devices, err := statsStore.GetPushDevicesByPubkey(pubkey)
 		if err != nil {
 			logging.Errorf("Failed to get devices for pubkey %s: %v", pubkey, err)
 			continue
@@ -214,6 +227,9 @@ func (ps *PushService) ProcessEvent(event *nostr.Event) {
 func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 	// Based on the plan, we focus on specific event kinds
 	switch event.Kind {
+	case 1: // Text note reply
+		logging.Infof("✅ Event kind 1 (Text Note Reply) will trigger notifications")
+		return true
 	case 1808: // Audio notes (mentions and replies)
 		logging.Infof("✅ Event kind 1808 (Audio note) will trigger notifications")
 		return true
@@ -230,6 +246,9 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 		logging.Infof("✅ Event kind 6 (Repost) will trigger notifications")
 		return true
 	case 7: // Reactions
+		if event.Content == "-" {
+			return false
+		}
 		logging.Infof("✅ Event kind 7 (Reaction) will trigger notifications")
 		return true
 	default:
@@ -240,30 +259,69 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 // getNotificationRecipients determines which users should receive notifications for an event
 func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 	var recipients []string
+	recipientsMap := make(map[string]bool) // Use map to avoid duplicates
+
+	// Helper to add recipient
+	addRecipient := func(pubkey string) {
+		if pubkey != "" && !recipientsMap[pubkey] {
+			recipientsMap[pubkey] = true
+			recipients = append(recipients, pubkey)
+		}
+	}
 
 	switch event.Kind {
-	case 1808: // Audio notes
-		// Check for mentions in p tags
+	case 1: // Text Note Reply
+		// 1. Notify p-tags (Mentions)
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
-				recipients = append(recipients, tag[1])
+				addRecipient(tag[1])
+				logging.Infof("👤 Added recipient for mention (p-tag): %s", tag[1])
+			}
+		}
+		// 2. Notify author of parent event (Reply)
+		if author := ps.getAuthorOfRefEvent(event); author != "" {
+			addRecipient(author)
+			logging.Infof("👤 Added recipient for reply (parent author): %s", author)
+		}
+
+	case 1808: // Audio notes
+		// 1. Notify mentions in p tags
+		for _, tag := range event.Tags {
+			if len(tag) >= 2 && tag[0] == "p" {
+				addRecipient(tag[1])
 				logging.Infof("👤 Added recipient for audio note mention: %s", tag[1])
 			}
 		}
+		// 2. Notify author of parent event (Reply)
+		if author := ps.getAuthorOfRefEvent(event); author != "" {
+			addRecipient(author)
+			logging.Infof("👤 Added recipient for audio reply (parent author): %s", author)
+		}
 
-	case 1809: // Audio post repost
-		// Notify the original author from p tags
+	case 6, 1809: // Repost / Audio Repost
+		// Notify the original author
+		if author := ps.getAuthorOfRefEvent(event); author != "" {
+			addRecipient(author)
+			logging.Infof("👤 Added recipient for repost (original author): %s", author)
+		}
+		// Also notify p-tags just in case
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
-				recipients = append(recipients, tag[1])
-				logging.Infof("👤 Added recipient for audio repost: %s", tag[1])
+				addRecipient(tag[1])
 			}
+		}
+
+	case 7: // Reactions
+		// Notify the author of the reacted-to event
+		if author := ps.getAuthorOfRefEvent(event); author != "" {
+			addRecipient(author)
+			logging.Infof("👤 Added recipient for reaction (original author): %s", author)
 		}
 
 	case 3: // Contact list - notify the users being followed
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
-				recipients = append(recipients, tag[1])
+				addRecipient(tag[1])
 				logging.Infof("👤 Added recipient for new follower: %s", tag[1])
 			}
 		}
@@ -271,22 +329,108 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 	case 4: // DM - notify the recipient
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
-				recipients = append(recipients, tag[1])
+				addRecipient(tag[1])
 				logging.Infof("👤 Added recipient for DM: %s", tag[1])
-			}
-		}
-
-	case 6, 7: // Reposts and reactions - notify the author of the referenced event
-		for _, tag := range event.Tags {
-			if len(tag) >= 2 && tag[0] == "e" {
-				// We would need to look up the author of the referenced event
-				// For now, skip this complex lookup
-				logging.Debugf("⚠️ Event reference found but author lookup not implemented: %s", tag[1])
 			}
 		}
 	}
 
 	return recipients
+}
+
+// getAuthorOfRefEvent looks up the author of the event referenced by an 'e' tag.
+// It prioritizes the "reply" marker, then the root/last convention, or just the first e-tag.
+func (ps *PushService) getAuthorOfRefEvent(event *nostr.Event) string {
+	var refEventID string
+
+	// 1. Look for 'e' tag with marker 'reply'
+	for _, tag := range event.Tags {
+		if len(tag) >= 4 && tag[0] == "e" && tag[3] == "reply" {
+			refEventID = tag[1]
+			break
+		}
+	}
+
+	// 2. If no reply marker, look for the last 'e' tag (NIP-10 mostly)
+	if refEventID == "" {
+		for i := len(event.Tags) - 1; i >= 0; i-- {
+			tag := event.Tags[i]
+			if len(tag) >= 2 && tag[0] == "e" {
+				refEventID = tag[1]
+				break
+			}
+		}
+	}
+
+	if refEventID == "" {
+		return ""
+	}
+
+	// Query the store for the Referenced Event
+	filter := nostr.Filter{
+		IDs:   []string{refEventID},
+		Limit: 1,
+	}
+
+	events, err := ps.store.QueryEvents(filter)
+	if err != nil {
+		logging.Errorf("Failed to query referenced event %s: %v", refEventID, err)
+		return ""
+	}
+
+	if len(events) > 0 {
+		return events[0].PubKey
+	}
+
+	logging.Warnf("Referenced event %s not found in store", refEventID)
+	return ""
+}
+
+// getAuthorName looks up the profile of the event author to get their name
+func (ps *PushService) getAuthorName(pubkey string) string {
+	// Query the store for the author's Kind 0 (Metadata) event
+	filter := nostr.Filter{
+		Kinds:   []int{0},
+		Authors: []string{pubkey},
+		Limit:   1,
+	}
+
+	events, err := ps.store.QueryEvents(filter)
+	if err != nil {
+		logging.Warnf("Failed to query profile for %s: %v", pubkey, err)
+		return shortenPubkey(pubkey)
+	}
+
+	if len(events) == 0 {
+		return shortenPubkey(pubkey)
+	}
+
+	// Parse the content
+	var profile map[string]interface{}
+	if err := json.Unmarshal([]byte(events[0].Content), &profile); err != nil {
+		logging.Warnf("Failed to parse profile content for %s: %v", pubkey, err)
+		return shortenPubkey(pubkey)
+	}
+
+	// Try to find a name
+	if name, ok := profile["display_name"].(string); ok && name != "" {
+		return name
+	}
+	if name, ok := profile["name"].(string); ok && name != "" {
+		return name
+	}
+	if name, ok := profile["displayName"].(string); ok && name != "" {
+		return name
+	}
+
+	return shortenPubkey(pubkey)
+}
+
+func shortenPubkey(pubkey string) string {
+	if len(pubkey) < 8 {
+		return pubkey
+	}
+	return fmt.Sprintf("%s...%s", pubkey[:4], pubkey[len(pubkey)-4:])
 }
 
 // formatNotificationMessage formats a push notification message for an event
@@ -302,30 +446,45 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 		},
 	}
 
+	authorName := ps.getAuthorName(event.PubKey)
+
 	switch event.Kind {
+	case 1: // Text Note
+		message.Title = "New Reply"
+		message.Body = fmt.Sprintf("%s replied to your note", authorName)
+
 	case 1808: // Audio note
 		message.Title = "New Audio Note"
-		message.Body = "You were mentioned in an audio note"
+		message.Body = fmt.Sprintf("%s mentioned you in an audio note", authorName)
 
 	case 1809: // Audio post repost
 		message.Title = "Audio Repost"
-		message.Body = "Someone reposted your audio post"
+		message.Body = fmt.Sprintf("%s reposted your audio post", authorName)
 
 	case 3: // Contact list
 		message.Title = "New Follower"
-		message.Body = "Someone started following you"
+		message.Body = fmt.Sprintf("%s started following you", authorName)
 
 	case 4: // DM
 		message.Title = "New Message"
-		message.Body = "You have a new direct message"
+		message.Body = fmt.Sprintf("You have a new direct message from %s", authorName)
 
 	case 6: // Repost
 		message.Title = "Repost"
-		message.Body = "Someone reposted your note"
+		message.Body = fmt.Sprintf("%s reposted your note", authorName)
 
 	case 7: // Reaction
-		message.Title = "Reaction"
-		message.Body = "Someone reacted to your note"
+		// Check content for emoji to make notification nicer
+		var content string
+		switch event.Content {
+		case "", "+":
+			content = "liked"
+		default:
+			// If it's a longer reaction (emoji), show it
+			content = fmt.Sprintf("reacted %s to", event.Content)
+		}
+		message.Title = "New Reaction"
+		message.Body = fmt.Sprintf("%s %s your note", authorName, content)
 
 	default:
 		message.Title = "New Notification"
@@ -343,7 +502,7 @@ var globalPushService *PushService
 var serviceMutex sync.RWMutex
 
 // InitGlobalPushService initializes the global push service instance
-func InitGlobalPushService(store statistics.StatisticsStore) error {
+func InitGlobalPushService(store stores.Store) error {
 	serviceMutex.Lock()
 	defer serviceMutex.Unlock()
 
@@ -385,7 +544,7 @@ func StopGlobalPushService() {
 }
 
 // ReloadGlobalPushService reloads the global push service with updated configuration
-func ReloadGlobalPushService(store statistics.StatisticsStore) error {
+func ReloadGlobalPushService(store stores.Store) error {
 	serviceMutex.Lock()
 	defer serviceMutex.Unlock()
 
