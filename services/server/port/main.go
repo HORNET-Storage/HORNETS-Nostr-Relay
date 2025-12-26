@@ -50,6 +50,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10001"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10002"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10010"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10051"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind10411"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1063"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind11011"
@@ -61,6 +62,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind443"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind445"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
@@ -519,6 +521,7 @@ func main() {
 	nostr.RegisterHandler("kind/1808", kind1808.BuildKind1808Handler(store))
 	nostr.RegisterHandler("kind/1809", kind1809.BuildKind1809Handler(store))
 	nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
+	nostr.RegisterHandler("kind/443", kind443.BuildKind443Handler(store))
 	nostr.RegisterHandler("kind/445", kind445.BuildKind445Handler(store))
 	nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
 	nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
@@ -532,6 +535,7 @@ func main() {
 	nostr.RegisterHandler("kind/10000", kind10000.BuildKind10000Handler(store))
 	nostr.RegisterHandler("kind/10001", kind10001.BuildKind10001Handler(store))
 	nostr.RegisterHandler("kind/10002", kind10002.BuildKind10002Handler(store))
+	nostr.RegisterHandler("kind/10051", kind10051.BuildKind10051Handler(store))
 	nostr.RegisterHandler("kind/11011", kind11011.BuildKind11011Handler(store))
 	nostr.RegisterHandler("kind/22242", auth.BuildAuthHandler(store))
 	nostr.RegisterHandler("kind/30000", kind30000.BuildKind30000Handler(store))
