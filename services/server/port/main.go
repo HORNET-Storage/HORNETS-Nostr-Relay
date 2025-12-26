@@ -61,6 +61,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind445"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30009"
@@ -518,6 +519,7 @@ func main() {
 	nostr.RegisterHandler("kind/1808", kind1808.BuildKind1808Handler(store))
 	nostr.RegisterHandler("kind/1809", kind1809.BuildKind1809Handler(store))
 	nostr.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
+	nostr.RegisterHandler("kind/445", kind445.BuildKind445Handler(store))
 	nostr.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
 	nostr.RegisterHandler("kind/6", kind6.BuildKind6Handler(store))
 	nostr.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
