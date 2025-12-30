@@ -597,9 +597,11 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
+		443, 444, 445,       // MIP kinds (MLS group messaging)
 		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
 		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds
+		10051,        // MIP-00 KeyPackage
 		10411,        // Relay info kind (NO 10011 or 10022 handlers)
 		11011,        // Relay list kind
 		16629, 16630, // Ephemeral kinds
@@ -609,7 +611,7 @@ func setDefaults() {
 		30023, 30078, 30079, // Long-form content kinds
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind10051"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -631,6 +633,10 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.media_definitions.git.mime_patterns", []string{"application/x-git"})
 	viper.SetDefault("event_filtering.media_definitions.git.extensions", []string{".git", ".bundle", ".json"})
 	viper.SetDefault("event_filtering.media_definitions.git.max_size_mb", 100)
+
+	viper.SetDefault("event_filtering.media_definitions.binary.mime_patterns", []string{"application/octet-stream"})
+	viper.SetDefault("event_filtering.media_definitions.binary.extensions", []string{".bin", ".dat", ".blob"})
+	viper.SetDefault("event_filtering.media_definitions.binary.max_size_mb", 100)
 
 	// Allowed users defaults - free mode for rapid testing
 	viper.SetDefault("allowed_users.mode", "public")
@@ -713,6 +719,12 @@ func setDefaults() {
 		"11888": "888", // Custom HORNETS protocol
 		"11011": "888", // Custom HORNETS
 		"555":   "555", // X-Nostr bridge
+
+		// MIP kinds (MLS group messaging)
+		"443":   "999", // MIP-00 KeyPackage
+		"444":   "999", // MIP-02 Welcome Event
+		"445":   "999", // MIP-03 Group Event
+		"10051": "999", // MIP-00 KeyPackage Directory
 
 		// Custom kinds
 		"9372":  "888", // Custom application
