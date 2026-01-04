@@ -67,10 +67,15 @@ func (w *Worker) processTask(task *NotificationTask) {
 	}
 
 	// Save log entry
-	if err := w.service.store.LogPushNotification(log); err != nil {
-		logging.Errorf("❌ Failed to log push notification to database: %v", err)
+	statsStore := w.service.store.GetStatsStore()
+	if statsStore != nil {
+		if err := statsStore.LogPushNotification(log); err != nil {
+			logging.Errorf("❌ Failed to log push notification to database: %v", err)
+		} else {
+			logging.Infof("💾 Push notification logged to database with ID: %d", log.ID)
+		}
 	} else {
-		logging.Infof("💾 Push notification logged to database with ID: %d", log.ID)
+		logging.Errorf("❌ Failed to log push notification: Stats store not available")
 	}
 
 	// Send the notification
@@ -101,8 +106,8 @@ func (w *Worker) processTask(task *NotificationTask) {
 			w.id, task.DeviceToken[:min(10, len(task.DeviceToken))], task.Event.ID, task.Event.Kind)
 
 		// Update log with error
-		if log.ID > 0 {
-			w.service.store.UpdatePushNotificationDelivery(log.ID, false, err.Error())
+		if log.ID > 0 && statsStore != nil {
+			statsStore.UpdatePushNotificationDelivery(log.ID, false, err.Error())
 			logging.Infof("📝 Updated notification log ID %d with failure status", log.ID)
 		}
 
@@ -130,7 +135,9 @@ func (w *Worker) processTask(task *NotificationTask) {
 			logging.Errorf("🔄 Max retry attempts (%d) reached for notification", w.service.config.Service.RetryAttempts)
 			logging.Errorf("🔄 Failed device marked inactive: %s...", task.DeviceToken[:min(10, len(task.DeviceToken))])
 			// Mark device as inactive if too many failures
-			w.service.store.UpdatePushDeviceStatus(task.DeviceToken, false)
+			if statsStore != nil {
+				statsStore.UpdatePushDeviceStatus(task.DeviceToken, false)
+			}
 		}
 	} else {
 		logging.Infof("✅ [Worker %d] Successfully sent push notification!", w.id)
@@ -139,8 +146,8 @@ func (w *Worker) processTask(task *NotificationTask) {
 		logging.Infof("✅ [Worker %d] Notification: %s - %s", w.id, task.Message.Title, task.Message.Body)
 
 		// Update log with success
-		if log.ID > 0 {
-			w.service.store.UpdatePushNotificationDelivery(log.ID, true, "")
+		if log.ID > 0 && statsStore != nil {
+			statsStore.UpdatePushNotificationDelivery(log.ID, true, "")
 			logging.Infof("📝 Updated notification log ID %d with success status", log.ID)
 		}
 	}

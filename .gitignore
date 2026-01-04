@@ -42,6 +42,7 @@ demo-config.json
 # Demo binaries
 hornet-demo-generator
 hornet-storage-demo
+hornet-storage-v2
 
 config.yaml
 
