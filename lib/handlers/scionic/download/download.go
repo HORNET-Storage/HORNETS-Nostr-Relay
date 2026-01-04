@@ -208,6 +208,10 @@ func sendBatch(stream lib_types.Stream, batch []*merkle_dag.TransmissionPacket, 
 
 	resp, err := lib_stream.WaitForResponse(stream)
 	if err != nil {
+		// On final packet, client may disconnect before sending ack - this is fine
+		if isFinal {
+			return nil
+		}
 		return err
 	}
 
@@ -255,10 +259,12 @@ func sendDagPackets(stream lib_types.Stream, dagData *types.DagData) {
 	total := len(sequence)
 
 	for i, packet := range sequence {
+		isFinalPacket := i == total-1
+
 		uploadMsg := lib_types.UploadMessage{
 			Root:          dagData.Dag.Root,
 			Packet:        *packet.ToSerializable(),
-			IsFinalPacket: i == total-1,
+			IsFinalPacket: isFinalPacket,
 		}
 
 		if packet.GetRootLeaf() != nil {
@@ -274,6 +280,10 @@ func sendDagPackets(stream lib_types.Stream, dagData *types.DagData) {
 
 		resp, err := lib_stream.WaitForResponse(stream)
 		if err != nil {
+			// On final packet, client may disconnect before sending ack - this is fine
+			if isFinalPacket {
+				return
+			}
 			lib_stream.WriteErrorToStream(stream, "Failed to receive acknowledgment", err)
 			return
 		}

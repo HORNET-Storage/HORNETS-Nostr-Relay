@@ -78,6 +78,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9802"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/claim"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
@@ -477,6 +478,7 @@ func main() {
 
 	upload.AddUploadHandlerForLibp2p(ctx, host, store, nil, nil)
 	query.AddQueryHandler(host, store)
+	claim.AddClaimOwnershipHandler(host, store)
 
 	logging.Infof("Host started with id: %s\n", host.ID())
 	logging.Infof("Host started with address: %s\n", host.Addrs())

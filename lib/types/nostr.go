@@ -59,9 +59,19 @@ type QueryResponse struct {
 	Hashes []string
 }
 
+// ClaimOwnershipMessage is sent by a client to claim ownership over an existing DAG.
+// The root must already exist on the relay. The signature should be the public key's
+// signature of the root hash.
+type ClaimOwnershipMessage struct {
+	Root      string
+	PublicKey string
+	Signature string
+}
+
 // ResponseMessage represents a generic response
 type ResponseMessage struct {
-	Ok bool
+	Ok      bool
+	Message string // Optional error message when Ok is false
 }
 
 // ErrorMessage represents an error response

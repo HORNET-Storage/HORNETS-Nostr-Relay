@@ -36,6 +36,14 @@ type Store interface {
 	CacheLabelsStreaming(dagStore *merkle_dag.DagStore) error
 	RetrieveRelationships(root string) (map[string]string, error)
 
+	// Partial DAG support - for verifying referenced leaves exist globally
+	HasLeafGlobal(hash string) (bool, error)
+	GetLeafLinksGlobal(hash string) ([]string, error)
+
+	// Ownership management
+	ClaimOwnership(root string, publicKey string, signature string) error
+	GetOwnership(root string) ([]types.DagOwnership, error)
+
 	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)
 	StoreEvent(event *nostr.Event) error
