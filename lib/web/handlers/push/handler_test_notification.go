@@ -69,9 +69,10 @@ func TestNotificationHandler(store stores.Store) fiber.Handler {
 		}
 
 		// Create a fake test event
+		// Using a special test pubkey that the notification service recognizes
 		testEvent := &nostr.Event{
 			ID:      "test_notification_" + pubkey,
-			PubKey:  "test_sender",
+			PubKey:  "0000000000000000000000000000000000000000000000000000000000000000",
 			Kind:    1808, // Audio note
 			Content: req.Message,
 			Tags:    nostr.Tags{nostr.Tag{"p", pubkey}},

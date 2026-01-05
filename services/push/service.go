@@ -26,6 +26,8 @@ type PushService struct {
 	apnsClient APNSClient
 	fcmClient  FCMClient
 	isRunning  bool
+	nameCache  map[string]string // Cache for author names (pubkey -> name)
+	cacheMutex sync.RWMutex       // Mutex for cache access
 }
 
 // NotificationTask represents a push notification task
@@ -73,11 +75,12 @@ func NewPushService(store stores.Store) (*PushService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	service := &PushService{
-		store:  store,
-		config: &cfg.PushNotifications,
-		queue:  make(chan *NotificationTask, cfg.PushNotifications.Service.QueueSize),
-		ctx:    ctx,
-		cancel: cancel,
+		store:     store,
+		config:    &cfg.PushNotifications,
+		queue:     make(chan *NotificationTask, cfg.PushNotifications.Service.QueueSize),
+		ctx:       ctx,
+		cancel:    cancel,
+		nameCache: make(map[string]string),
 	}
 
 	// Initialize APNs client if enabled
@@ -399,12 +402,28 @@ func (ps *PushService) getAuthorOfRefEvent(event *nostr.Event) string {
 
 // getAuthorName looks up the profile of the event author to get their name
 func (ps *PushService) getAuthorName(pubkey string) string {
+	// Special case for test notifications
+	if pubkey == "0000000000000000000000000000000000000000000000000000000000000000" {
+		return "Test Notification"
+	}
+
+	// Check cache first
+	ps.cacheMutex.RLock()
+	if name, found := ps.nameCache[pubkey]; found {
+		ps.cacheMutex.RUnlock()
+		logging.Infof("✅ Cache hit for %s: %s", shortenPubkey(pubkey), name)
+		return name
+	}
+	ps.cacheMutex.RUnlock()
+
 	// Query the store for the author's Kind 0 (Metadata) event
 	filter := nostr.Filter{
 		Kinds:   []int{0},
 		Authors: []string{pubkey},
 		Limit:   1,
 	}
+
+	logging.Infof("🔍 Looking up profile for pubkey: %s", shortenPubkey(pubkey))
 
 	events, err := ps.store.QueryEvents(filter)
 	if err != nil {
@@ -413,8 +432,25 @@ func (ps *PushService) getAuthorName(pubkey string) string {
 	}
 
 	if len(events) == 0 {
-		return shortenPubkey(pubkey)
+		logging.Infof("No kind 0 profile found for %s", shortenPubkey(pubkey))
+
+		// Cache the shortened pubkey even if no profile exists
+		shortened := shortenPubkey(pubkey)
+		ps.cacheMutex.Lock()
+		ps.nameCache[pubkey] = shortened
+		ps.cacheMutex.Unlock()
+
+		return shortened
 	}
+
+	logging.Infof("Found kind 0 profile for %s, content preview: %s",
+		shortenPubkey(pubkey),
+		func() string {
+			if len(events[0].Content) > 100 {
+				return events[0].Content[:100] + "..."
+			}
+			return events[0].Content
+		}())
 
 	// Parse the content
 	var profile map[string]interface{}
@@ -423,18 +459,44 @@ func (ps *PushService) getAuthorName(pubkey string) string {
 		return shortenPubkey(pubkey)
 	}
 
-	// Try to find a name
-	if name, ok := profile["display_name"].(string); ok && name != "" {
-		return name
-	}
-	if name, ok := profile["name"].(string); ok && name != "" {
-		return name
-	}
-	if name, ok := profile["displayName"].(string); ok && name != "" {
-		return name
+	// Try multiple field name variations that are commonly used
+	nameFields := []string{"display_name", "displayName", "name", "username", "handle"}
+
+	for _, field := range nameFields {
+		if value, ok := profile[field]; ok {
+			if name, ok := value.(string); ok && name != "" {
+				logging.Infof("✅ Found name for %s: %s (from field: %s)",
+					shortenPubkey(pubkey), name, field)
+
+				// Cache the name
+				ps.cacheMutex.Lock()
+				ps.nameCache[pubkey] = name
+				ps.cacheMutex.Unlock()
+
+				return name
+			}
+		}
 	}
 
-	return shortenPubkey(pubkey)
+	// If we have profile data but no name, log what fields are available
+	if len(profile) > 0 {
+		fields := make([]string, 0, len(profile))
+		for k := range profile {
+			fields = append(fields, k)
+		}
+		logging.Infof("Profile for %s has fields: %v but no recognized name field",
+			shortenPubkey(pubkey), fields)
+	}
+
+	logging.Infof("No name found in profile for %s, using shortened pubkey", shortenPubkey(pubkey))
+
+	// Cache the shortened pubkey to avoid repeated lookups
+	shortened := shortenPubkey(pubkey)
+	ps.cacheMutex.Lock()
+	ps.nameCache[pubkey] = shortened
+	ps.cacheMutex.Unlock()
+
+	return shortened
 }
 
 func shortenPubkey(pubkey string) string {
