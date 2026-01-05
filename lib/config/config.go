@@ -598,6 +598,7 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
 		443, 444, 445,       // MIP kinds (MLS group messaging)
+		1059,                // NIP-59 Gift Wrap (encrypted DMs)
 		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
 		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds
@@ -611,7 +612,7 @@ func setDefaults() {
 		30023, 30078, 30079, // Long-form content kinds
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind10051"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -710,6 +711,9 @@ func setDefaults() {
 
 		// NIP-78: Application-specific Data
 		"30078": "78", // Application-specific Data
+
+		// NIP-59: Gift Wrap
+		"1059": "59", // Gift wrap (encrypted DMs)
 
 		// NIP-94: File Metadata
 		"1063": "94", // File metadata

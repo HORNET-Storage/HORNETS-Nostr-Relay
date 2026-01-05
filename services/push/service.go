@@ -251,6 +251,9 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 		}
 		logging.Infof("✅ Event kind 7 (Reaction) will trigger notifications")
 		return true
+	case 1059: // Gift Wrap (NIP-59 encrypted DMs)
+		logging.Infof("✅ Event kind 1059 (Gift Wrap DM) will trigger notifications")
+		return true
 	default:
 		return false
 	}
@@ -331,6 +334,14 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 			if len(tag) >= 2 && tag[0] == "p" {
 				addRecipient(tag[1])
 				logging.Infof("👤 Added recipient for DM: %s", tag[1])
+			}
+		}
+
+	case 1059: // Gift Wrap (NIP-59 encrypted DM) - notify the recipient
+		for _, tag := range event.Tags {
+			if len(tag) >= 2 && tag[0] == "p" {
+				addRecipient(tag[1])
+				logging.Infof("👤 Added recipient for Gift Wrap DM: %s", tag[1])
 			}
 		}
 	}
@@ -485,6 +496,12 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 		}
 		message.Title = "New Reaction"
 		message.Body = fmt.Sprintf("%s %s your note", authorName, content)
+
+	case 1059: // Gift Wrap (NIP-59 encrypted DM)
+		// For gift wraps, we can't show the real sender as it's encrypted
+		// The pubkey is a random ephemeral key
+		message.Title = "New Encrypted Message"
+		message.Body = "You have a new encrypted message"
 
 	default:
 		message.Title = "New Notification"
