@@ -1,7 +1,6 @@
 package push
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -60,10 +59,12 @@ type RealAPNSClient struct {
 
 // SendNotification sends a push notification to an iOS device
 func (c *RealAPNSClient) SendNotification(deviceToken string, message *PushMessage) error {
+	payload := message.ToAPNsPayload()
+
 	notification := &apns2.Notification{
 		DeviceToken: deviceToken,
 		Topic:       c.bundleID,
-		Payload:     message.ToAPNsPayload(),
+		Payload:     payload,
 	}
 
 	res, err := c.client.Push(notification)
@@ -108,18 +109,15 @@ func (m *MockAPNSClient) SendNotification(deviceToken string, message *PushMessa
 	}
 
 	logging.Warn("📱 Mock APNs Notification (NOT SENT)", map[string]interface{}{
-		"device_token": tokenDisplay,
-		"bundle_id":    m.bundleID,
-		"environment":  environment,
-		"title":        message.Title,
-		"body":         message.Body,
-		"note":         "This is a MOCK - no actual notification was sent to the device",
-		"help":         "For local dev: Use TestFlight or configure real APNs credentials",
+		"device_token":    tokenDisplay,
+		"bundle_id":       m.bundleID,
+		"environment":     environment,
+		"title":           message.Title,
+		"body":            message.Body,
+		"mutable_content": message.MutableContent,
+		"note":            "This is a MOCK - no actual notification was sent to the device",
+		"help":            "For local dev: Use TestFlight or configure real APNs credentials",
 	})
-
-	// Log the full message for debugging
-	messageJSON, _ := json.MarshalIndent(message, "", "  ")
-	logging.Debugf("Mock APNs full payload: %s", string(messageJSON))
 
 	return nil
 }
@@ -133,6 +131,11 @@ func (m *PushMessage) ToAPNsPayload() map[string]interface{} {
 		},
 		"badge": m.Badge,
 		"sound": m.Sound,
+	}
+
+	// Add mutable-content flag for iOS to allow notification modification
+	if m.MutableContent {
+		aps["mutable-content"] = 1
 	}
 
 	if m.Category != "" {

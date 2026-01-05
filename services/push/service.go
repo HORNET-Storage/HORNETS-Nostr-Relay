@@ -15,17 +15,21 @@ import (
 
 // PushService manages push notifications
 type PushService struct {
-	store      stores.Store
-	config     *types.PushNotificationConfig
-	queue      chan *NotificationTask
-	workers    []*Worker
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	mutex      sync.RWMutex
-	apnsClient APNSClient
-	fcmClient  FCMClient
-	isRunning  bool
+	store        stores.Store
+	config       *types.PushNotificationConfig
+	queue        chan *NotificationTask
+	workers      []*Worker
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	mutex        sync.RWMutex
+	apnsClient   APNSClient
+	fcmClient    FCMClient
+	isRunning    bool
+	nameCache    map[string]string // Cache for author names (pubkey -> name)
+	cacheMutex   sync.RWMutex       // Mutex for cache access
+	processedIDs map[string]bool    // Track processed event IDs to prevent duplicates
+	idMutex      sync.RWMutex       // Mutex for processed IDs
 }
 
 // NotificationTask represents a push notification task
@@ -40,12 +44,13 @@ type NotificationTask struct {
 
 // PushMessage represents the formatted push notification message
 type PushMessage struct {
-	Title    string
-	Body     string
-	Badge    int
-	Sound    string
-	Category string
-	Data     map[string]interface{}
+	Title          string
+	Body           string
+	Badge          int
+	Sound          string
+	Category       string
+	Data           map[string]interface{}
+	MutableContent bool // iOS-specific: allows app to modify notification before display
 }
 
 // APNSClient interface for Apple Push Notification service
@@ -73,11 +78,13 @@ func NewPushService(store stores.Store) (*PushService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	service := &PushService{
-		store:  store,
-		config: &cfg.PushNotifications,
-		queue:  make(chan *NotificationTask, cfg.PushNotifications.Service.QueueSize),
-		ctx:    ctx,
-		cancel: cancel,
+		store:        store,
+		config:       &cfg.PushNotifications,
+		queue:        make(chan *NotificationTask, cfg.PushNotifications.Service.QueueSize),
+		ctx:          ctx,
+		cancel:       cancel,
+		nameCache:    make(map[string]string),
+		processedIDs: make(map[string]bool),
 	}
 
 	// Initialize APNs client if enabled
@@ -156,6 +163,28 @@ func (ps *PushService) ProcessEvent(event *nostr.Event) {
 	if ps == nil || !ps.isRunning {
 		return
 	}
+
+	// Check for duplicate processing
+	ps.idMutex.RLock()
+	if ps.processedIDs[event.ID] {
+		ps.idMutex.RUnlock()
+		logging.Infof("⏭️ Skipping duplicate notification for event %s (already processed)", event.ID)
+		return
+	}
+	ps.idMutex.RUnlock()
+
+	// Mark as processed
+	ps.idMutex.Lock()
+	ps.processedIDs[event.ID] = true
+	// Clean up old entries if map gets too large (prevent memory leak)
+	if len(ps.processedIDs) > 10000 {
+		// Keep only recent entries by creating a new map
+		newMap := make(map[string]bool)
+		newMap[event.ID] = true // Always keep the current event
+		ps.processedIDs = newMap
+		logging.Infof("🧹 Cleaned up processed event ID cache")
+	}
+	ps.idMutex.Unlock()
 
 	// Log incoming event for push notification processing
 	logging.Infof("🔔 Processing event for push notifications - Kind: %d, Event ID: %s, Author: %s",
@@ -239,9 +268,10 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 	case 3: // Contact lists (new followers)
 		logging.Infof("✅ Event kind 3 (Contact list) will trigger notifications")
 		return true
-	case 4: // DMs
-		logging.Infof("✅ Event kind 4 (DM) will trigger notifications")
-		return true
+	// case 4: // Traditional DMs - DISABLED to prevent duplicates with kind 1059
+	// We only use kind 1059 (Gift Wrap) for encrypted DMs now
+	// logging.Infof("✅ Event kind 4 (DM) will trigger notifications")
+	// return true
 	case 6: // Reposts
 		logging.Infof("✅ Event kind 6 (Repost) will trigger notifications")
 		return true
@@ -250,6 +280,9 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 			return false
 		}
 		logging.Infof("✅ Event kind 7 (Reaction) will trigger notifications")
+		return true
+	case 1059: // Gift Wrap (NIP-59 encrypted DMs)
+		logging.Infof("✅ Event kind 1059 (Gift Wrap DM) will trigger notifications")
 		return true
 	default:
 		return false
@@ -326,11 +359,19 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 			}
 		}
 
-	case 4: // DM - notify the recipient
+	// case 4: // Traditional DM - DISABLED to prevent duplicates with kind 1059
+	// for _, tag := range event.Tags {
+	// 	if len(tag) >= 2 && tag[0] == "p" {
+	// 		addRecipient(tag[1])
+	// 		logging.Infof("👤 Added recipient for DM: %s", tag[1])
+	// 	}
+	// }
+
+	case 1059: // Gift Wrap (NIP-59 encrypted DM) - notify the recipient
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" {
 				addRecipient(tag[1])
-				logging.Infof("👤 Added recipient for DM: %s", tag[1])
+				logging.Infof("👤 Added recipient for Gift Wrap DM: %s", tag[1])
 			}
 		}
 	}
@@ -388,12 +429,28 @@ func (ps *PushService) getAuthorOfRefEvent(event *nostr.Event) string {
 
 // getAuthorName looks up the profile of the event author to get their name
 func (ps *PushService) getAuthorName(pubkey string) string {
+	// Special case for test notifications
+	if pubkey == "0000000000000000000000000000000000000000000000000000000000000000" {
+		return "Test Notification"
+	}
+
+	// Check cache first
+	ps.cacheMutex.RLock()
+	if name, found := ps.nameCache[pubkey]; found {
+		ps.cacheMutex.RUnlock()
+		logging.Infof("✅ Cache hit for %s: %s", shortenPubkey(pubkey), name)
+		return name
+	}
+	ps.cacheMutex.RUnlock()
+
 	// Query the store for the author's Kind 0 (Metadata) event
 	filter := nostr.Filter{
 		Kinds:   []int{0},
 		Authors: []string{pubkey},
 		Limit:   1,
 	}
+
+	logging.Infof("🔍 Looking up profile for pubkey: %s", shortenPubkey(pubkey))
 
 	events, err := ps.store.QueryEvents(filter)
 	if err != nil {
@@ -402,8 +459,25 @@ func (ps *PushService) getAuthorName(pubkey string) string {
 	}
 
 	if len(events) == 0 {
-		return shortenPubkey(pubkey)
+		logging.Infof("No kind 0 profile found for %s", shortenPubkey(pubkey))
+
+		// Cache the shortened pubkey even if no profile exists
+		shortened := shortenPubkey(pubkey)
+		ps.cacheMutex.Lock()
+		ps.nameCache[pubkey] = shortened
+		ps.cacheMutex.Unlock()
+
+		return shortened
 	}
+
+	logging.Infof("Found kind 0 profile for %s, content preview: %s",
+		shortenPubkey(pubkey),
+		func() string {
+			if len(events[0].Content) > 100 {
+				return events[0].Content[:100] + "..."
+			}
+			return events[0].Content
+		}())
 
 	// Parse the content
 	var profile map[string]interface{}
@@ -412,18 +486,44 @@ func (ps *PushService) getAuthorName(pubkey string) string {
 		return shortenPubkey(pubkey)
 	}
 
-	// Try to find a name
-	if name, ok := profile["display_name"].(string); ok && name != "" {
-		return name
-	}
-	if name, ok := profile["name"].(string); ok && name != "" {
-		return name
-	}
-	if name, ok := profile["displayName"].(string); ok && name != "" {
-		return name
+	// Try multiple field name variations that are commonly used
+	nameFields := []string{"display_name", "displayName", "name", "username", "handle"}
+
+	for _, field := range nameFields {
+		if value, ok := profile[field]; ok {
+			if name, ok := value.(string); ok && name != "" {
+				logging.Infof("✅ Found name for %s: %s (from field: %s)",
+					shortenPubkey(pubkey), name, field)
+
+				// Cache the name
+				ps.cacheMutex.Lock()
+				ps.nameCache[pubkey] = name
+				ps.cacheMutex.Unlock()
+
+				return name
+			}
+		}
 	}
 
-	return shortenPubkey(pubkey)
+	// If we have profile data but no name, log what fields are available
+	if len(profile) > 0 {
+		fields := make([]string, 0, len(profile))
+		for k := range profile {
+			fields = append(fields, k)
+		}
+		logging.Infof("Profile for %s has fields: %v but no recognized name field",
+			shortenPubkey(pubkey), fields)
+	}
+
+	logging.Infof("No name found in profile for %s, using shortened pubkey", shortenPubkey(pubkey))
+
+	// Cache the shortened pubkey to avoid repeated lookups
+	shortened := shortenPubkey(pubkey)
+	ps.cacheMutex.Lock()
+	ps.nameCache[pubkey] = shortened
+	ps.cacheMutex.Unlock()
+
+	return shortened
 }
 
 func shortenPubkey(pubkey string) string {
@@ -436,9 +536,10 @@ func shortenPubkey(pubkey string) string {
 // formatNotificationMessage formats a push notification message for an event
 func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient string) *PushMessage {
 	message := &PushMessage{
-		Badge:    1,
-		Sound:    "default",
-		Category: fmt.Sprintf("kind_%d", event.Kind),
+		Badge:          1,
+		Sound:          "default",
+		Category:       fmt.Sprintf("kind_%d", event.Kind),
+		MutableContent: true, // Allow iOS app to modify notification before display
 		Data: map[string]interface{}{
 			"event_id":   event.ID,
 			"event_kind": event.Kind,
@@ -465,9 +566,9 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 		message.Title = "New Follower"
 		message.Body = fmt.Sprintf("%s started following you", authorName)
 
-	case 4: // DM
-		message.Title = "New Message"
-		message.Body = fmt.Sprintf("You have a new direct message from %s", authorName)
+	// case 4: // Traditional DM - DISABLED to prevent duplicates with kind 1059
+	// 	message.Title = "New Message"
+	// 	message.Body = fmt.Sprintf("You have a new direct message from %s", authorName)
 
 	case 6: // Repost
 		message.Title = "Repost"
@@ -485,6 +586,15 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 		}
 		message.Title = "New Reaction"
 		message.Body = fmt.Sprintf("%s %s your note", authorName, content)
+
+	case 1059: // Gift Wrap (NIP-59 encrypted DM)
+		// For gift wraps, we can't show the real sender as it's encrypted
+		// The pubkey is a random ephemeral key
+		// With mutable-content: 1, iOS app can decrypt and show real sender
+		message.Title = "New Encrypted Message"
+		message.Body = "You have a new encrypted message"
+		// Add recipient to data so iOS can decrypt properly
+		message.Data["recipient"] = recipient
 
 	default:
 		message.Title = "New Notification"
