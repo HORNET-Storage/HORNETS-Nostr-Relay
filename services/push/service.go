@@ -15,19 +15,21 @@ import (
 
 // PushService manages push notifications
 type PushService struct {
-	store      stores.Store
-	config     *types.PushNotificationConfig
-	queue      chan *NotificationTask
-	workers    []*Worker
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	mutex      sync.RWMutex
-	apnsClient APNSClient
-	fcmClient  FCMClient
-	isRunning  bool
-	nameCache  map[string]string // Cache for author names (pubkey -> name)
-	cacheMutex sync.RWMutex       // Mutex for cache access
+	store        stores.Store
+	config       *types.PushNotificationConfig
+	queue        chan *NotificationTask
+	workers      []*Worker
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	mutex        sync.RWMutex
+	apnsClient   APNSClient
+	fcmClient    FCMClient
+	isRunning    bool
+	nameCache    map[string]string // Cache for author names (pubkey -> name)
+	cacheMutex   sync.RWMutex       // Mutex for cache access
+	processedIDs map[string]bool    // Track processed event IDs to prevent duplicates
+	idMutex      sync.RWMutex       // Mutex for processed IDs
 }
 
 // NotificationTask represents a push notification task
@@ -75,12 +77,13 @@ func NewPushService(store stores.Store) (*PushService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	service := &PushService{
-		store:     store,
-		config:    &cfg.PushNotifications,
-		queue:     make(chan *NotificationTask, cfg.PushNotifications.Service.QueueSize),
-		ctx:       ctx,
-		cancel:    cancel,
-		nameCache: make(map[string]string),
+		store:        store,
+		config:       &cfg.PushNotifications,
+		queue:        make(chan *NotificationTask, cfg.PushNotifications.Service.QueueSize),
+		ctx:          ctx,
+		cancel:       cancel,
+		nameCache:    make(map[string]string),
+		processedIDs: make(map[string]bool),
 	}
 
 	// Initialize APNs client if enabled
@@ -159,6 +162,28 @@ func (ps *PushService) ProcessEvent(event *nostr.Event) {
 	if ps == nil || !ps.isRunning {
 		return
 	}
+
+	// Check for duplicate processing
+	ps.idMutex.RLock()
+	if ps.processedIDs[event.ID] {
+		ps.idMutex.RUnlock()
+		logging.Infof("⏭️ Skipping duplicate notification for event %s (already processed)", event.ID)
+		return
+	}
+	ps.idMutex.RUnlock()
+
+	// Mark as processed
+	ps.idMutex.Lock()
+	ps.processedIDs[event.ID] = true
+	// Clean up old entries if map gets too large (prevent memory leak)
+	if len(ps.processedIDs) > 10000 {
+		// Keep only recent entries by creating a new map
+		newMap := make(map[string]bool)
+		newMap[event.ID] = true // Always keep the current event
+		ps.processedIDs = newMap
+		logging.Infof("🧹 Cleaned up processed event ID cache")
+	}
+	ps.idMutex.Unlock()
 
 	// Log incoming event for push notification processing
 	logging.Infof("🔔 Processing event for push notifications - Kind: %d, Event ID: %s, Author: %s",
@@ -242,9 +267,10 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 	case 3: // Contact lists (new followers)
 		logging.Infof("✅ Event kind 3 (Contact list) will trigger notifications")
 		return true
-	case 4: // DMs
-		logging.Infof("✅ Event kind 4 (DM) will trigger notifications")
-		return true
+	// case 4: // Traditional DMs - DISABLED to prevent duplicates with kind 1059
+	// We only use kind 1059 (Gift Wrap) for encrypted DMs now
+	// logging.Infof("✅ Event kind 4 (DM) will trigger notifications")
+	// return true
 	case 6: // Reposts
 		logging.Infof("✅ Event kind 6 (Repost) will trigger notifications")
 		return true
@@ -332,13 +358,13 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 			}
 		}
 
-	case 4: // DM - notify the recipient
-		for _, tag := range event.Tags {
-			if len(tag) >= 2 && tag[0] == "p" {
-				addRecipient(tag[1])
-				logging.Infof("👤 Added recipient for DM: %s", tag[1])
-			}
-		}
+	// case 4: // Traditional DM - DISABLED to prevent duplicates with kind 1059
+	// for _, tag := range event.Tags {
+	// 	if len(tag) >= 2 && tag[0] == "p" {
+	// 		addRecipient(tag[1])
+	// 		logging.Infof("👤 Added recipient for DM: %s", tag[1])
+	// 	}
+	// }
 
 	case 1059: // Gift Wrap (NIP-59 encrypted DM) - notify the recipient
 		for _, tag := range event.Tags {
@@ -538,9 +564,9 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 		message.Title = "New Follower"
 		message.Body = fmt.Sprintf("%s started following you", authorName)
 
-	case 4: // DM
-		message.Title = "New Message"
-		message.Body = fmt.Sprintf("You have a new direct message from %s", authorName)
+	// case 4: // Traditional DM - DISABLED to prevent duplicates with kind 1059
+	// 	message.Title = "New Message"
+	// 	message.Body = fmt.Sprintf("You have a new direct message from %s", authorName)
 
 	case 6: // Repost
 		message.Title = "Repost"
