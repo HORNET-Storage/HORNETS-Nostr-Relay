@@ -44,12 +44,13 @@ type NotificationTask struct {
 
 // PushMessage represents the formatted push notification message
 type PushMessage struct {
-	Title    string
-	Body     string
-	Badge    int
-	Sound    string
-	Category string
-	Data     map[string]interface{}
+	Title          string
+	Body           string
+	Badge          int
+	Sound          string
+	Category       string
+	Data           map[string]interface{}
+	MutableContent bool // iOS-specific: allows app to modify notification before display
 }
 
 // APNSClient interface for Apple Push Notification service
@@ -535,9 +536,10 @@ func shortenPubkey(pubkey string) string {
 // formatNotificationMessage formats a push notification message for an event
 func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient string) *PushMessage {
 	message := &PushMessage{
-		Badge:    1,
-		Sound:    "default",
-		Category: fmt.Sprintf("kind_%d", event.Kind),
+		Badge:          1,
+		Sound:          "default",
+		Category:       fmt.Sprintf("kind_%d", event.Kind),
+		MutableContent: true, // Allow iOS app to modify notification before display
 		Data: map[string]interface{}{
 			"event_id":   event.ID,
 			"event_kind": event.Kind,
@@ -588,8 +590,11 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 	case 1059: // Gift Wrap (NIP-59 encrypted DM)
 		// For gift wraps, we can't show the real sender as it's encrypted
 		// The pubkey is a random ephemeral key
+		// With mutable-content: 1, iOS app can decrypt and show real sender
 		message.Title = "New Encrypted Message"
 		message.Body = "You have a new encrypted message"
+		// Add recipient to data so iOS can decrypt properly
+		message.Data["recipient"] = recipient
 
 	default:
 		message.Title = "New Notification"
