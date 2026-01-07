@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions DisableDelayedExpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
 REM Always operate from the script's folder (repo root)
 pushd "%~dp0" >nul
@@ -8,6 +8,7 @@ REM --- Config ---
 set "REPO_URL=https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git"
 set "PANEL_DIR=panel-source"
 set "BACKEND_EXE=hornet-storage.exe"
+set "CONFIG_FILE=config.yaml"
 set "NODE_OPTIONS=--openssl-legacy-provider --max-old-space-size=4096"
 REM -------------
 
@@ -16,6 +17,17 @@ echo ================================
 echo HORNETS-Relay-Panel Dev Runner
 echo ================================
 echo(
+
+REM Read base port from config.yaml and calculate web port (+2)
+set "BASE_PORT=9000"
+if exist "%CONFIG_FILE%" (
+  echo Reading port from %CONFIG_FILE%...
+  for /f "tokens=2 delims=: " %%a in ('findstr "port:" "%CONFIG_FILE%"') do (
+    set "BASE_PORT=%%a"
+  )
+)
+set /a "WEB_PORT=BASE_PORT + 2"
+echo Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
 
 REM 1) Clone panel if missing (no pull/update if it already exists)
 if not exist "%PANEL_DIR%" (
@@ -30,6 +42,28 @@ if not exist "%PANEL_DIR%\package.json" (
   goto FAIL
 )
 
+REM Update .env.development with the correct web port
+echo Updating .env.development with port !WEB_PORT!...
+if exist "%PANEL_DIR%\.env.development" (
+  set "FOUND_BASE_URL=0"
+  set "TEMP_ENV=%PANEL_DIR%\.env.tmp"
+  if exist "!TEMP_ENV!" del "!TEMP_ENV!"
+  for /f "usebackq delims=" %%a in ("%PANEL_DIR%\.env.development") do (
+    set "envline=%%a"
+    set "outline=!envline!"
+    echo !envline! | findstr /B /C:"REACT_APP_BASE_URL=" >nul
+    if not errorlevel 1 (
+      set "outline=REACT_APP_BASE_URL=http://localhost:!WEB_PORT!"
+      set "FOUND_BASE_URL=1"
+    )
+    echo !outline!>> "!TEMP_ENV!"
+  )
+  if "!FOUND_BASE_URL!"=="0" (
+    echo REACT_APP_BASE_URL=http://localhost:!WEB_PORT!>> "!TEMP_ENV!"
+  )
+  move /y "!TEMP_ENV!" "%PANEL_DIR%\.env.development" >nul
+)
+
 REM 2) Build the RELAY using root build.bat
 if not exist "build.bat" (
   echo ERROR: Root build.bat not found.
@@ -41,8 +75,6 @@ if errorlevel 1 (
   echo ERROR: build.bat failed.
   goto FAIL
 )
-
-popd >nul
 
 REM 3) Run the backend exe from the root
 if not exist "%BACKEND_EXE%" (

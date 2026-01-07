@@ -8,6 +8,7 @@ cd "$(dirname "$0")"
 REPO_URL="https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git"
 PANEL_DIR="panel-source"
 BACKEND_EXE="./hornet-storage"
+CONFIG_FILE="config.yaml"
 export NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=4096"
 # -------------
 
@@ -16,6 +17,18 @@ echo "==============================="
 echo "HORNETS-Relay-Panel Dev Runner"
 echo "==============================="
 echo
+
+# Read base port from config.yaml and calculate web port (+2)
+BASE_PORT="9000"
+if [ -f "$CONFIG_FILE" ]; then
+  echo "Reading port from $CONFIG_FILE..."
+  PARSED_PORT=$(grep -E "^\s*port:" "$CONFIG_FILE" | head -1 | sed 's/.*port:\s*//' | tr -d '[:space:]')
+  if [ -n "$PARSED_PORT" ]; then
+    BASE_PORT="$PARSED_PORT"
+  fi
+fi
+WEB_PORT=$((BASE_PORT + 2))
+echo "Base port: $BASE_PORT - Web panel port: $WEB_PORT"
 
 # 1) Clone panel if missing (no pull/update if it already exists)
 if [ ! -d "$PANEL_DIR" ]; then
@@ -31,6 +44,16 @@ fi
 if [ ! -f "$PANEL_DIR/package.json" ]; then
   echo "ERROR: $PANEL_DIR/package.json not found."
   exit 1
+fi
+
+# Update .env.development with the correct web port
+echo "Updating .env.development with port $WEB_PORT..."
+if [ -f "$PANEL_DIR/.env.development" ]; then
+  if grep -q "REACT_APP_BASE_URL=" "$PANEL_DIR/.env.development"; then
+    sed -i "s|REACT_APP_BASE_URL=http://localhost:[0-9]*|REACT_APP_BASE_URL=http://localhost:$WEB_PORT|g" "$PANEL_DIR/.env.development"
+  else
+    echo "REACT_APP_BASE_URL=http://localhost:$WEB_PORT" >> "$PANEL_DIR/.env.development"
+  fi
 fi
 
 # 2) Build the RELAY using root build.sh
