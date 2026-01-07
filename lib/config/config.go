@@ -54,13 +54,30 @@ func InitConfig() error {
 	// Try to read config file
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Config file not found, create it with defaults
-			fmt.Println("No config.yaml found, creating default configuration...")
-			if err := viper.WriteConfigAs("config.yaml"); err != nil {
-				return fmt.Errorf("failed to create default config: %w", err)
+			// Config file not found, create it from example
+			fmt.Println("No config.yaml found, creating from config.example.yaml...")
+
+			// Try to read config.example.yaml first
+			viper.SetConfigFile("config.example.yaml")
+			if err := viper.ReadInConfig(); err != nil {
+				// Example not found, fall back to defaults
+				fmt.Printf("Warning: config.example.yaml not found (%v), using built-in defaults...\n", err)
+				// Reset config name and create with defaults
+				viper.SetConfigName("config")
+				viper.SetConfigType("yaml")
+				if err := viper.WriteConfigAs("config.yaml"); err != nil {
+					return fmt.Errorf("failed to create default config: %w", err)
+				}
+			} else {
+				// Successfully read example, write it as config.yaml
+				if err := viper.WriteConfigAs("config.yaml"); err != nil {
+					return fmt.Errorf("failed to create config from example: %w", err)
+				}
+				fmt.Println("Created config.yaml from config.example.yaml")
 			}
-			fmt.Println("Created default config.yaml")
-			// Try to read it again
+
+			// Switch back to config.yaml and read it
+			viper.SetConfigFile("config.yaml")
 			if err := viper.ReadInConfig(); err != nil {
 				return fmt.Errorf("failed to read created config: %w", err)
 			}
@@ -145,7 +162,7 @@ func GetConfig() (*types.Config, error) {
 func GetPort(service string) int {
 	cfg, err := GetConfig()
 	if err != nil || cfg.Server.Port == 0 {
-		return 9000 // fallback
+		return 11000 // fallback
 	}
 
 	basePort := cfg.Server.Port
@@ -544,7 +561,7 @@ func setDefaults() {
 	fmt.Println("No existing config found, setting defaults for new installation")
 
 	// Server defaults
-	viper.SetDefault("server.port", 9000)
+	viper.SetDefault("server.port", 11000)
 	viper.SetDefault("server.bind_address", "0.0.0.0")
 	viper.SetDefault("server.upnp", false)
 	viper.SetDefault("server.nostr", true)
@@ -558,7 +575,7 @@ func setDefaults() {
 	viper.SetDefault("external_services.ollama.model", "gemma2:2b")
 	viper.SetDefault("external_services.ollama.timeout", 10000)
 	viper.SetDefault("external_services.moderator.url", "http://moderator:8000")
-	viper.SetDefault("external_services.wallet.url", "http://localhost:9003")
+	viper.SetDefault("external_services.wallet.url", "http://localhost:11003")
 	viper.SetDefault("external_services.wallet.key", "")
 	viper.SetDefault("external_services.wallet.name", "default")
 
@@ -569,8 +586,8 @@ func setDefaults() {
 	// Relay defaults
 	viper.SetDefault("relay.name", "HORNETS")
 	viper.SetDefault("relay.description", "HORNETS relay, the home of GitNestr")
-	viper.SetDefault("relay.contact", "support@hornets.net")
-	viper.SetDefault("relay.icon", "http://localhost:9002/logo-dark-192.png")
+	viper.SetDefault("relay.contact", "support@hornetstorage.com")
+	viper.SetDefault("relay.icon", "http://localhost:11002/logo-dark-192.png")
 	viper.SetDefault("relay.software", "HORNETS")
 	viper.SetDefault("relay.version", "0.0.1")
 	viper.SetDefault("relay.service_tag", "hornet-storage-service")
