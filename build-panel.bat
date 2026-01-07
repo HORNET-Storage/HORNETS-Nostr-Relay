@@ -8,16 +8,23 @@ REM --- Config ---
 set "CONFIG_FILE=config.yaml"
 REM -------------
 
-REM Read base port from config.yaml and calculate web port (+2)
-set "BASE_PORT=9000"
+REM Check if config.yaml exists and read port early
+set "CONFIG_EXISTS=0"
+set "BASE_PORT="
 if exist "%CONFIG_FILE%" (
-  echo Reading port from %CONFIG_FILE%...
-  for /f "tokens=2 delims=: " %%a in ('findstr "port:" "%CONFIG_FILE%"') do (
+  set "CONFIG_EXISTS=1"
+  for /f "tokens=2 delims=: " %%a in ('findstr "port:" "%CONFIG_FILE%" ^| findstr /V "http"') do (
     set "BASE_PORT=%%a"
   )
+  if defined BASE_PORT (
+    set /a "WEB_PORT=BASE_PORT + 2"
+    echo Config found - Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
+  )
 )
-set /a "WEB_PORT=BASE_PORT + 2"
-echo Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
+
+if "!CONFIG_EXISTS!"=="0" (
+  echo No config.yaml found - relay will generate it on first run.
+)
 
 REM 0) Build the RELAY using root build.bat
 if not exist "build.bat" (
@@ -29,6 +36,30 @@ call build.bat
 if errorlevel 1 (
   echo ERROR: build.bat failed.
   goto FAIL
+)
+
+REM If config didn't exist, run relay briefly to generate it
+if "!CONFIG_EXISTS!"=="0" (
+  if exist "hornet-storage.exe" (
+    echo Starting relay briefly to generate config.yaml...
+    start "" "hornet-storage.exe"
+    timeout /t 3 /nobreak >nul
+    taskkill /IM "hornet-storage.exe" /F >nul 2>&1
+  )
+
+  if exist "%CONFIG_FILE%" (
+    for /f "tokens=2 delims=: " %%a in ('findstr "port:" "%CONFIG_FILE%" ^| findstr /V "http"') do (
+      set "BASE_PORT=%%a"
+    )
+  )
+
+  if not defined BASE_PORT (
+    echo WARNING: Could not read port from config.yaml, using default 11000
+    set "BASE_PORT=11000"
+  )
+
+  set /a "WEB_PORT=BASE_PORT + 2"
+  echo Config generated - Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
 )
 
 REM Step 1: Remove old panel source
