@@ -98,12 +98,12 @@ cp config.example.yaml config.yaml
 
 *Run this script found in the main directory:*
 ```powershell
-./build-panel.bat
+.\build-panel.bat
 ```
 
 The compiled binary (hornet-storage or hornet-storage.exe) will be created in the project root directory.
 
-**📌 Port Info:** The web panel runs on **port +2**. If you set `port: 9000` in config.yaml, the panel will be at `http://localhost:9002`.
+**📌 Port Info:** The web panel runs on **base port +2**. The default base port is `11000`, so the panel will be at `http://localhost:11002`. (Base port can be changed by renaming `config.example.yaml` to `config.yaml` before building, or by editing the auto-generated `config.yaml` after the first build.)
 
 ---
 
@@ -136,12 +136,12 @@ cp config.example.yaml config.yaml
 
 *Run this script found in the main directory:*
 ```powershell
-./build-panel-devmode.bat
+.\build-panel-devmode.bat
 ```
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
-**📌 Port Info:** In dev mode, the React dev server runs on **port +3**. If you set `port: 9000` in config.yaml, access the panel at `http://localhost:9003`. The API backend runs on port +2 (9002).
+**📌 Port Info:** In dev mode, the React dev server runs on **base port +3** and the API backend runs on **base port +2**. The default base port is `11000`, so access the panel at `http://localhost:11003` (API at `http://localhost:11002`). (Base port can be changed by renaming `config.example.yaml` to `config.yaml` before building, or by editing the auto-generated `config.yaml` after the first build.)
 
 ---
 
@@ -165,7 +165,7 @@ cd HORNETS-Nostr-Relay
 
 *Run this script found in the main directory:*
 ```powershell
-./build.bat
+.\build.bat
 ```
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
