@@ -18,7 +18,7 @@ echo HORNETS-Relay-Panel Dev Runner
 echo ================================
 echo(
 
-REM Read base port from config.yaml and calculate web port (+2)
+REM Read base port from config.yaml and calculate ports
 set "BASE_PORT=9000"
 if exist "%CONFIG_FILE%" (
   echo Reading port from %CONFIG_FILE%...
@@ -27,7 +27,8 @@ if exist "%CONFIG_FILE%" (
   )
 )
 set /a "WEB_PORT=BASE_PORT + 2"
-echo Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
+set /a "DEV_PORT=BASE_PORT + 3"
+echo Base port: !BASE_PORT! - API port: !WEB_PORT! - Dev server port: !DEV_PORT!
 
 REM 1) Clone panel if missing (no pull/update if it already exists)
 if not exist "%PANEL_DIR%" (
@@ -109,6 +110,8 @@ if errorlevel 1 (
 )
 
 REM Prefer CRACO if present; else yarn start; else npm start
+echo Starting React dev server on port !DEV_PORT!...
+set "PORT=!DEV_PORT!"
 if exist "node_modules\.bin\craco" (
   call npx craco start
   set "RC=%ERRORLEVEL%"

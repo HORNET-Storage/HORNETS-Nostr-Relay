@@ -18,7 +18,7 @@ echo "HORNETS-Relay-Panel Dev Runner"
 echo "==============================="
 echo
 
-# Read base port from config.yaml and calculate web port (+2)
+# Read base port from config.yaml and calculate ports
 BASE_PORT="9000"
 if [ -f "$CONFIG_FILE" ]; then
   echo "Reading port from $CONFIG_FILE..."
@@ -28,7 +28,8 @@ if [ -f "$CONFIG_FILE" ]; then
   fi
 fi
 WEB_PORT=$((BASE_PORT + 2))
-echo "Base port: $BASE_PORT - Web panel port: $WEB_PORT"
+DEV_PORT=$((BASE_PORT + 3))
+echo "Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT"
 
 # 1) Clone panel if missing (no pull/update if it already exists)
 if [ ! -d "$PANEL_DIR" ]; then
@@ -93,10 +94,11 @@ node_modules/.bin/lessc --js --clean-css="--s1 --advanced" src/styles/themes/mai
 }
 
 # Prefer CRACO if present; else yarn start; else npm start
+echo "Starting React dev server on port $DEV_PORT..."
 if [ -f "node_modules/.bin/craco" ]; then
-  exec npx craco start
+  PORT=$DEV_PORT exec npx craco start
 elif command -v yarn >/dev/null 2>&1; then
-  NODE_ENV=development exec yarn start
+  PORT=$DEV_PORT NODE_ENV=development exec yarn start
 else
-  NODE_ENV=development exec npm run start
+  PORT=$DEV_PORT NODE_ENV=development exec npm run start
 fi
