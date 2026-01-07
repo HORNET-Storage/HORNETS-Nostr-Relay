@@ -72,13 +72,19 @@ Required for building C-based dependencies via `cgo`.
 
 ---
 
-### 🚀 **QUICK SETUP: Building Relay with Panel** (When Needing to Pull Latest)
+### 🚀 **QUICK SETUP: Building Relay with Panel** (Production Mode)
 
 After cloning the repository,
 
 ```bash
 git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
 cd HORNETS-Nostr-Relay
+```
+
+**Optional:** To change the server port, copy and edit `config.example.yaml` before building:
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml and change the port value under server:
 ```
 
 #### On **Linux or macOS**:
@@ -97,16 +103,26 @@ cd HORNETS-Nostr-Relay
 
 The compiled binary (hornet-storage or hornet-storage.exe) will be created in the project root directory.
 
+**📌 Port Info:** The web panel runs on **port +2**. If you set `port: 9000` in config.yaml, the panel will be at `http://localhost:9002`.
+
 ---
 
 
-### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode If Modifying Panel In /panel-source)
+### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode)
+
+Use this mode when modifying the panel source code in `/panel-source`.
 
 After cloning the repository,
 
 ```bash
 git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
 cd HORNETS-Nostr-Relay
+```
+
+**Optional:** To change the server port, copy and edit `config.example.yaml` before building:
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml and change the port value under server:
 ```
 
 #### On **Linux or macOS**:
@@ -125,11 +141,7 @@ cd HORNETS-Nostr-Relay
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
-#### ⚠️ When Troubleshooting:
-
-*Make sure the port in the .env.development file for the relay's base URL matches the port that the relay is using inside of the config.yaml file.*
-
-***Web panel is always served on that port +2, so if the relay is running on 9000 then the .env.development base url needs to point to 9002.***
+**📌 Port Info:** In dev mode, the React dev server runs on **port +3**. If you set `port: 9000` in config.yaml, access the panel at `http://localhost:9003`. The API backend runs on port +2 (9002).
 
 ---
 
