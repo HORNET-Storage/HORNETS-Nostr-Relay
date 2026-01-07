@@ -682,6 +682,55 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 	return nil
 }
 
+// DeleteEventsByTag deletes all events that have a specific tag with a specific value
+// and were created before the given timestamp. Returns the IDs of deleted events.
+// This is used for cascade deletions where all events with a matching tag (e.g., "r" tag
+// for repository identifier) should be deleted as part of a parent resource deletion.
+func (store *BadgerholdStore) DeleteEventsByTag(tagName string, tagValue string, beforeTimestamp int64) ([]string, error) {
+	// Find all tag entries matching the tag name and value
+	var tagEntries []types.TagEntry
+	err := store.Database.Find(&tagEntries, badgerhold.Where("TagName").Eq(tagName).And("TagValue").Eq(tagValue))
+	if err != nil && err != badgerhold.ErrNotFound {
+		return nil, fmt.Errorf("failed to query tag entries: %w", err)
+	}
+
+	if len(tagEntries) == 0 {
+		return []string{}, nil
+	}
+
+	// Collect unique event IDs
+	eventIDs := make(map[string]struct{})
+	for _, entry := range tagEntries {
+		eventIDs[entry.EventID] = struct{}{}
+	}
+
+	// Filter events by timestamp and delete them
+	var deletedEventIDs []string
+	for eventID := range eventIDs {
+		// Fetch the event to check its timestamp
+		var event types.NostrEvent
+		err := store.Database.Get(eventID, &event)
+		if err != nil {
+			if err == badgerhold.ErrNotFound {
+				continue // Event already deleted or doesn't exist
+			}
+			logging.Infof("Failed to get event %s for cascade delete: %v", eventID, err)
+			continue
+		}
+
+		// Only delete events created before the tombstone timestamp
+		if int64(event.CreatedAt) < beforeTimestamp {
+			if err := store.DeleteEvent(eventID); err != nil {
+				logging.Infof("Failed to delete event %s during cascade: %v", eventID, err)
+				continue
+			}
+			deletedEventIDs = append(deletedEventIDs, eventID)
+		}
+	}
+
+	return deletedEventIDs, nil
+}
+
 // Blossom Blobs (unchunked data)
 func (store *BadgerholdStore) StoreBlob(data []byte, hash []byte, publicKey string) error {
 	encodedHash := hex.EncodeToString(hash)
