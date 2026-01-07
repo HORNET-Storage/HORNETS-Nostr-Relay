@@ -28,7 +28,8 @@ if [ -f "$CONFIG_FILE" ]; then
     BASE_PORT="$PARSED_PORT"
     WEB_PORT=$((BASE_PORT + 2))
     DEV_PORT=$((BASE_PORT + 3))
-    echo "Config found - Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT"
+    WALLET_PORT=$((BASE_PORT + 4))
+    echo "Config found - Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT - Wallet port: $WALLET_PORT"
   fi
 fi
 
@@ -88,16 +89,22 @@ if [ "$CONFIG_EXISTS" -eq 0 ]; then
 
   WEB_PORT=$((BASE_PORT + 2))
   DEV_PORT=$((BASE_PORT + 3))
-  echo "Config generated - Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT"
+  WALLET_PORT=$((BASE_PORT + 4))
+  echo "Config generated - Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT - Wallet port: $WALLET_PORT"
 fi
 
-# 5) Update .env.development with the correct web port
-echo "Updating .env.development with port $WEB_PORT..."
+# 5) Update .env.development with the correct ports
+echo "Updating .env.development with API port $WEB_PORT and wallet port $WALLET_PORT..."
 if [ -f "$PANEL_DIR/.env.development" ]; then
   if grep -q "REACT_APP_BASE_URL=" "$PANEL_DIR/.env.development"; then
     sed -i "s|REACT_APP_BASE_URL=http://localhost:[0-9]*|REACT_APP_BASE_URL=http://localhost:$WEB_PORT|g" "$PANEL_DIR/.env.development"
   else
     echo "REACT_APP_BASE_URL=http://localhost:$WEB_PORT" >> "$PANEL_DIR/.env.development"
+  fi
+  if grep -q "REACT_APP_WALLET_BASE_URL=" "$PANEL_DIR/.env.development"; then
+    sed -i "s|REACT_APP_WALLET_BASE_URL=http://localhost:[0-9]*|REACT_APP_WALLET_BASE_URL=http://localhost:$WALLET_PORT|g" "$PANEL_DIR/.env.development"
+  else
+    echo "REACT_APP_WALLET_BASE_URL=http://localhost:$WALLET_PORT" >> "$PANEL_DIR/.env.development"
   fi
 fi
 

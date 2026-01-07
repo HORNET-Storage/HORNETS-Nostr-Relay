@@ -6,6 +6,7 @@ echo.
 
 REM --- Config ---
 set "CONFIG_FILE=config.yaml"
+set "NODE_OPTIONS=--openssl-legacy-provider --max-old-space-size=4096"
 REM -------------
 
 REM Check if config.yaml exists and read port early
@@ -18,7 +19,8 @@ if exist "%CONFIG_FILE%" (
   )
   if defined BASE_PORT (
     set /a "WEB_PORT=BASE_PORT + 2"
-    echo Config found - Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
+    set /a "WALLET_PORT=BASE_PORT + 4"
+    echo Config found - Base port: !BASE_PORT! - Web panel port: !WEB_PORT! - Wallet port: !WALLET_PORT!
   )
 )
 
@@ -59,7 +61,8 @@ if "!CONFIG_EXISTS!"=="0" (
   )
 
   set /a "WEB_PORT=BASE_PORT + 2"
-  echo Config generated - Base port: !BASE_PORT! - Web panel port: !WEB_PORT!
+  set /a "WALLET_PORT=BASE_PORT + 4"
+  echo Config generated - Base port: !BASE_PORT! - Web panel port: !WEB_PORT! - Wallet port: !WALLET_PORT!
 )
 
 REM Step 1: Remove old panel source
@@ -77,11 +80,12 @@ if not exist panel-source (
 REM Step 3: Navigate into panel-source for all remaining commands
 pushd panel-source
 
-REM Step 4: Update .env files with the correct web port
-echo Updating .env files with port !WEB_PORT!...
+REM Step 4: Update .env files with the correct ports
+echo Updating .env files with API port !WEB_PORT! and wallet port !WALLET_PORT!...
 for %%f in (.env.development .env.production) do (
   if exist "%%f" (
     set "FOUND_BASE_URL=0"
+    set "FOUND_WALLET_URL=0"
     set "TEMP_ENV=%%f.tmp"
     if exist "!TEMP_ENV!" del "!TEMP_ENV!"
     for /f "usebackq delims=" %%a in ("%%f") do (
@@ -92,10 +96,18 @@ for %%f in (.env.development .env.production) do (
         set "outline=REACT_APP_BASE_URL=http://localhost:!WEB_PORT!"
         set "FOUND_BASE_URL=1"
       )
+      echo !envline! | findstr /B /C:"REACT_APP_WALLET_BASE_URL=" >nul
+      if not errorlevel 1 (
+        set "outline=REACT_APP_WALLET_BASE_URL=http://localhost:!WALLET_PORT!"
+        set "FOUND_WALLET_URL=1"
+      )
       echo !outline!>> "!TEMP_ENV!"
     )
     if "!FOUND_BASE_URL!"=="0" (
       echo REACT_APP_BASE_URL=http://localhost:!WEB_PORT!>> "!TEMP_ENV!"
+    )
+    if "!FOUND_WALLET_URL!"=="0" (
+      echo REACT_APP_WALLET_BASE_URL=http://localhost:!WALLET_PORT!>> "!TEMP_ENV!"
     )
     move /y "!TEMP_ENV!" "%%f" >nul
   )
@@ -134,6 +146,7 @@ echo 3. The panel should load automatically
 :end
 pause
 endlocal
+exit /b 0
 
 :FAIL
 exit /b 1

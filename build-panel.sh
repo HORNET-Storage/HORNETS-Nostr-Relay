@@ -7,6 +7,7 @@ set -e
 
 # --- Config ---
 CONFIG_FILE="config.yaml"
+export NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=4096"
 # -------------
 
 echo "Building HORNETS-Relay-Panel..."
@@ -20,7 +21,8 @@ if [ -f "$CONFIG_FILE" ]; then
   if [ -n "$PARSED_PORT" ]; then
     BASE_PORT="$PARSED_PORT"
     WEB_PORT=$((BASE_PORT + 2))
-    echo "Config found - Base port: $BASE_PORT - Web panel port: $WEB_PORT"
+    WALLET_PORT=$((BASE_PORT + 4))
+    echo "Config found - Base port: $BASE_PORT - Web panel port: $WEB_PORT - Wallet port: $WALLET_PORT"
   fi
 fi
 
@@ -59,7 +61,8 @@ if [ "$CONFIG_EXISTS" -eq 0 ]; then
   fi
 
   WEB_PORT=$((BASE_PORT + 2))
-  echo "Config generated - Base port: $BASE_PORT - Web panel port: $WEB_PORT"
+  WALLET_PORT=$((BASE_PORT + 4))
+  echo "Config generated - Base port: $BASE_PORT - Web panel port: $WEB_PORT - Wallet port: $WALLET_PORT"
 fi
 
 # Remove old panel source to get latest changes
@@ -73,14 +76,19 @@ git clone https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git ./panel-sour
 # Navigate to panel source directory
 cd panel-source
 
-# Update .env files with the correct web port
-echo "Updating .env files with port $WEB_PORT..."
+# Update .env files with the correct ports
+echo "Updating .env files with API port $WEB_PORT and wallet port $WALLET_PORT..."
 for envfile in .env.development .env.production; do
   if [ -f "$envfile" ]; then
     if grep -q "REACT_APP_BASE_URL=" "$envfile"; then
       sed -i "s|REACT_APP_BASE_URL=http://localhost:[0-9]*|REACT_APP_BASE_URL=http://localhost:$WEB_PORT|g" "$envfile"
     else
       echo "REACT_APP_BASE_URL=http://localhost:$WEB_PORT" >> "$envfile"
+    fi
+    if grep -q "REACT_APP_WALLET_BASE_URL=" "$envfile"; then
+      sed -i "s|REACT_APP_WALLET_BASE_URL=http://localhost:[0-9]*|REACT_APP_WALLET_BASE_URL=http://localhost:$WALLET_PORT|g" "$envfile"
+    else
+      echo "REACT_APP_WALLET_BASE_URL=http://localhost:$WALLET_PORT" >> "$envfile"
     fi
   fi
 done
