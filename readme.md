@@ -141,7 +141,7 @@ cp config.example.yaml config.yaml
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
-**📌 Port Info:** In dev mode, the React dev server runs on **base port +3** and the API backend runs on **base port +2**. The default base port is `11000`, so access the panel at `http://localhost:11003` (API at `http://localhost:11002`). (Base port can be changed by renaming `config.example.yaml` to `config.yaml` before building, or by editing the auto-generated `config.yaml` after the first build.)
+**📌 Port Info:** In dev mode, the React dev server runs on **base port +3**. The default base port is `11000`, so access the panel at `http://localhost:11003`. (Base port can be changed by renaming `config.example.yaml` to `config.yaml` before building, or by editing the auto-generated `config.yaml` after the first build.)
 
 ---
 
