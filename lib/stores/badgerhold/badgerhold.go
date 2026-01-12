@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -127,7 +129,10 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 
 	// Start background garbage collection for Badger value logs
 	// This prevents disk space from growing indefinitely due to old/deleted values
-	go runBadgerGC(store.Database.Badger(), store.Ctx, "main", 10*time.Minute)
+	go runBadgerGC(store.Database.Badger(), store.Ctx, "main", 10*time.Minute, 0.5)
+
+	// Start disk usage monitoring (logs every 5 minutes)
+	go runDiskUsageMonitor(store, 5*time.Minute)
 
 	return store, nil
 }
@@ -249,18 +254,145 @@ func (store *BadgerholdStore) GetDatabaseSize() (lsm int64, vlog int64) {
 	return store.Database.Badger().Size()
 }
 
+// DiskUsageStats holds disk usage statistics for monitoring
+type DiskUsageStats struct {
+	LSMSizeMB      int64
+	VLogSizeMB     int64
+	TotalSizeMB    int64
+	VLogFileCount  int
+	SSTFileCount   int
+	TotalFileCount int
+	EventsStored   int64
+	EventsDeleted  int64
+	LeavesStored   int64
+	GCRunCount     int64
+	GCReclaimedMB  int64
+}
+
+// Global counters for tracking write operations
+var (
+	eventsStoredCount  atomic.Int64
+	eventsDeletedCount atomic.Int64
+	// leavesStoredCount is defined in badgerhold_dags.go as storedLeafCount
+	gcRunCount       atomic.Int64
+	gcReclaimedBytes atomic.Int64
+)
+
+// GetDiskUsageStats returns comprehensive disk usage statistics
+func (store *BadgerholdStore) GetDiskUsageStats() DiskUsageStats {
+	if store.IsClosed() {
+		return DiskUsageStats{}
+	}
+
+	lsm, vlog := store.Database.Badger().Size()
+
+	// Count files in database directory
+	vlogCount := 0
+	sstCount := 0
+	totalCount := 0
+
+	entries, err := os.ReadDir(store.DatabasePath)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			totalCount++
+			name := entry.Name()
+			if strings.HasSuffix(name, ".vlog") {
+				vlogCount++
+			} else if strings.HasSuffix(name, ".sst") {
+				sstCount++
+			}
+		}
+	}
+
+	return DiskUsageStats{
+		LSMSizeMB:      lsm / (1024 * 1024),
+		VLogSizeMB:     vlog / (1024 * 1024),
+		TotalSizeMB:    (lsm + vlog) / (1024 * 1024),
+		VLogFileCount:  vlogCount,
+		SSTFileCount:   sstCount,
+		TotalFileCount: totalCount,
+		EventsStored:   eventsStoredCount.Load(),
+		EventsDeleted:  eventsDeletedCount.Load(),
+		LeavesStored:   storedLeafCount.Load(), // from badgerhold_dags.go
+		GCRunCount:     gcRunCount.Load(),
+		GCReclaimedMB:  gcReclaimedBytes.Load() / (1024 * 1024),
+	}
+}
+
+// runDiskUsageMonitor logs disk usage statistics periodically
+func runDiskUsageMonitor(store *BadgerholdStore, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var lastStats DiskUsageStats
+
+	for {
+		select {
+		case <-ticker.C:
+			if store.IsClosed() {
+				return
+			}
+
+			stats := store.GetDiskUsageStats()
+
+			// Calculate deltas
+			deltaEvents := stats.EventsStored - lastStats.EventsStored
+			deltaDeletes := stats.EventsDeleted - lastStats.EventsDeleted
+			deltaLeaves := stats.LeavesStored - lastStats.LeavesStored
+			deltaSizeMB := stats.TotalSizeMB - lastStats.TotalSizeMB
+
+			logging.Infof("[DISK MONITOR] Total: %d MB (LSM: %d MB, VLog: %d MB) | Files: %d (.vlog: %d, .sst: %d) | Delta: %+d MB",
+				stats.TotalSizeMB, stats.LSMSizeMB, stats.VLogSizeMB,
+				stats.TotalFileCount, stats.VLogFileCount, stats.SSTFileCount,
+				deltaSizeMB)
+
+			logging.Infof("[DISK MONITOR] Operations since last check: Events stored: %d, deleted: %d | Leaves stored: %d | GC runs: %d (reclaimed: %d MB total)",
+				deltaEvents, deltaDeletes, deltaLeaves,
+				stats.GCRunCount, stats.GCReclaimedMB)
+
+			lastStats = stats
+
+		case <-store.Ctx.Done():
+			return
+		}
+	}
+}
+
 // runBadgerGC runs Badger's value log garbage collection periodically.
-func runBadgerGC(db *badger.DB, ctx context.Context, name string, interval time.Duration) {
+// discardRatio: files with garbage ratio > discardRatio will be rewritten (lower = more aggressive)
+// - 0.5 = only compact files with >50% garbage (standard, recommended)
+// - 0.3 = compact files with >30% garbage (more aggressive)
+func runBadgerGC(db *badger.DB, ctx context.Context, name string, interval time.Duration, discardRatio float64) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
+			// Get size before GC
+			_, vlogBefore := db.Size()
+
+			// Run GC iterations until no more files need compaction
+			gcIterations := 0
 			for i := 0; i < 10; i++ {
-				if err := db.RunValueLogGC(0.5); err != nil {
+				if err := db.RunValueLogGC(discardRatio); err != nil {
 					break
 				}
+				gcIterations++
+			}
+
+			// Track GC activity
+			if gcIterations > 0 {
+				gcRunCount.Add(1)
+				_, vlogAfter := db.Size()
+				if vlogBefore > vlogAfter {
+					gcReclaimedBytes.Add(vlogBefore - vlogAfter)
+				}
+				logging.Infof("[GC] Completed %d iterations, reclaimed %d MB",
+					gcIterations, (vlogBefore-vlogAfter)/(1024*1024))
 			}
 		case <-ctx.Done():
 			return
@@ -581,33 +713,44 @@ func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 	event := WrapEvent(ev)
 
-	err := store.Database.Upsert(event.ID, event)
+	// Batch all writes (event + tags) into a single transaction to reduce write amplification
+	err := store.Database.Badger().Update(func(tx *badger.Txn) error {
+		// Store the event
+		if err := store.Database.TxUpsert(tx, event.ID, event); err != nil {
+			return fmt.Errorf("failed to store nostr event: %w", err)
+		}
+
+		// Store all tags in the same transaction
+		for _, tag := range event.Tags {
+			if len(tag) < 2 {
+				continue
+			}
+
+			if len(tag[0]) != 1 {
+				continue
+			}
+
+			entry := types.TagEntry{
+				EventID:  event.ID,
+				TagName:  tag[0],
+				TagValue: tag[1],
+			}
+
+			key := fmt.Sprintf("tag:%s:%s:%s", tag[0], tag[1], event.ID)
+
+			if err := store.Database.TxUpsert(tx, key, entry); err != nil {
+				return fmt.Errorf("failed to store tag entry: %w", err)
+			}
+		}
+
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to store nostr event: %w", err)
+		return err
 	}
 
-	for _, tag := range event.Tags {
-		if len(tag) < 2 {
-			continue
-		}
-
-		if len(tag[0]) != 1 {
-			continue
-		}
-
-		entry := types.TagEntry{
-			EventID:  event.ID,
-			TagName:  tag[0],
-			TagValue: tag[1],
-		}
-
-		key := fmt.Sprintf("tag:%s:%s:%s", tag[0], tag[1], event.ID)
-
-		err := store.Database.Upsert(key, entry)
-		if err != nil {
-			return fmt.Errorf("failed to store tag entry: %w", err)
-		}
-	}
+	// Track for disk monitoring
+	eventsStoredCount.Add(1)
 
 	// Record event statistics
 	if store.StatsDatabase != nil {
@@ -659,10 +802,38 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 }
 
 func (store *BadgerholdStore) DeleteEvent(eventID string) error {
-	err := store.Database.Delete(eventID, types.NostrEvent{})
-	if err != nil {
-		return fmt.Errorf("failed to find event to delete: %w", err)
+	// Find all tag entries for this event to delete them along with the event
+	var tagEntries []types.TagEntry
+	if err := store.Database.Find(&tagEntries, badgerhold.Where("EventID").Eq(eventID)); err != nil {
+		if err != badgerhold.ErrNotFound {
+			logging.Infof("Warning: failed to find tag entries for event %s: %v", eventID, err)
+		}
 	}
+
+	// Batch delete event and all its tags in a single transaction
+	err := store.Database.Badger().Update(func(tx *badger.Txn) error {
+		// Delete all tag entries
+		for _, entry := range tagEntries {
+			key := fmt.Sprintf("tag:%s:%s:%s", entry.TagName, entry.TagValue, eventID)
+			if err := store.Database.TxDelete(tx, key, types.TagEntry{}); err != nil {
+				// Log but don't fail - tag may already be deleted
+				logging.Infof("Warning: failed to delete tag entry %s: %v", key, err)
+			}
+		}
+
+		// Delete the event
+		if err := store.Database.TxDelete(tx, eventID, types.NostrEvent{}); err != nil {
+			return fmt.Errorf("failed to delete event: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete event and tags: %w", err)
+	}
+
+	// Track for disk monitoring
+	eventsDeletedCount.Add(1)
 
 	// Remove event from statistics
 	if store.StatsDatabase != nil {

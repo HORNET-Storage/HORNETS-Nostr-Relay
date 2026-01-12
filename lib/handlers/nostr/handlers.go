@@ -30,3 +30,7 @@ func GetHandler(kind string) func(read KindReader, write KindWriter) {
 func GetHandlers() map[string]KindHandler {
 	return KindHandlers
 }
+
+func ClearHandlers() {
+	KindHandlers = make(map[string]KindHandler)
+}

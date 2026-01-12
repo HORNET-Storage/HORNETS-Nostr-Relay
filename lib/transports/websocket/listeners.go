@@ -111,5 +111,20 @@ func generateGlobalChallenge() (string, error) {
 
 // Get the global challenge
 func getGlobalChallenge() string {
-	return globalChallenge.Load().(string)
+	val := globalChallenge.Load()
+	if val == nil {
+		// Generate challenge if not set
+		challenge, err := generateGlobalChallenge()
+		if err != nil {
+			return ""
+		}
+		return challenge
+	}
+	return val.(string)
+}
+
+// InitGlobalChallenge initializes the global challenge for testing or manual setup
+func InitGlobalChallenge() error {
+	_, err := generateGlobalChallenge()
+	return err
 }

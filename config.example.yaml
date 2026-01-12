@@ -136,6 +136,10 @@ event_filtering:
         - 30023
         - 30078
         - 30079
+        - 76
+        - 75
+        - 74
+        - 73
 external_services:
     moderator:
         url: http://moderator:8000
@@ -247,11 +251,16 @@ relay:
     version: 0.0.1
 server:
     bind_address: 0.0.0.0
+    port: 11000
+    upnp: false
     data_path: ./data
     demo: false
     hornets: true
     nostr: true
-    port: 11000
-    upnp: false
+    blossom: true
     web: true
-startup_initialized: 1767770874
+    services:
+        airlock:
+            host: ""
+            port: 11006
+            pubkey: ""

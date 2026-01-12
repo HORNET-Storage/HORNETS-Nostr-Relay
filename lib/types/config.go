@@ -22,6 +22,7 @@ type ServerConfig struct {
 	Hornets     bool   `mapstructure:"hornets"`
 	Web         bool   `mapstructure:"web"`
 	Demo        bool   `mapstructure:"demo"`
+	Blossom     bool   `mapstructure:"blossom"`
 	DataPath    string `mapstructure:"data_path"`
 }
 

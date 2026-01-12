@@ -28,7 +28,7 @@ import (
 )
 
 type connectionState struct {
-	authenticated    bool
+	authenticated   bool
 	pubkey          string    // Store the pubkey to know who owns this connection
 	blockedCheck    time.Time // When we last checked if this pubkey is blocked
 	authAttempts    int       // Track number of auth attempts
@@ -135,11 +135,47 @@ func BuildServer(store stores.Store) *fiber.App {
 		}
 	}))
 
+	return app
+}
+
+// BuildBlossomServer creates a separate Fiber app for Blossom file storage
+func BuildBlossomServer(store stores.Store) *fiber.App {
+	app := fiber.New()
+
 	// Enable blossom routes for unchunked file storage
 	server := blossom.NewServer(store)
 	server.SetupRoutes(app)
 
 	return app
+}
+
+// StartBlossomServer starts the Blossom server on its own port (base_port + 5)
+func StartBlossomServer(app *fiber.App) error {
+	address := viper.GetString("server.address")
+	port := config.GetPort("blossom")
+
+	logging.Info("Starting Blossom server", map[string]interface{}{
+		"address": address,
+		"port":    port,
+	})
+
+	err := app.Listen(fmt.Sprintf("%s:%d", address, port))
+	if err != nil {
+		logging.Fatalf("error starting blossom server: %v\n", err)
+	}
+
+	if viper.GetBool("server.upnp") {
+		upnp := upnp.Get()
+
+		err := upnp.ForwardPort(uint16(port), "Hornet Storage Blossom")
+		if err != nil {
+			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+				"port": port,
+			})
+		}
+	}
+
+	return err
 }
 
 func StartServer(app *fiber.App) error {
@@ -203,6 +239,7 @@ func GetRelayInfo() NIP11RelayInfo {
 	}
 
 	// These values are set in main.go init() for backward compatibility
+	basePort := viper.GetInt("server.port")
 	relayInfo := NIP11RelayInfo{
 		Name:          viper.GetString("relay.name"),
 		Description:   viper.GetString("relay.description"),
@@ -212,7 +249,11 @@ func GetRelayInfo() NIP11RelayInfo {
 		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
 		Software:      viper.GetString("relay.software"),
 		Version:       viper.GetString("relay.version"),
+		BasePort:      basePort, // Clients use this + offsets to find services
 	}
+
+	// Build services map for external services only (services not derivable from offset)
+	relayInfo.Services = buildServicesMap()
 
 	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("relay.private_key"))
 	libp2pId := viper.GetString("LibP2PID")
@@ -231,6 +272,47 @@ func GetRelayInfo() NIP11RelayInfo {
 	}
 
 	return relayInfo
+}
+
+// buildServicesMap constructs the services map from config
+// Built-in services (hornets, panel, blossom) use fixed offsets from base_port
+// External services configured under server.services are advertised here
+func buildServicesMap() RelayServices {
+	services := make(RelayServices)
+
+	// Get all services from config
+	servicesConfig := viper.GetStringMap("server.services")
+
+	for serviceName := range servicesConfig {
+		// Check if service has a port configured (required)
+		portKey := fmt.Sprintf("server.services.%s.port", serviceName)
+		port := viper.GetInt(portKey)
+
+		if port <= 0 {
+			continue // Skip services without a valid port
+		}
+
+		// Build the service endpoint from config
+		hostKey := fmt.Sprintf("server.services.%s.host", serviceName)
+		pathKey := fmt.Sprintf("server.services.%s.path", serviceName)
+		pubkeyKey := fmt.Sprintf("server.services.%s.pubkey", serviceName)
+
+		endpoint := &ServiceEndpoint{
+			Host:   viper.GetString(hostKey),
+			Port:   port,
+			Path:   viper.GetString(pathKey),
+			Pubkey: viper.GetString(pubkeyKey),
+		}
+
+		services[serviceName] = endpoint
+	}
+
+	// Return nil if no services configured (omit from JSON)
+	if len(services) == 0 {
+		return nil
+	}
+
+	return services
 }
 
 func SignRelay(relay *NIP11RelayInfo, privKey *btcec.PrivateKey) error {
@@ -344,7 +426,7 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 					// Rate limiting: Check if too many auth attempts
 					const maxAuthAttempts = 5
 					const authRateLimitWindow = time.Minute
-					
+
 					now := time.Now()
 					if state.authAttempts >= maxAuthAttempts {
 						if now.Sub(state.lastAuthAttempt) < authRateLimitWindow {
@@ -356,10 +438,10 @@ func processWebSocketMessage(c *websocket.Conn, challenge string, state *connect
 						// Reset counter after window expires
 						state.authAttempts = 0
 					}
-					
+
 					state.authAttempts++
 					state.lastAuthAttempt = now
-					
+
 					logging.Infof("Received AUTH event (attempt %d)", state.authAttempts)
 					eventBytes, err := json.Marshal(eventMap)
 					if err != nil {

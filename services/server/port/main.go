@@ -63,9 +63,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind443"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind444"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind445"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30009"
@@ -73,6 +70,9 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30044"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30078"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind443"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind444"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind445"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -636,7 +636,26 @@ func main() {
 			err := ws.StartServer(wsApp)
 
 			if err != nil {
-				logging.Info("Fatal error occurred in web server")
+				logging.Info("Fatal error occurred in nostr server")
+			}
+
+			wg.Done()
+		}()
+	}
+
+	// Blossom file storage
+	var blossomApp *fiber.App
+	if config.IsEnabled("blossom") {
+		wg.Add(1)
+
+		logging.Info("Starting Blossom file storage server")
+
+		go func() {
+			blossomApp = ws.BuildBlossomServer(store)
+			err := ws.StartBlossomServer(blossomApp)
+
+			if err != nil {
+				logging.Info("Fatal error occurred in blossom server")
 			}
 
 			wg.Done()
@@ -655,6 +674,13 @@ func main() {
 			logging.Info("Shutting down WebSocket server...")
 			if err := wsApp.Shutdown(); err != nil {
 				logging.Errorf("Error shutting down WebSocket server: %v", err)
+			}
+		}
+
+		if blossomApp != nil {
+			logging.Info("Shutting down Blossom server...")
+			if err := blossomApp.Shutdown(); err != nil {
+				logging.Errorf("Error shutting down Blossom server: %v", err)
 			}
 		}
 

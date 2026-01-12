@@ -329,10 +329,28 @@ func (store *BadgerholdStore) StoreLeavesBatch(root string, leaves []*types.DagL
 	defer wb.Cancel()
 
 	var contentWrites int64
-	var metadataWrites int64
+
+	type leafContentInsert struct {
+		key   string
+		value types.LeafContent
+	}
+	type ownershipInsert struct {
+		key   string
+		value types.DagOwnership
+	}
+	type parentCacheInsert struct {
+		key   string
+		value types.LeafParentCache
+	}
+
+	var leafContentsToInsert []leafContentInsert
+	var ownershipsToInsert []ownershipInsert
+	var parentCachesToInsert []parentCacheInsert
 
 	for _, leafData := range leaves {
-		// Check if leaf already exists (skip if both content and ownership exist)
+		isRootLeaf := root == leafData.Leaf.Hash
+
+		// Check if leaf content already exists
 		leafContentExists := false
 		var existingLeaf types.LeafContent
 		err := store.Database.Get(leafData.Leaf.Hash, &existingLeaf)
@@ -340,23 +358,37 @@ func (store *BadgerholdStore) StoreLeavesBatch(root string, leaves []*types.DagL
 			leafContentExists = true
 		}
 
-		ownershipKey := root + ":" + leafData.PublicKey + ":" + leafData.Leaf.Hash
+		// Check ownership for root leaf
+		// New format: root:pubkey
+		// Old format (fallback): root:pubkey:root
+		ownershipKey := root + ":" + leafData.PublicKey
 		ownershipExists := false
-		var existingOwnership types.DagOwnership
-		err = store.Database.Get(ownershipKey, &existingOwnership)
-		if err == nil {
-			ownershipExists = true
+		if isRootLeaf {
+			var existingOwnership types.DagOwnership
+			err = store.Database.Get(ownershipKey, &existingOwnership)
+			if err == nil {
+				ownershipExists = true
+			} else {
+				// Fallback: check old key format (root:pubkey:root) for backward compatibility
+				oldOwnershipKey := root + ":" + leafData.PublicKey + ":" + root
+				err = store.Database.Get(oldOwnershipKey, &existingOwnership)
+				if err == nil {
+					ownershipExists = true
+				}
+			}
 		}
 
-		if leafContentExists && ownershipExists {
+		// Skip if already fully stored
+		if leafContentExists && (!isRootLeaf || ownershipExists) {
 			skippedLeafCount.Add(1)
 			continue
 		}
 
+		// Store content using WriteBatch (raw bytes, no BadgerHold)
 		if leafData.Leaf.Content != nil {
 			contentKey := makeKey("content", leafData.Leaf.ContentHash)
 
-			// Check existence in WriteBatch context
+			// Check existence
 			var contentExists bool
 			store.Database.Badger().View(func(tx *badger.Txn) error {
 				_, err := tx.Get(contentKey)
@@ -374,6 +406,57 @@ func (store *BadgerholdStore) StoreLeavesBatch(root string, leaves []*types.DagL
 			// Clear content to avoid storing in metadata
 			leafData.Leaf.Content = nil
 		}
+
+		// Collect LeafContent if needed
+		if !leafContentExists {
+			leafContentsToInsert = append(leafContentsToInsert, leafContentInsert{
+				key: leafData.Leaf.Hash,
+				value: types.LeafContent{
+					Hash:              leafData.Leaf.Hash,
+					ItemName:          leafData.Leaf.ItemName,
+					Type:              leafData.Leaf.Type,
+					ContentHash:       leafData.Leaf.ContentHash,
+					ClassicMerkleRoot: leafData.Leaf.ClassicMerkleRoot,
+					CurrentLinkCount:  leafData.Leaf.CurrentLinkCount,
+					LeafCount:         leafData.Leaf.LeafCount,
+					ContentSize:       leafData.Leaf.ContentSize,
+					DagSize:           leafData.Leaf.DagSize,
+					Links:             leafData.Leaf.Links,
+					AdditionalData:    leafData.Leaf.AdditionalData,
+				},
+			})
+		}
+
+		// Collect Ownership for root leaf
+		if isRootLeaf && !ownershipExists {
+			ownershipsToInsert = append(ownershipsToInsert, ownershipInsert{
+				key: ownershipKey,
+				value: types.DagOwnership{
+					Root:      root,
+					PublicKey: leafData.PublicKey,
+					Signature: leafData.Signature,
+				},
+			})
+		}
+
+		// Collect ParentCache if needed
+		if leafData.Leaf.ParentHash != "" {
+			parentCacheKey := root + ":" + leafData.Leaf.Hash
+			var existingCache types.LeafParentCache
+			err = store.Database.Get(parentCacheKey, &existingCache)
+			if errors.Is(err, badgerhold.ErrNotFound) {
+				parentCachesToInsert = append(parentCachesToInsert, parentCacheInsert{
+					key: parentCacheKey,
+					value: types.LeafParentCache{
+						RootHash:   root,
+						LeafHash:   leafData.Leaf.Hash,
+						ParentHash: leafData.Leaf.ParentHash,
+					},
+				})
+			}
+		}
+
+		storedLeafCount.Add(1)
 	}
 
 	// Flush content writes
@@ -383,12 +466,41 @@ func (store *BadgerholdStore) StoreLeavesBatch(root string, leaves []*types.DagL
 		}
 	}
 
-	// Store metadata using individual StoreLeaf calls (needed for BadgerHold)
-	for _, leafData := range leaves {
-		if err := store.storeLeafMetadata(root, leafData); err != nil {
+	// Batch all metadata writes into a single transaction
+	if len(leafContentsToInsert) > 0 || len(ownershipsToInsert) > 0 || len(parentCachesToInsert) > 0 {
+		err := store.Database.Badger().Update(func(tx *badger.Txn) error {
+			// Insert all leaf contents
+			for _, item := range leafContentsToInsert {
+				if err := store.Database.TxInsert(tx, item.key, item.value); err != nil {
+					if !errors.Is(err, badgerhold.ErrKeyExists) {
+						return fmt.Errorf("error inserting leaf content: %w", err)
+					}
+				}
+			}
+
+			// Insert all ownerships
+			for _, item := range ownershipsToInsert {
+				if err := store.Database.TxInsert(tx, item.key, item.value); err != nil {
+					if !errors.Is(err, badgerhold.ErrKeyExists) {
+						return fmt.Errorf("error inserting ownership: %w", err)
+					}
+				}
+			}
+
+			// Insert all parent caches
+			for _, item := range parentCachesToInsert {
+				if err := store.Database.TxInsert(tx, item.key, item.value); err != nil {
+					if !errors.Is(err, badgerhold.ErrKeyExists) {
+						return fmt.Errorf("error inserting parent cache: %w", err)
+					}
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
 			return err
 		}
-		metadataWrites++
 	}
 
 	return nil
@@ -779,9 +891,16 @@ func (store *BadgerholdStore) ClaimOwnership(root string, publicKey string, sign
 	}
 
 	// Check if this owner already has ownership of this root
+	// New format: root:pubkey
+	// Old format (fallback): root:pubkey:root
 	ownershipKey := root + ":" + publicKey
 	var existingOwnership types.DagOwnership
 	err = store.Database.Get(ownershipKey, &existingOwnership)
+	if err != nil && errors.Is(err, badgerhold.ErrNotFound) {
+		// Fallback: check old key format for backward compatibility
+		oldOwnershipKey := root + ":" + publicKey + ":" + root
+		err = store.Database.Get(oldOwnershipKey, &existingOwnership)
+	}
 	if err == nil {
 		// Already owns it, update signature if different
 		if existingOwnership.Signature != signature {
@@ -867,10 +986,12 @@ func (store *BadgerholdStore) RetrieveLeaf(root string, hash string, includeCont
 		}
 
 		if len(ownerships) == 0 {
-			return nil, fmt.Errorf("no ownership record found for root %s", root)
+			// No ownership records means the DAG has been marked for deletion
+			return nil, fmt.Errorf("DAG not available: no ownership records for root %s (marked for deletion)", root)
 		}
 
 		// Use the first ownership record
+		// Clients should verify the signature matches their expected owner
 		ownership := ownerships[0]
 		data.PublicKey = ownership.PublicKey
 		data.Signature = ownership.Signature
