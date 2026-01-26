@@ -23,6 +23,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/filter"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind0"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind1"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind16629"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -392,17 +393,18 @@ func initTestConfig(dataDir string, port int, cfg TestRelayConfig) {
 	config.InitConfigForTesting()
 }
 
-// registerTestHandlers registers the basic Nostr handlers for testing
+// registerTestHandlers registers all Nostr handlers for testing
 func registerTestHandlers(store *badgerhold.BadgerholdStore, privateKeyStr string, privateKey *btcec.PrivateKey) {
 	// Clear any existing handlers
 	nostrHandlers.ClearHandlers()
 
-	// Register essential handlers
+	// Register all handlers
 	nostrHandlers.RegisterHandler("kind/0", kind0.BuildKind0Handler(store, privateKey))
 	nostrHandlers.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	nostrHandlers.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 	nostrHandlers.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
 	nostrHandlers.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
+	nostrHandlers.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
 
 	// Universal handler for other kinds
 	nostrHandlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))
@@ -411,40 +413,13 @@ func registerTestHandlers(store *badgerhold.BadgerholdStore, privateKeyStr strin
 	nostrHandlers.RegisterHandler("filter", filter.BuildFilterHandler(store))
 }
 
-// NewTestRelayWithServices creates a test relay with web and blossom services enabled
-func NewTestRelayWithServices(cfg TestRelayConfig) (*TestRelay, error) {
-	// Create temp directory if not specified
+// NewTestRelayWithConfig creates a test relay with custom config initialization
+// Use this when tests need specific viper config settings beyond the defaults
+func NewTestRelayWithConfig(cfg TestRelayConfig, configInit func(dataDir string, port int, cfg TestRelayConfig)) (*TestRelay, error) {
 	dataDir := cfg.DataDir
 	if dataDir == "" {
 		var err error
-		dataDir, err = os.MkdirTemp("", "hornet-test-relay-services-*")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temp directory: %w", err)
-		}
-	}
-
-	// Find available port if not specified
-	port := cfg.Port
-	if port == 0 {
-		var err error
-		port, err = findAvailablePort()
-		if err != nil {
-			return nil, fmt.Errorf("failed to find available port: %w", err)
-		}
-	}
-
-	// Initialize config with services enabled
-	initTestConfigWithServices(dataDir, port, cfg)
-
-	return createTestRelayFromConfig(dataDir, port, cfg)
-}
-
-// NewTestRelayWithHornets creates a test relay with hornets (libp2p) service configured
-func NewTestRelayWithHornets(cfg TestRelayConfig) (*TestRelay, error) {
-	dataDir := cfg.DataDir
-	if dataDir == "" {
-		var err error
-		dataDir, err = os.MkdirTemp("", "hornet-test-relay-hornets-*")
+		dataDir, err = os.MkdirTemp("", "hornet-test-relay-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp directory: %w", err)
 		}
@@ -459,39 +434,10 @@ func NewTestRelayWithHornets(cfg TestRelayConfig) (*TestRelay, error) {
 		}
 	}
 
-	initTestConfigWithHornets(dataDir, port, cfg)
+	// Run custom config initialization
+	configInit(dataDir, port, cfg)
 
-	return createTestRelayFromConfig(dataDir, port, cfg)
-}
-
-// NewTestRelayWithAirlock creates a test relay with airlock service configured
-func NewTestRelayWithAirlock(cfg TestRelayConfig) (*TestRelay, error) {
-	dataDir := cfg.DataDir
-	if dataDir == "" {
-		var err error
-		dataDir, err = os.MkdirTemp("", "hornet-test-relay-airlock-*")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temp directory: %w", err)
-		}
-	}
-
-	port := cfg.Port
-	if port == 0 {
-		var err error
-		port, err = findAvailablePort()
-		if err != nil {
-			return nil, fmt.Errorf("failed to find available port: %w", err)
-		}
-	}
-
-	initTestConfigWithAirlock(dataDir, port, cfg)
-
-	return createTestRelayFromConfig(dataDir, port, cfg)
-}
-
-// createTestRelayFromConfig creates a test relay after config is initialized
-func createTestRelayFromConfig(dataDir string, port int, cfg TestRelayConfig) (*TestRelay, error) {
-	// Initialize logging (suppress for tests)
+	// Initialize logging
 	logging.InitLogger()
 
 	// Initialize store
@@ -503,13 +449,11 @@ func createTestRelayFromConfig(dataDir string, port int, cfg TestRelayConfig) (*
 		return nil, fmt.Errorf("failed to initialize store: %w", err)
 	}
 
-	// Get or generate private key
 	privateKeyStr := cfg.PrivateKey
 	if privateKeyStr == "" {
 		privateKeyStr = viper.GetString("relay.private_key")
 	}
 
-	// Deserialize private key for handlers that need it
 	privateKey, publicKey, err := signing.DeserializePrivateKey(privateKeyStr)
 	if err != nil {
 		os.RemoveAll(dataDir)
@@ -517,7 +461,6 @@ func createTestRelayFromConfig(dataDir string, port int, cfg TestRelayConfig) (*
 		return nil, fmt.Errorf("failed to deserialize private key: %w", err)
 	}
 
-	// Get serialized public key
 	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
 	if err != nil {
 		os.RemoveAll(dataDir)
@@ -525,31 +468,21 @@ func createTestRelayFromConfig(dataDir string, port int, cfg TestRelayConfig) (*
 		return nil, fmt.Errorf("failed to serialize public key: %w", err)
 	}
 
-	// Register handlers
 	registerTestHandlers(store, privateKeyStr, privateKey)
 
-	// Create context
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Get blossom port if configured
-	blossomPort := viper.GetInt("server.services.blossom.port")
-	if blossomPort == 0 {
-		blossomPort = port + 2 // default offset
-	}
-
 	relay := &TestRelay{
-		Store:       store,
-		Port:        port,
-		BlossomPort: blossomPort,
-		URL:         fmt.Sprintf("ws://127.0.0.1:%d", port),
-		DataDir:     dataDir,
-		PrivateKey:  privateKeyStr,
-		PublicKey:   *serializedPublicKey,
-		ctx:         ctx,
-		cancel:      cancel,
+		Store:      store,
+		Port:       port,
+		URL:        fmt.Sprintf("ws://127.0.0.1:%d", port),
+		DataDir:    dataDir,
+		PrivateKey: privateKeyStr,
+		PublicKey:  *serializedPublicKey,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 
-	// Start the WebSocket server
 	if err := relay.start(); err != nil {
 		cancel()
 		store.Cleanup()
@@ -560,47 +493,37 @@ func createTestRelayFromConfig(dataDir string, port int, cfg TestRelayConfig) (*
 	return relay, nil
 }
 
-// initTestConfigWithServices initializes viper config with web and blossom services
-func initTestConfigWithServices(dataDir string, port int, cfg TestRelayConfig) {
-	initTestConfig(dataDir, port, cfg)
-
-	// Enable web panel and blossom services
-	viper.Set("server.web", true)
-	viper.Set("server.services.web.port", port+2)
-	viper.Set("server.services.web.path", "/")
-
-	viper.Set("server.services.blossom.enabled", true)
-	viper.Set("server.services.blossom.port", port+2)
-	viper.Set("server.services.blossom.path", "/blossom")
-
-	// Re-initialize config after changes
-	config.InitConfigForTesting()
+// NewTestRelayWithServices creates a test relay with web/blossom config flags set
+func NewTestRelayWithServices(cfg TestRelayConfig) (*TestRelay, error) {
+	return NewTestRelayWithConfig(cfg, func(dataDir string, port int, cfg TestRelayConfig) {
+		initTestConfig(dataDir, port, cfg)
+		viper.Set("server.web", true)
+		viper.Set("server.services.web.port", port+2)
+		viper.Set("server.services.blossom.enabled", true)
+		viper.Set("server.services.blossom.port", port+2)
+		config.InitConfigForTesting()
+	})
 }
 
-// initTestConfigWithHornets initializes viper config with hornets service
-func initTestConfigWithHornets(dataDir string, port int, cfg TestRelayConfig) {
-	initTestConfig(dataDir, port, cfg)
-
-	// Enable hornets service
-	viper.Set("server.hornets", true)
-	viper.Set("server.services.hornets.port", port)
-
-	// Re-initialize config after changes
-	config.InitConfigForTesting()
+// NewTestRelayWithHornets creates a test relay with hornets config flags set
+func NewTestRelayWithHornets(cfg TestRelayConfig) (*TestRelay, error) {
+	return NewTestRelayWithConfig(cfg, func(dataDir string, port int, cfg TestRelayConfig) {
+		initTestConfig(dataDir, port, cfg)
+		viper.Set("server.hornets", true)
+		viper.Set("server.services.hornets.port", port)
+		config.InitConfigForTesting()
+	})
 }
 
-// initTestConfigWithAirlock initializes viper config with airlock service
-func initTestConfigWithAirlock(dataDir string, port int, cfg TestRelayConfig) {
-	initTestConfig(dataDir, port, cfg)
-
-	// Enable airlock service
-	viper.Set("server.services.airlock.enabled", true)
-	viper.Set("server.services.airlock.port", port+3)
-	// Use a test pubkey (32 bytes hex = 64 chars)
-	viper.Set("server.services.airlock.pubkey", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
-
-	// Re-initialize config after changes
-	config.InitConfigForTesting()
+// NewTestRelayWithAirlock creates a test relay with airlock config flags set
+func NewTestRelayWithAirlock(cfg TestRelayConfig) (*TestRelay, error) {
+	return NewTestRelayWithConfig(cfg, func(dataDir string, port int, cfg TestRelayConfig) {
+		initTestConfig(dataDir, port, cfg)
+		viper.Set("server.services.airlock.enabled", true)
+		viper.Set("server.services.airlock.port", port+3)
+		viper.Set("server.services.airlock.pubkey", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
+		config.InitConfigForTesting()
+	})
 }
 
 // NewTestRelayWithBlossom creates a test relay with blossom service enabled
