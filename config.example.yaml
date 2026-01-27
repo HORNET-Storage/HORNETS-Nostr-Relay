@@ -65,6 +65,8 @@ event_filtering:
         - kind30023
         - kind30078
         - kind30079
+        - kind76
+        - kind75
         - kind74
         - kind73
         - kind16629
