@@ -35,19 +35,41 @@ event_filtering:
     kind_whitelist:
         - kind0
         - kind1
-        - kind22242
+        - kind3
+        - kind5
+        - kind6
+        - kind7
+        - kind8
+        - kind1063
+        - kind1808
+        - kind1984
+        - kind9372
+        - kind9373
+        - kind9735
+        - kind9802
+        - kind10000
+        - kind10001
+        - kind10002
         - kind10010
+        - kind10411
+        - kind11011
+        - kind16629
+        - kind16630
         - kind19841
         - kind19842
         - kind19843
-        - kind10002
-        - kind1808
+        - kind22242
+        - kind30000
+        - kind30008
+        - kind30009
+        - kind30023
+        - kind30078
+        - kind30079
+        - kind74
+        - kind73
+        - kind16629
+        - kind16630
         - kind1809
-        - kind443
-        - kind444
-        - kind445
-        - kind1059
-        - kind10051
     media_definitions:
         audio:
             extensions:
