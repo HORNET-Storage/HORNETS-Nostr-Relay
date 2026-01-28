@@ -424,6 +424,7 @@ func validateATag(value string) string {
 func validateTags(tags nostr.Tags) string {
 	var rTagValue string
 	var aTagValue string
+	var nTagValue string
 	hasPermissionTag := false
 
 	for _, tag := range tags {
@@ -439,6 +440,11 @@ func validateTags(tags nostr.Tags) string {
 		// Extract the a tag for later validation
 		if tag[0] == "a" && len(tag) >= 2 {
 			aTagValue = tag[1]
+		}
+
+		// Extract the n tag (repo name for efficient queries)
+		if tag[0] == "n" && len(tag) >= 2 {
+			nTagValue = tag[1]
 		}
 
 		// Ensure at least one valid permission tag is present
@@ -460,6 +466,17 @@ func validateTags(tags nostr.Tags) string {
 	// Validate r tag format
 	if errMsg := validateRTag(rTagValue); errMsg != "" {
 		return errMsg
+	}
+
+	// Validate required n tag (repo name for efficient relay queries)
+	if nTagValue == "" {
+		return "Missing 'n' tag (repository name for indexing)."
+	}
+
+	// Validate n tag matches the repo name in r tag
+	rParts := strings.SplitN(rTagValue, ":", 2)
+	if len(rParts) == 2 && rParts[1] != nTagValue {
+		return "The 'n' tag value must match the repository name in 'r' tag."
 	}
 
 	// Validate a tag format if present

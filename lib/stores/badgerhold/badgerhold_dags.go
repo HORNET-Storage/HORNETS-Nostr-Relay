@@ -940,6 +940,42 @@ func (store *BadgerholdStore) GetOwnership(root string) ([]types.DagOwnership, e
 	return ownerships, nil
 }
 
+// FindRootForLeaf attempts to find the root hash that contains the given leaf hash.
+// This is useful when a client provides a leaf hash instead of a root hash.
+// Returns the root hash if found, empty string if not found.
+func (store *BadgerholdStore) FindRootForLeaf(leafHash string) (string, error) {
+	// First, check if this hash is itself a root (has ownership)
+	var ownerships []types.DagOwnership
+	err := store.Database.Find(&ownerships, badgerhold.Where("Root").Eq(leafHash))
+	if err == nil && len(ownerships) > 0 {
+		// This hash is a root itself
+		return leafHash, nil
+	}
+
+	// Check if this leaf exists at all
+	var leafContent types.LeafContent
+	err = store.Database.Get(leafHash, &leafContent)
+	if err != nil {
+		if errors.Is(err, badgerhold.ErrNotFound) {
+			return "", nil // Leaf not found at all
+		}
+		return "", fmt.Errorf("failed to query leaf content: %w", err)
+	}
+
+	// The leaf exists. Now we need to find which root it belongs to.
+	// Query LeafParentCache entries that reference this leaf hash.
+	// LeafParentCache entries have RootHash field we can use.
+	var parentCaches []types.LeafParentCache
+	err = store.Database.Find(&parentCaches, badgerhold.Where("LeafHash").Eq(leafHash).Limit(1))
+	if err == nil && len(parentCaches) > 0 {
+		return parentCaches[0].RootHash, nil
+	}
+
+	// If we can't find it in parent cache, this leaf might be a root itself without ownership
+	// (orphaned DAG) or it's only accessible by scanning all DAGs
+	return "", nil
+}
+
 // RetrieveLeaf retrieves a single DAG leaf, optionally filtering by public key.
 // Ownership info is only included for root leaves (ownership is per-root, not per-leaf).
 func (store *BadgerholdStore) RetrieveLeaf(root string, hash string, includeContent bool) (*types.DagLeafData, error) {
