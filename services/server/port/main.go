@@ -670,6 +670,9 @@ func main() {
 		<-sigs
 		logging.Info("Received shutdown signal, cleaning up...")
 
+		// 1. Signal WebSocket connections to stop accepting new operations
+		ws.SignalShutdown()
+
 		if wsApp != nil {
 			logging.Info("Shutting down WebSocket server...")
 			if err := wsApp.Shutdown(); err != nil {
@@ -682,6 +685,14 @@ func main() {
 			if err := blossomApp.Shutdown(); err != nil {
 				logging.Errorf("Error shutting down Blossom server: %v", err)
 			}
+		}
+
+		// 2. Wait for active WebSocket connections to close gracefully
+		logging.Info("Waiting for active WebSocket connections to close...")
+		if ws.WaitForConnections(10 * time.Second) {
+			logging.Info("All WebSocket connections closed gracefully")
+		} else {
+			logging.Info("Timeout waiting for WebSocket connections, proceeding with cleanup")
 		}
 
 		cancel()

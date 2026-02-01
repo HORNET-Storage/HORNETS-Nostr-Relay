@@ -16,6 +16,9 @@ import (
 type Store interface {
 	Cleanup() error
 
+	// IsClosed returns true if the store has been closed
+	IsClosed() bool
+
 	// Statistics Store
 	GetStatsStore() statistics.StatisticsStore
 

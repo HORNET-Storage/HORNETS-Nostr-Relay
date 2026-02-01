@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
@@ -26,6 +27,50 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 )
+
+// Graceful shutdown coordination
+var (
+	shutdownChan      = make(chan struct{})
+	shutdownOnce      sync.Once
+	activeConnWg      sync.WaitGroup
+	shutdownInitiated bool
+	shutdownMu        sync.RWMutex
+)
+
+// SignalShutdown signals all WebSocket connections to stop processing
+func SignalShutdown() {
+	shutdownOnce.Do(func() {
+		shutdownMu.Lock()
+		shutdownInitiated = true
+		shutdownMu.Unlock()
+		close(shutdownChan)
+		logging.Info("WebSocket shutdown signal sent")
+	})
+}
+
+// IsShuttingDown returns true if shutdown has been initiated
+func IsShuttingDown() bool {
+	shutdownMu.RLock()
+	defer shutdownMu.RUnlock()
+	return shutdownInitiated
+}
+
+// WaitForConnections waits for all active WebSocket connections to close
+// Returns true if all connections closed, false if timeout was reached
+func WaitForConnections(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		activeConnWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
 
 type connectionState struct {
 	authenticated   bool
@@ -76,7 +121,17 @@ func BuildServer(store stores.Store) *fiber.App {
 	app.Use(handleRelayInfoRequests)
 
 	app.Get("/", websocket.New(func(c *websocket.Conn) {
+		// Track this connection for graceful shutdown
+		activeConnWg.Add(1)
+		defer activeConnWg.Done()
 		defer removeListener(c)
+
+		// Check if shutdown is already in progress
+		if IsShuttingDown() {
+			c.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(1001, "Server is shutting down"))
+			return
+		}
 
 		challenge := getGlobalChallenge()
 
@@ -106,7 +161,14 @@ func BuildServer(store stores.Store) *fiber.App {
 
 			for {
 				select {
+				case <-shutdownChan:
+					// Server is shutting down, stop background checks
+					return
 				case <-ticker.C:
+					// Skip database operations if shutting down or store is closed
+					if IsShuttingDown() || store.IsClosed() {
+						return
+					}
 					if state.pubkey != "" {
 						isBlocked, err := store.IsBlockedPubkey(state.pubkey)
 						if err != nil {
@@ -129,6 +191,17 @@ func BuildServer(store stores.Store) *fiber.App {
 		}()
 
 		for {
+			// Check for shutdown before processing each message
+			select {
+			case <-shutdownChan:
+				logging.Info("Connection closing due to server shutdown")
+				c.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(1001, "Server is shutting down"))
+				return
+			default:
+				// Continue processing
+			}
+
 			if err := processWebSocketMessage(c, challenge, state, store); err != nil {
 				break
 			}
@@ -395,6 +468,11 @@ func PackRelayForSig(nr *NIP11RelayInfo) []byte {
 }
 
 func processWebSocketMessage(c *websocket.Conn, challenge string, state *connectionState, store stores.Store) error {
+	// Check if server is shutting down or store is closed
+	if IsShuttingDown() || store.IsClosed() {
+		return fmt.Errorf("server is shutting down")
+	}
+
 	_, message, err := c.ReadMessage()
 	if err != nil {
 		return fmt.Errorf("read error: %w", err)
