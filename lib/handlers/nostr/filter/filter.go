@@ -184,12 +184,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		// Check read access permissions using the global access control system
 		accessControl := websocket.GetAccessControl()
 		if accessControl != nil {
-			// Only check access if we have a valid pubkey
-			if connPubkey == "" {
-				logging.Infof(ColorRed + "[ACCESS CONTROL] Read access denied: No authenticated user" + ColorReset)
-				write("NOTICE", "Read access denied: Authentication required")
-				return
-			}
 
 			// Check if user has read access
 			err := accessControl.CanRead(connPubkey)
