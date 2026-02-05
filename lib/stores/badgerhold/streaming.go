@@ -90,28 +90,33 @@ func (s *BadgerholdLeafStore) DeleteLeaf(hash string) error {
 }
 
 func (s *BadgerholdLeafStore) Count() int {
-	var ownerships []types.DagOwnership
-	err := s.store.Database.Find(&ownerships, badgerhold.Where("Root").Eq(s.root))
-	if err != nil {
+	// Use relationships cache to count leaves (relationships map contains leaf -> parent)
+	relationships, err := s.store.RetrieveRelationships(s.root)
+	if err != nil || relationships == nil {
 		return 0
 	}
-	return len(ownerships)
+	// The relationships map has all non-root leaves as keys, plus we need to count the root
+	return len(relationships) + 1
 }
 
 func (s *BadgerholdLeafStore) GetAllLeafHashes() []string {
-	var ownerships []types.DagOwnership
-	err := s.store.Database.Find(&ownerships, badgerhold.Where("Root").Eq(s.root))
-	if err != nil {
+	// Use relationships cache to get all leaf hashes
+	// The relationships map is leaf -> parent, so keys are all non-root leaves
+	relationships, err := s.store.RetrieveRelationships(s.root)
+	if err != nil || relationships == nil {
+		// Fallback: if no relationships cache, at least return the root
+		if s.root != "" {
+			return []string{s.root}
+		}
 		return nil
 	}
 
-	hashes := make([]string, 0, len(ownerships))
-	seen := make(map[string]bool)
-	for _, ownership := range ownerships {
-		if !seen[ownership.LeafHash] {
-			hashes = append(hashes, ownership.LeafHash)
-			seen[ownership.LeafHash] = true
-		}
+	// Collect all leaf hashes from the relationships map
+	// Keys are child hashes, values are parent hashes
+	hashes := make([]string, 0, len(relationships)+1)
+	hashes = append(hashes, s.root) // Root is always included
+	for leafHash := range relationships {
+		hashes = append(hashes, leafHash)
 	}
 	return hashes
 }

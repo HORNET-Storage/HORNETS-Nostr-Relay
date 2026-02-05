@@ -62,7 +62,18 @@ func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf
 func handleDownload(store stores.Store, stream lib_types.Stream, message *lib_types.DownloadMessage, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) {
 	rootData, err := store.RetrieveLeaf(message.Root, message.Root, false)
 	if err != nil {
+		// Check if this hash exists as a non-root leaf and provide a helpful error
+		if parentRoot, findErr := store.FindRootForLeaf(message.Root); findErr == nil && parentRoot != "" {
+			lib_stream.WriteErrorToStream(stream, fmt.Sprintf("Hash '%s' is a leaf hash, not a root hash. It belongs to DAG with root: %s", message.Root, parentRoot), nil)
+			return
+		}
 		lib_stream.WriteErrorToStream(stream, "Node does not have root leaf", err)
+		return
+	}
+
+	// Validate that ownership record exists - this is required for serving DAGs
+	if rootData.PublicKey == "" || rootData.Signature == "" {
+		lib_stream.WriteErrorToStream(stream, fmt.Sprintf("No ownership record found for root hash '%s'. The DAG may have been stored without proper signing or has been orphaned.", message.Root), nil)
 		return
 	}
 
@@ -208,6 +219,10 @@ func sendBatch(stream lib_types.Stream, batch []*merkle_dag.TransmissionPacket, 
 
 	resp, err := lib_stream.WaitForResponse(stream)
 	if err != nil {
+		// On final packet, client may disconnect before sending ack - this is fine
+		if isFinal {
+			return nil
+		}
 		return err
 	}
 
@@ -255,10 +270,12 @@ func sendDagPackets(stream lib_types.Stream, dagData *types.DagData) {
 	total := len(sequence)
 
 	for i, packet := range sequence {
+		isFinalPacket := i == total-1
+
 		uploadMsg := lib_types.UploadMessage{
 			Root:          dagData.Dag.Root,
 			Packet:        *packet.ToSerializable(),
-			IsFinalPacket: i == total-1,
+			IsFinalPacket: isFinalPacket,
 		}
 
 		if packet.GetRootLeaf() != nil {
@@ -274,6 +291,10 @@ func sendDagPackets(stream lib_types.Stream, dagData *types.DagData) {
 
 		resp, err := lib_stream.WaitForResponse(stream)
 		if err != nil {
+			// On final packet, client may disconnect before sending ack - this is fine
+			if isFinalPacket {
+				return
+			}
 			lib_stream.WriteErrorToStream(stream, "Failed to receive acknowledgment", err)
 			return
 		}

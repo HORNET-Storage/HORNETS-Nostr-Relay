@@ -48,14 +48,15 @@ type LeafContent struct {
 	AdditionalData    map[string]string
 }
 
-// DagOwnership represents ownership/signature for a leaf within a DAG
-// NOTE: Root and LeafHash indexes are needed for retrieval queries.
-// PublicKey index removed to reduce write amplification during uploads.
+// DagOwnership represents ownership/signature for a DAG.
+// There is one ownership record per DAG root per owner (public key).
+// The signature is the owner's signature of the root hash.
+// Leaf membership is determined by traversing from root, not by ownership records.
+// NOTE: When GC is implemented, deleting all ownership records for a root marks the DAG for cleanup.
 type DagOwnership struct {
 	Root      string `badgerhold:"index"`
-	PublicKey string
+	PublicKey string `badgerhold:"index"`
 	Signature string
-	LeafHash  string `badgerhold:"index"`
 }
 
 // LeafParentCache caches the parent hash for a leaf within a specific DAG root

@@ -63,9 +63,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19842"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind19843"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind443"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind444"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind445"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30000"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30009"
@@ -73,6 +70,9 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30044"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30078"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind443"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind444"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind445"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind6"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
@@ -83,6 +83,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind9802"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/claim"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
@@ -482,6 +483,7 @@ func main() {
 
 	upload.AddUploadHandlerForLibp2p(ctx, host, store, nil, nil)
 	query.AddQueryHandler(host, store)
+	claim.AddClaimOwnershipHandler(host, store)
 
 	logging.Infof("Host started with id: %s\n", host.ID())
 	logging.Infof("Host started with address: %s\n", host.Addrs())
@@ -634,7 +636,26 @@ func main() {
 			err := ws.StartServer(wsApp)
 
 			if err != nil {
-				logging.Info("Fatal error occurred in web server")
+				logging.Info("Fatal error occurred in nostr server")
+			}
+
+			wg.Done()
+		}()
+	}
+
+	// Blossom file storage
+	var blossomApp *fiber.App
+	if config.IsEnabled("blossom") {
+		wg.Add(1)
+
+		logging.Info("Starting Blossom file storage server")
+
+		go func() {
+			blossomApp = ws.BuildBlossomServer(store)
+			err := ws.StartBlossomServer(blossomApp)
+
+			if err != nil {
+				logging.Info("Fatal error occurred in blossom server")
 			}
 
 			wg.Done()
@@ -649,11 +670,29 @@ func main() {
 		<-sigs
 		logging.Info("Received shutdown signal, cleaning up...")
 
+		// 1. Signal WebSocket connections to stop accepting new operations
+		ws.SignalShutdown()
+
 		if wsApp != nil {
 			logging.Info("Shutting down WebSocket server...")
 			if err := wsApp.Shutdown(); err != nil {
 				logging.Errorf("Error shutting down WebSocket server: %v", err)
 			}
+		}
+
+		if blossomApp != nil {
+			logging.Info("Shutting down Blossom server...")
+			if err := blossomApp.Shutdown(); err != nil {
+				logging.Errorf("Error shutting down Blossom server: %v", err)
+			}
+		}
+
+		// 2. Wait for active WebSocket connections to close gracefully
+		logging.Info("Waiting for active WebSocket connections to close...")
+		if ws.WaitForConnections(10 * time.Second) {
+			logging.Info("All WebSocket connections closed gracefully")
+		} else {
+			logging.Info("Timeout waiting for WebSocket connections, proceeding with cleanup")
 		}
 
 		cancel()

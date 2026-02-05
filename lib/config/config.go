@@ -54,13 +54,30 @@ func InitConfig() error {
 	// Try to read config file
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Config file not found, create it with defaults
-			fmt.Println("No config.yaml found, creating default configuration...")
-			if err := viper.WriteConfigAs("config.yaml"); err != nil {
-				return fmt.Errorf("failed to create default config: %w", err)
+			// Config file not found, create it from example
+			fmt.Println("No config.yaml found, creating from config.example.yaml...")
+
+			// Try to read config.example.yaml first
+			viper.SetConfigFile("config.example.yaml")
+			if err := viper.ReadInConfig(); err != nil {
+				// Example not found, fall back to defaults
+				fmt.Printf("Warning: config.example.yaml not found (%v), using built-in defaults...\n", err)
+				// Reset config name and create with defaults
+				viper.SetConfigName("config")
+				viper.SetConfigType("yaml")
+				if err := viper.WriteConfigAs("config.yaml"); err != nil {
+					return fmt.Errorf("failed to create default config: %w", err)
+				}
+			} else {
+				// Successfully read example, write it as config.yaml
+				if err := viper.WriteConfigAs("config.yaml"); err != nil {
+					return fmt.Errorf("failed to create config from example: %w", err)
+				}
+				fmt.Println("Created config.yaml from config.example.yaml")
 			}
-			fmt.Println("Created default config.yaml")
-			// Try to read it again
+
+			// Switch back to config.yaml and read it
+			viper.SetConfigFile("config.yaml")
 			if err := viper.ReadInConfig(); err != nil {
 				return fmt.Errorf("failed to read created config: %w", err)
 			}
@@ -141,21 +158,42 @@ func GetConfig() (*types.Config, error) {
 	return cfg.(*types.Config), nil
 }
 
-// GetPort returns the calculated port for a service
+// GetPort returns the port for a service from configuration
+// Falls back to base port with offset calculation if service-specific port not configured
 func GetPort(service string) int {
+	// First try to get from explicit service configuration
+	servicePort := viper.GetInt(fmt.Sprintf("server.services.%s.port", service))
+	if servicePort > 0 {
+		return servicePort
+	}
+
+	// Fallback to base port with offset calculation
 	cfg, err := GetConfig()
 	if err != nil || cfg.Server.Port == 0 {
-		return 9000 // fallback
+		return 11000 // fallback
 	}
 
 	basePort := cfg.Server.Port
+	// Port offsets from types.go:
+	// PortOffsetNostr   = 0 // Base port (Nostr WebSocket)
+	// PortOffsetHornets = 1 // libp2p/QUIC for DAG transfers
+	// PortOffsetPanel   = 2 // HTTP admin panel
+	// PortOffsetReactDev = 3 // React development server
+	// PortOffsetWallet  = 4 // Wallet service
+	// PortOffsetBlossom = 5 // Blossom media storage
 	switch service {
-	case "hornets":
-		return basePort
 	case "nostr":
-		return basePort + 1
-	case "web":
-		return basePort + 2
+		return basePort // offset 0
+	case "hornets":
+		return basePort + 1 // offset 1
+	case "web", "panel":
+		return basePort + 2 // offset 2
+	case "react", "reactdev":
+		return basePort + 3 // offset 3
+	case "wallet":
+		return basePort + 4 // offset 4
+	case "blossom":
+		return basePort + 5 // offset 5
 	default:
 		return basePort
 	}
@@ -177,6 +215,8 @@ func IsEnabled(feature string) bool {
 		return cfg.Server.Nostr
 	case "hornets":
 		return cfg.Server.Hornets
+	case "blossom":
+		return cfg.Server.Blossom
 	default:
 		// For other features, we need to check viper
 		// This is rare, so the lock is acceptable
@@ -365,6 +405,23 @@ func RefreshConfig() error {
 	return reloadConfigCache()
 }
 
+// InitConfigForTesting initializes the configuration system for testing
+// This should be called after setting up viper values manually in tests
+// It loads the config into the cache without reading from a file
+func InitConfigForTesting() {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	// Reset the sync.Once so we can reinitialize
+	configLoadOnce = sync.Once{}
+	configLoadError = nil
+
+	// Load config into cache from current viper values
+	if err := reloadConfigCache(); err != nil {
+		log.Printf("Warning: failed to load test config into cache: %v", err)
+	}
+}
+
 // GetAllowedUsersSettings returns the allowed users settings from cached config
 func GetAllowedUsersSettings() (*types.AllowedUsersSettings, error) {
 	cfg, err := GetConfig()
@@ -544,13 +601,14 @@ func setDefaults() {
 	fmt.Println("No existing config found, setting defaults for new installation")
 
 	// Server defaults
-	viper.SetDefault("server.port", 9000)
+	viper.SetDefault("server.port", 11000)
 	viper.SetDefault("server.bind_address", "0.0.0.0")
 	viper.SetDefault("server.upnp", false)
 	viper.SetDefault("server.nostr", true)
 	viper.SetDefault("server.hornets", true)
 	viper.SetDefault("server.web", true)
 	viper.SetDefault("server.demo", false)
+	viper.SetDefault("server.blossom", true)
 	viper.SetDefault("server.data_path", "./data")
 
 	// External services defaults
@@ -558,7 +616,7 @@ func setDefaults() {
 	viper.SetDefault("external_services.ollama.model", "gemma2:2b")
 	viper.SetDefault("external_services.ollama.timeout", 10000)
 	viper.SetDefault("external_services.moderator.url", "http://moderator:8000")
-	viper.SetDefault("external_services.wallet.url", "http://localhost:9003")
+	viper.SetDefault("external_services.wallet.url", "http://localhost:11003")
 	viper.SetDefault("external_services.wallet.key", "")
 	viper.SetDefault("external_services.wallet.name", "default")
 
@@ -569,8 +627,8 @@ func setDefaults() {
 	// Relay defaults
 	viper.SetDefault("relay.name", "HORNETS")
 	viper.SetDefault("relay.description", "HORNETS relay, the home of GitNestr")
-	viper.SetDefault("relay.contact", "support@hornets.net")
-	viper.SetDefault("relay.icon", "http://localhost:9002/logo-dark-192.png")
+	viper.SetDefault("relay.contact", "support@hornetstorage.com")
+	viper.SetDefault("relay.icon", "http://localhost:11002/logo-dark-192.png")
 	viper.SetDefault("relay.software", "HORNETS")
 	viper.SetDefault("relay.version", "0.0.1")
 	viper.SetDefault("relay.service_tag", "hornet-storage-service")
@@ -597,8 +655,8 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
-		443, 444, 445,       // MIP kinds (MLS group messaging)
-		1059,                // NIP-59 Gift Wrap (encrypted DMs)
+		443, 444, 445, // MIP kinds (MLS group messaging)
+		1059,                   // NIP-59 Gift Wrap (encrypted DMs)
 		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
 		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds

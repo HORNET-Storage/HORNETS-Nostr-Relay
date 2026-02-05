@@ -8,6 +8,7 @@ cd "$(dirname "$0")"
 REPO_URL="https://github.com/HORNET-Storage/HORNETS-Relay-Panel.git"
 PANEL_DIR="panel-source"
 BACKEND_EXE="./hornet-storage"
+CONFIG_FILE="config.yaml"
 export NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=4096"
 # -------------
 
@@ -16,6 +17,24 @@ echo "==============================="
 echo "HORNETS-Relay-Panel Dev Runner"
 echo "==============================="
 echo
+
+# Check if config.yaml exists and read port early
+CONFIG_EXISTS=0
+BASE_PORT=""
+if [ -f "$CONFIG_FILE" ]; then
+  CONFIG_EXISTS=1
+  PARSED_PORT=$(grep "port:" "$CONFIG_FILE" | grep -v "http" | head -1 | sed 's/.*port:\s*//' | tr -d '[:space:]')
+  if [ -n "$PARSED_PORT" ]; then
+    BASE_PORT="$PARSED_PORT"
+    WEB_PORT=$((BASE_PORT + 2))
+    DEV_PORT=$((BASE_PORT + 3))
+    echo "Config found - Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT"
+  fi
+fi
+
+if [ "$CONFIG_EXISTS" -eq 0 ]; then
+  echo "No config.yaml found - relay will generate it on first run."
+fi
 
 # 1) Clone panel if missing (no pull/update if it already exists)
 if [ ! -d "$PANEL_DIR" ]; then
@@ -50,7 +69,39 @@ fi
 echo "Starting backend: $BACKEND_EXE"
 $BACKEND_EXE &
 
-# 4) Start the panel in dev mode (current process)
+# 4) If config didn't exist before, wait for relay to generate it and read port
+if [ "$CONFIG_EXISTS" -eq 0 ]; then
+  echo "Waiting for relay to generate config.yaml..."
+  sleep 3
+
+  if [ -f "$CONFIG_FILE" ]; then
+    PARSED_PORT=$(grep "port:" "$CONFIG_FILE" | grep -v "http" | head -1 | sed 's/.*port:\s*//' | tr -d '[:space:]')
+    if [ -n "$PARSED_PORT" ]; then
+      BASE_PORT="$PARSED_PORT"
+    fi
+  fi
+
+  if [ -z "$BASE_PORT" ]; then
+    echo "WARNING: Could not read port from config.yaml, using default 11000"
+    BASE_PORT="11000"
+  fi
+
+  WEB_PORT=$((BASE_PORT + 2))
+  DEV_PORT=$((BASE_PORT + 3))
+  echo "Config generated - Base port: $BASE_PORT - API port: $WEB_PORT - Dev server port: $DEV_PORT"
+fi
+
+# 5) Update .env.development with the correct web port
+echo "Updating .env.development with port $WEB_PORT..."
+if [ -f "$PANEL_DIR/.env.development" ]; then
+  if grep -q "REACT_APP_BASE_URL=" "$PANEL_DIR/.env.development"; then
+    sed -i "s|REACT_APP_BASE_URL=http://localhost:[0-9]*|REACT_APP_BASE_URL=http://localhost:$WEB_PORT|g" "$PANEL_DIR/.env.development"
+  else
+    echo "REACT_APP_BASE_URL=http://localhost:$WEB_PORT" >> "$PANEL_DIR/.env.development"
+  fi
+fi
+
+# 6) Start the panel in dev mode (current process)
 echo
 echo "Starting panel dev server (dev mode)..."
 cd "$PANEL_DIR"
@@ -70,10 +121,11 @@ node_modules/.bin/lessc --js --clean-css="--s1 --advanced" src/styles/themes/mai
 }
 
 # Prefer CRACO if present; else yarn start; else npm start
+echo "Starting React dev server on port $DEV_PORT..."
 if [ -f "node_modules/.bin/craco" ]; then
-  exec npx craco start
+  PORT=$DEV_PORT exec npx craco start
 elif command -v yarn >/dev/null 2>&1; then
-  NODE_ENV=development exec yarn start
+  PORT=$DEV_PORT NODE_ENV=development exec yarn start
 else
-  NODE_ENV=development exec npm run start
+  PORT=$DEV_PORT NODE_ENV=development exec npm run start
 fi

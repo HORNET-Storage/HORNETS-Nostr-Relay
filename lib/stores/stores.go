@@ -16,6 +16,9 @@ import (
 type Store interface {
 	Cleanup() error
 
+	// IsClosed returns true if the store has been closed
+	IsClosed() bool
+
 	// Statistics Store
 	GetStatsStore() statistics.StatisticsStore
 
@@ -35,6 +38,15 @@ type Store interface {
 	CacheRelationshipsStreaming(dagStore *merkle_dag.DagStore) error
 	CacheLabelsStreaming(dagStore *merkle_dag.DagStore) error
 	RetrieveRelationships(root string) (map[string]string, error)
+
+	// Partial DAG support - for verifying referenced leaves exist globally
+	HasLeafGlobal(hash string) (bool, error)
+	GetLeafLinksGlobal(hash string) ([]string, error)
+
+	// Ownership management
+	ClaimOwnership(root string, publicKey string, signature string) error
+	GetOwnership(root string) ([]types.DagOwnership, error)
+	FindRootForLeaf(leafHash string) (string, error)
 
 	// Nostr
 	QueryEvents(filter nostr.Filter) ([]*nostr.Event, error)

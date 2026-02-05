@@ -72,13 +72,19 @@ Required for building C-based dependencies via `cgo`.
 
 ---
 
-### 🚀 **QUICK SETUP: Building Relay with Panel** (When Needing to Pull Latest)
+### 🚀 **QUICK SETUP: Building Relay with Panel** (Production Mode)
 
 After cloning the repository,
 
 ```bash
 git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
 cd HORNETS-Nostr-Relay
+```
+
+**Optional:** To change the server port, copy and edit `config.example.yaml` before building:
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml and change the port value under server:
 ```
 
 #### On **Linux or macOS**:
@@ -92,21 +98,31 @@ cd HORNETS-Nostr-Relay
 
 *Run this script found in the main directory:*
 ```powershell
-./build-panel.bat
+.\build-panel.bat
 ```
 
 The compiled binary (hornet-storage or hornet-storage.exe) will be created in the project root directory.
 
+**📌 Port Info:** The web panel runs on **base port +2**. The default base port is `11000`, so the panel will be at `http://localhost:11002`. (Base port can be changed by renaming `config.example.yaml` to `config.yaml` before building, or by editing the auto-generated `config.yaml` after the first build.)
+
 ---
 
 
-### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode If Modifying Panel In /panel-source)
+### 🚀 **Building Relay with Panel** (Hot Reload Dev Mode)
+
+Use this mode when modifying the panel source code in `/panel-source`.
 
 After cloning the repository,
 
 ```bash
 git clone https://github.com/HORNET-Storage/HORNETS-Nostr-Relay.git
 cd HORNETS-Nostr-Relay
+```
+
+**Optional:** To change the server port, copy and edit `config.example.yaml` before building:
+```bash
+cp config.example.yaml config.yaml
+# Edit config.yaml and change the port value under server:
 ```
 
 #### On **Linux or macOS**:
@@ -120,16 +136,12 @@ cd HORNETS-Nostr-Relay
 
 *Run this script found in the main directory:*
 ```powershell
-./build-panel-devmode.bat
+.\build-panel-devmode.bat
 ```
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.
 
-#### ⚠️ When Troubleshooting:
-
-*Make sure the port in the .env.development file for the relay's base URL matches the port that the relay is using inside of the config.yaml file.*
-
-***Web panel is always served on that port +2, so if the relay is running on 9000 then the .env.development base url needs to point to 9002.***
+**📌 Port Info:** In dev mode, the React dev server runs on **base port +3**. The default base port is `11000`, so access the panel at `http://localhost:11003`. (Base port can be changed by renaming `config.example.yaml` to `config.yaml` before building, or by editing the auto-generated `config.yaml` after the first build.)
 
 ---
 
@@ -153,7 +165,7 @@ cd HORNETS-Nostr-Relay
 
 *Run this script found in the main directory:*
 ```powershell
-./build.bat
+.\build.bat
 ```
 
 The compiled binary (`hornet-storage` or `hornet-storage.exe`) will be created in the project root directory.

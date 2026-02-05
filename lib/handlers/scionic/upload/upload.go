@@ -137,6 +137,10 @@ func handleStreamingUpload(
 	leafCount := 0
 	packetCount := 0
 
+	// Track uploaded leaf hashes and referenced (linked) leaf hashes for partial DAG support
+	uploadedHashes := make(map[string]bool)
+	referencedHashes := make(map[string]bool)
+
 	packet := merkle_dag.BatchedTransmissionPacketFromSerializable(&message.Packet)
 
 	if canUploadDag != nil {
@@ -152,7 +156,7 @@ func handleStreamingUpload(
 	}
 
 	packetCount++
-	if err := processPacketStreaming(dagStore, packet, &totalDagSize, &leafCount, write); err != nil {
+	if err := processPacketStreamingWithTracking(dagStore, packet, &totalDagSize, &leafCount, uploadedHashes, referencedHashes, write); err != nil {
 		return
 	}
 
@@ -173,7 +177,7 @@ func handleStreamingUpload(
 			pkt := merkle_dag.BatchedTransmissionPacketFromSerializable(&msg.Packet)
 			packetCount++
 
-			if err := processPacketStreaming(dagStore, pkt, &totalDagSize, &leafCount, write); err != nil {
+			if err := processPacketStreamingWithTracking(dagStore, pkt, &totalDagSize, &leafCount, uploadedHashes, referencedHashes, write); err != nil {
 				store.DeleteDag(message.Root)
 				return
 			}
@@ -186,6 +190,18 @@ func handleStreamingUpload(
 			if msg.IsFinalPacket {
 				break
 			}
+		}
+	}
+
+	// Handle partial DAG: check for referenced leaves that weren't uploaded
+	missingHashes := findMissingLeafHashes(uploadedHashes, referencedHashes)
+	if len(missingHashes) > 0 {
+		logging.Infof("Partial DAG detected for root %s: %d referenced leaves not in upload, checking global store", message.Root, len(missingHashes))
+
+		// Verify all missing leaves exist in global store
+		if err := handlePartialDagLeaves(store, missingHashes, write); err != nil {
+			store.DeleteDag(message.Root)
+			return
 		}
 	}
 
@@ -226,10 +242,14 @@ func handleStreamingUpload(
 		}
 	}
 
-	logging.Infof("Streaming upload complete: %d leaves, %d bytes", leafCount, totalDagSize)
+	if len(missingHashes) > 0 {
+		logging.Infof("Streaming upload complete (partial DAG): %d uploaded leaves + %d existing leaves, %d bytes", leafCount, len(missingHashes), totalDagSize)
+	} else {
+		logging.Infof("Streaming upload complete: %d leaves, %d bytes", leafCount, totalDagSize)
+	}
 }
 
-func processPacketStreaming(dagStore *merkle_dag.DagStore, packet *merkle_dag.BatchedTransmissionPacket, totalSize *int64, leafCount *int, write utils.DagWriter) error {
+func processPacketStreamingWithTracking(dagStore *merkle_dag.DagStore, packet *merkle_dag.BatchedTransmissionPacket, totalSize *int64, leafCount *int, uploadedHashes map[string]bool, referencedHashes map[string]bool, write utils.DagWriter) error {
 	if err := dagStore.AddBatchedTransmissionPacket(packet); err != nil {
 		write(utils.BuildErrorMessage(fmt.Sprintf("Failed to apply packet with %d leaves", len(packet.Leaves)), err))
 		return err
@@ -237,6 +257,15 @@ func processPacketStreaming(dagStore *merkle_dag.DagStore, packet *merkle_dag.Ba
 
 	for _, leaf := range packet.Leaves {
 		*leafCount++
+
+		// Track this uploaded leaf
+		uploadedHashes[leaf.Hash] = true
+
+		// Track all referenced children (Links)
+		for _, childHash := range leaf.Links {
+			referencedHashes[childHash] = true
+		}
+
 		if leaf.Content != nil {
 			*totalSize += int64(len(leaf.Content))
 		}
@@ -248,5 +277,83 @@ func processPacketStreaming(dagStore *merkle_dag.DagStore, packet *merkle_dag.Ba
 			}
 		}
 	}
+	return nil
+}
+
+// findMissingLeafHashes returns hashes that are referenced but not uploaded
+func findMissingLeafHashes(uploadedHashes, referencedHashes map[string]bool) []string {
+	var missing []string
+	for hash := range referencedHashes {
+		if !uploadedHashes[hash] {
+			missing = append(missing, hash)
+		}
+	}
+	return missing
+}
+
+// handlePartialDagLeaves verifies that missing leaves exist globally.
+// It recursively checks children of existing leaves to ensure the full DAG can be reconstructed.
+func handlePartialDagLeaves(store stores.Store, missingHashes []string, write utils.DagWriter) error {
+	// Use a set to track all leaves we need to verify and avoid duplicates
+	toVerify := make(map[string]bool)
+	for _, hash := range missingHashes {
+		toVerify[hash] = true
+	}
+
+	verified := make(map[string]bool)
+	var notFoundHashes []string
+	verifiedCount := 0
+
+	// Verify leaves iteratively (BFS-style) to handle transitive dependencies
+	for len(toVerify) > 0 {
+		// Get next hash to verify
+		var currentHash string
+		for h := range toVerify {
+			currentHash = h
+			break
+		}
+		delete(toVerify, currentHash)
+
+		if verified[currentHash] {
+			continue
+		}
+		verified[currentHash] = true
+
+		// Check if leaf exists globally
+		exists, err := store.HasLeafGlobal(currentHash)
+		if err != nil {
+			logging.Infof("Error checking leaf existence for %s: %v", currentHash, err)
+			write(utils.BuildErrorMessage("Failed to check existing leaf", err))
+			return err
+		}
+
+		if !exists {
+			notFoundHashes = append(notFoundHashes, currentHash)
+			continue
+		}
+		verifiedCount++
+
+		// Get the leaf's children and add them to verification queue if not already verified
+		links, err := store.GetLeafLinksGlobal(currentHash)
+		if err != nil {
+			logging.Infof("Error getting leaf links for %s: %v", currentHash, err)
+			write(utils.BuildErrorMessage("Failed to get leaf children", err))
+			return err
+		}
+
+		for _, childHash := range links {
+			if !verified[childHash] {
+				toVerify[childHash] = true
+			}
+		}
+	}
+
+	if len(notFoundHashes) > 0 {
+		logging.Infof("Partial DAG rejected: %d referenced leaves not found in store", len(notFoundHashes))
+		write(utils.BuildErrorMessage("Partial upload rejected: some referenced leaves don't exist on this relay", nil))
+		return fmt.Errorf("missing leaves: %d not found", len(notFoundHashes))
+	}
+
+	logging.Infof("Partial DAG verified: %d existing leaves linked", verifiedCount)
 	return nil
 }
