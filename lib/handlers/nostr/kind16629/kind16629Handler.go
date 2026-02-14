@@ -2,6 +2,8 @@ package kind16629
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -19,6 +21,14 @@ const (
 	OrgInvitationResponseKind = 39506
 	DeletionEventKind         = 5
 )
+
+// uuidRegex matches UUID v4 format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// isGUID checks if a string is a valid UUID v4 format
+func isGUID(s string) bool {
+	return uuidRegex.MatchString(strings.ToLower(s))
+}
 
 func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
@@ -45,7 +55,7 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		}
 
 		// Validate tags
-		message := validateTags(env.Event.Tags)
+		message := validateTags(env.Event.Tags, env.Event.PubKey)
 		if len(message) > 0 {
 			write("NOTICE", message)
 			return
@@ -62,7 +72,7 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		aTag := getTagValue(env.Event.Tags, "a")
 
 		// Determine ownership type and get the owner pubkey
-		isOrgRepo, ownerPubkey, orgDtag := parseOwnership(aTag, rTag)
+		isOrgRepo, ownerPubkey, orgDtag := parseOwnership(aTag, rTag, env.Event.PubKey)
 
 		logging.Infof("[Kind16629] Processing event - rTag: %s, aTag: %s, isOrg: %v, owner: %s, publisher: %s",
 			rTag, aTag, isOrgRepo, ownerPubkey, env.Event.PubKey)
@@ -155,11 +165,14 @@ func getTagValue(tags nostr.Tags, key string) string {
 	return ""
 }
 
-// parseOwnership determines if the repo is org-owned and extracts the owner pubkey
+// parseOwnership determines if the repo is org-owned and extracts the owner pubkey.
 // Returns: (isOrgRepo, ownerPubkey, orgDtag)
 // For org repos: ownerPubkey is the org owner, orgDtag is the org's d-tag
-// For regular repos: ownerPubkey is the repo owner, orgDtag is empty
-func parseOwnership(aTag, rTag string) (bool, string, string) {
+// For regular repos: ownerPubkey is the event publisher (signer), orgDtag is empty
+//
+// With GUID-based r tags, ownership for regular repos is determined by the event signer,
+// not by parsing the r tag value.
+func parseOwnership(aTag, rTag string, eventPubkey string) (bool, string, string) {
 	// If a tag exists, use it to determine ownership
 	// a tag format: "39504:<owner_pubkey>:<d_tag>" (colon-separated org address)
 	if aTag != "" {
@@ -173,7 +186,12 @@ func parseOwnership(aTag, rTag string) (bool, string, string) {
 		// Invalid a tag format - fall through to check r tag
 	}
 
-	// No valid a tag, check if r tag indicates an org repo
+	// GUID r tag: ownership is determined by the event signer
+	if isGUID(rTag) {
+		return false, eventPubkey, ""
+	}
+
+	// Legacy format: check if r tag indicates an org repo
 	// r tag format for org: "39504_orgOwnerPubkey_orgDtag:reponame" (underscore-encoded)
 	// r tag format for regular: "pubkey:reponame"
 	if strings.HasPrefix(rTag, "39504_") {
@@ -190,7 +208,7 @@ func parseOwnership(aTag, rTag string) (bool, string, string) {
 		}
 	}
 
-	// Regular repo identified by r tag
+	// Regular repo in legacy format: "pubkey:reponame"
 	parts := strings.SplitN(rTag, ":", 2)
 	if len(parts) >= 1 {
 		return false, parts[0], ""
@@ -318,13 +336,18 @@ func isValidHexPubkey(s string) bool {
 	return true
 }
 
-// validateRepoIdentifier validates a repository identifier which can be in one of two formats:
-// - Regular repo: "pubkey:reponame" where pubkey is a 64-char hex string
-// - Org repo: "39504_orgOwnerPubkey_orgDtag:reponame"
-// The tagName parameter is used for error messages (e.g., "r" or "a")
+// validateRepoIdentifier validates a repository identifier which can be in one of three formats:
+// - GUID: UUID v4 format (e.g., "550e8400-e29b-41d4-a716-446655440000")
+// - Regular repo (legacy): "pubkey:reponame" where pubkey is a 64-char hex string
+// - Org repo (legacy): "39504_orgOwnerPubkey_orgDtag:reponame"
 func validateRepoIdentifier(value string, tagName string) string {
 	if value == "" {
 		return fmt.Sprintf("'%s' tag value cannot be empty", tagName)
+	}
+
+	// Accept GUID format (UUID v4)
+	if isGUID(value) {
+		return ""
 	}
 
 	// Check if it's an org repo format
@@ -362,10 +385,10 @@ func validateRepoIdentifier(value string, tagName string) string {
 		return ""
 	}
 
-	// Regular repo format: "pubkey:reponame"
+	// Regular repo format (legacy): "pubkey:reponame"
 	parts := strings.SplitN(value, ":", 2)
 	if len(parts) != 2 {
-		return fmt.Sprintf("Invalid '%s' tag format: expected 'pubkey:reponame' or '39504_pubkey_dtag:reponame'", tagName)
+		return fmt.Sprintf("Invalid '%s' tag format: expected GUID, 'pubkey:reponame', or '39504_pubkey_dtag:reponame'", tagName)
 	}
 
 	pubkey := parts[0]
@@ -421,10 +444,12 @@ func validateATag(value string) string {
 }
 
 // validateTags checks if the tags array contains the expected structure for a Kind 16629 event.
-func validateTags(tags nostr.Tags) string {
+func validateTags(tags nostr.Tags, eventPubkey string) string {
 	var rTagValue string
 	var aTagValue string
 	var nTagValue string
+	var cloneTagValue string
+	var relayTagValue string
 	hasPermissionTag := false
 
 	for _, tag := range tags {
@@ -445,6 +470,14 @@ func validateTags(tags nostr.Tags) string {
 		// Extract the n tag (repo name for efficient queries)
 		if tag[0] == "n" && len(tag) >= 2 {
 			nTagValue = tag[1]
+		}
+
+		// Extract clone and relay tags
+		if tag[0] == "clone" && len(tag) >= 2 {
+			cloneTagValue = tag[1]
+		}
+		if tag[0] == "relay" && len(tag) >= 2 {
+			relayTagValue = tag[1]
 		}
 
 		// Ensure at least one valid permission tag is present
@@ -473,10 +506,12 @@ func validateTags(tags nostr.Tags) string {
 		return "Missing 'n' tag (repository name for indexing)."
 	}
 
-	// Validate n tag matches the repo name in r tag
-	rParts := strings.SplitN(rTagValue, ":", 2)
-	if len(rParts) == 2 && rParts[1] != nTagValue {
-		return "The 'n' tag value must match the repository name in 'r' tag."
+	// For legacy r tag formats (not GUID), validate that n tag matches the repo name in r tag
+	if !isGUID(rTagValue) {
+		rParts := strings.SplitN(rTagValue, ":", 2)
+		if len(rParts) == 2 && rParts[1] != nTagValue {
+			return "The 'n' tag value must match the repository name in 'r' tag."
+		}
 	}
 
 	// Validate a tag format if present
@@ -484,8 +519,104 @@ func validateTags(tags nostr.Tags) string {
 		return errMsg
 	}
 
+	// Validate required clone tag
+	if cloneTagValue == "" {
+		return "Missing 'clone' tag (repository clone URL)."
+	}
+	if errMsg := validateCloneTag(cloneTagValue, rTagValue, nTagValue, aTagValue, eventPubkey); errMsg != "" {
+		return errMsg
+	}
+
+	// Validate required relay tag
+	if relayTagValue == "" {
+		return "Missing 'relay' tag (relay WebSocket URL)."
+	}
+	if errMsg := validateRelayTag(relayTagValue); errMsg != "" {
+		return errMsg
+	}
+
 	if !hasPermissionTag {
 		return "Missing valid 'p' tag (authorized user and permission level)."
+	}
+
+	return ""
+}
+
+// validateCloneTag validates the clone tag format and consistency with other tags.
+// Expected format: nestr://<host>[:<port>][/path]?id=<GUID>&repo_author=<author>&repo_name=<name>
+func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
+	parsed, err := url.Parse(cloneURL)
+	if err != nil {
+		return fmt.Sprintf("Invalid 'clone' tag: failed to parse URL: %s", err)
+	}
+
+	// Must use nestr:// scheme
+	if parsed.Scheme != "nestr" {
+		return fmt.Sprintf("Invalid 'clone' tag: expected 'nestr://' scheme, got '%s://'", parsed.Scheme)
+	}
+
+	// Must have a host
+	if parsed.Host == "" {
+		return "Invalid 'clone' tag: missing host"
+	}
+
+	query := parsed.Query()
+
+	// Must have required query parameters
+	cloneID := query.Get("id")
+	cloneRepoAuthor := query.Get("repo_author")
+	cloneRepoName := query.Get("repo_name")
+
+	if cloneID == "" {
+		return "Invalid 'clone' tag: missing 'id' query parameter"
+	}
+	if cloneRepoAuthor == "" {
+		return "Invalid 'clone' tag: missing 'repo_author' query parameter"
+	}
+	if cloneRepoName == "" {
+		return "Invalid 'clone' tag: missing 'repo_name' query parameter"
+	}
+
+	// Cross-validate: clone URL 'id' must match the 'r' tag
+	if cloneID != rTag {
+		return fmt.Sprintf("Clone tag 'id' parameter (%s) does not match 'r' tag (%s)", cloneID, rTag)
+	}
+
+	// Cross-validate: clone URL 'repo_name' must match the 'n' tag
+	if cloneRepoName != nTag {
+		return fmt.Sprintf("Clone tag 'repo_name' parameter (%s) does not match 'n' tag (%s)", cloneRepoName, nTag)
+	}
+
+	// Cross-validate: clone URL 'repo_author' must be consistent with ownership
+	if aTag != "" {
+		// Org repo: repo_author should be the org address (e.g. 39504:pubkey:dtag)
+		if cloneRepoAuthor != aTag {
+			return fmt.Sprintf("Clone tag 'repo_author' parameter (%s) does not match 'a' tag (%s) for org repo", cloneRepoAuthor, aTag)
+		}
+	} else {
+		// Personal repo: repo_author should be the event publisher's pubkey
+		if cloneRepoAuthor != eventPubkey {
+			return fmt.Sprintf("Clone tag 'repo_author' parameter (%s) does not match event pubkey (%s)", cloneRepoAuthor, eventPubkey)
+		}
+	}
+
+	return ""
+}
+
+// validateRelayTag validates the relay tag format.
+// Expected format: ws://<host>:<port>[/path] or wss://<host>[/path]
+func validateRelayTag(relayURL string) string {
+	parsed, err := url.Parse(relayURL)
+	if err != nil {
+		return fmt.Sprintf("Invalid 'relay' tag: failed to parse URL: %s", err)
+	}
+
+	if parsed.Scheme != "ws" && parsed.Scheme != "wss" {
+		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://' or 'wss://' scheme, got '%s://'", parsed.Scheme)
+	}
+
+	if parsed.Host == "" {
+		return "Invalid 'relay' tag: missing host"
 	}
 
 	return ""
