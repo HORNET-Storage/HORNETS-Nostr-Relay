@@ -26,6 +26,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/handlers/push"
+	"github.com/HORNET-Storage/hornet-storage/lib/web/middleware"
 )
 
 // Graceful shutdown coordination
@@ -119,6 +121,29 @@ func BuildServer(store stores.Store) *fiber.App {
 
 	// Middleware for handling relay information requests
 	app.Use(handleRelayInfoRequests)
+
+	// ================================
+	// PUSH NOTIFICATION ROUTES (NIP-98 AUTH)
+	// ================================
+
+	pushRoutes := app.Group("/push")
+
+	// Add basic request logging for push routes
+	pushRoutes.Use(func(c *fiber.Ctx) error {
+		logging.Info("Push route accessed", map[string]interface{}{
+			"method": c.Method(),
+			"path":   c.Path(),
+			"url":    c.OriginalURL(),
+		})
+		return c.Next()
+	})
+
+	// Apply NIP-98 authentication middleware for push routes
+	pushRoutes.Use(middleware.NIP98Middleware())
+
+	pushRoutes.Post("/register", push.RegisterDeviceHandler(store))
+	pushRoutes.Post("/unregister", push.UnregisterDeviceHandler(store))
+	pushRoutes.Post("/test", push.TestNotificationHandler(store))
 
 	app.Get("/", websocket.New(func(c *websocket.Conn) {
 		// Track this connection for graceful shutdown
