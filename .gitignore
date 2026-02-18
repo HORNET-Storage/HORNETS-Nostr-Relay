@@ -56,3 +56,6 @@ test-db-*/
 
 # iOS keys directory
 ios_keys/
+
+# Code indexing
+.chunks/
