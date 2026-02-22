@@ -513,7 +513,7 @@ func TestDAGRoundTrip_AllFixtures(t *testing.T) {
 	})
 }
 
-// TestDAGConcurrentUploads tests multiple concurrent DAG uploads
+// TestDAGConcurrentUploads tests multiple concurrent DAG uploads from different users
 func TestDAGConcurrentUploads(t *testing.T) {
 	relay, err := helpers.NewTestLibp2pRelay(helpers.DefaultTestLibp2pConfig())
 	if err != nil {
@@ -525,16 +525,21 @@ func TestDAGConcurrentUploads(t *testing.T) {
 		t.Fatalf("Relay not ready: %v", err)
 	}
 
-	kp, err := helpers.GenerateDAGKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate key pair: %v", err)
-	}
-
 	// Use different fixtures for concurrent uploads
 	fixtures := helpers.GetMultiFileFixtures()
 	numUploads := len(fixtures)
 	errChan := make(chan error, numUploads)
 	rootChan := make(chan string, numUploads)
+
+	// Generate a separate key pair per upload to simulate different users
+	keyPairs := make([]*helpers.TestDAGKeyPair, numUploads)
+	for i := 0; i < numUploads; i++ {
+		kp, err := helpers.GenerateDAGKeyPair()
+		if err != nil {
+			t.Fatalf("Failed to generate key pair %d: %v", i, err)
+		}
+		keyPairs[i] = kp
+	}
 
 	// Launch concurrent uploads
 	for i, fixture := range fixtures {
@@ -556,7 +561,7 @@ func TestDAGConcurrentUploads(t *testing.T) {
 			}
 			defer cm.Disconnect("test-relay")
 
-			err = connmgr.UploadDag(ctx, cm, fd.Dag, kp.PrivateKey, nil)
+			err = connmgr.UploadDag(ctx, cm, fd.Dag, keyPairs[idx].PrivateKey, nil)
 			if err != nil {
 				errChan <- err
 				return

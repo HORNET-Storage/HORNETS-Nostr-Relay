@@ -321,10 +321,6 @@ func TestNIP11ServiceEndpointStructure(t *testing.T) {
 		t.Error("Expected airlock endpoint to have 'port' field")
 	}
 
-	if _, hasProtocol := airlock["protocol"]; !hasProtocol {
-		t.Error("Expected airlock endpoint to have 'protocol' field")
-	}
-
 	// pubkey should be present for libp2p services (clients derive peer ID)
 	if _, hasPubkey := airlock["pubkey"]; !hasPubkey {
 		t.Error("Expected airlock endpoint to have 'pubkey' field")

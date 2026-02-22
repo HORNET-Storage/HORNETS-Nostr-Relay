@@ -96,7 +96,7 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// - New event has 'a' tag (migrating to org)
 		// - Existing event(s) have no 'a' tag (was personal repo)
 		isMigrationToOrg := false
-		if isOrgRepo && !isFirstEvent {
+		if isOrgRepo && !isFirstEvent && aTag != "" {
 			// Check if existing events lack the 'a' tag
 			existingHasATag := false
 			for _, existingEvent := range existingEvents {

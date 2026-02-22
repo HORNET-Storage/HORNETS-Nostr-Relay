@@ -30,7 +30,6 @@ type (
 // Nostr types
 type (
 	NostrEvent           = types.NostrEvent
-	TagEntry             = types.TagEntry
 	Kind                 = types.Kind
 	QueryFilter          = types.QueryFilter
 	QueryMessage         = types.QueryMessage

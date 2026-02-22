@@ -11,12 +11,12 @@ import (
 )
 
 func sendWebSocketMessage(ws *websocket.Conn, msg interface{}) error {
-	// msg is any of nostr.ClosedEnvelope, nostr.EOSEEnvelope, nostr.OKEnvelope, nostr.EventEnvelope, nostr.NoticeEnvelope
-	_, err := jsoniter.MarshalToString(msg)
-	if err != nil {
-		logging.Infof("Couldn't ummarshall websocket message: %s", err)
-	}
-	// logging.Infof("Websocket message: %s", marshalledMsg)
+	// Acquire per-connection write mutex to prevent concurrent writes
+	// between the notification processor goroutine and connection handler goroutines.
+	mu := getConnWriteMutex(ws)
+	mu.Lock()
+	defer mu.Unlock()
+
 	if err := ws.WriteJSON(msg); err != nil {
 		// Only log the first error, then suppress subsequent errors for this connection
 		// This prevents log spam when clients disconnect with large result sets pending

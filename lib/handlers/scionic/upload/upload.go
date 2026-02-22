@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gabriel-vasile/mimetype"
@@ -28,6 +29,8 @@ import (
 
 type CanUploadDagFunc func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool
 type HandleUploadedDagFunc func(dag *merkle_dag.Dag, pubKey *string)
+
+var activeUploads sync.Map
 
 func AddUploadHandlerForLibp2p(ctx context.Context, libp2phost host.Host, store stores.Store, canUploadDag CanUploadDagFunc, handleRecievedDag HandleUploadedDagFunc) {
 	handler := BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag)
@@ -114,6 +117,13 @@ func BuildUploadStreamHandler(store stores.Store, canUploadDag func(rootLeaf *me
 			write(utils.BuildErrorMessage("Failed to serialize public key", err))
 			return
 		}
+
+		// Enforce one upload at a time per pubkey
+		if _, alreadyActive := activeUploads.LoadOrStore(*serializedPublicKey, true); alreadyActive {
+			write(utils.BuildErrorMessage("Upload already in progress for this key, please wait and try again", nil))
+			return
+		}
+		defer activeUploads.Delete(*serializedPublicKey)
 
 		handleStreamingUpload(store, read, write, message, *serializedPublicKey, hex.EncodeToString(signature.Serialize()), canUploadDag, handleRecievedDag)
 	}

@@ -191,7 +191,7 @@ func (m *SubscriptionManager) createNIP88EventIfNotExists(
 		return err
 	}
 
-	logging.Infof("Subscription Event before storing: " + event.String())
+	logging.Infof("Subscription Event before storing: %s", event.String())
 
 	// Store and verify
 	if err := m.store.StoreEvent(event); err != nil {

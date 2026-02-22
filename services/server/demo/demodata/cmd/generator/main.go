@@ -347,7 +347,7 @@ func configureKindDistribution(scanner *bufio.Scanner, generator *demodata.DemoD
 	choice := strings.TrimSpace(scanner.Text())
 
 	if choice == "1" {
-		logging.Infof("\nEnter new percentages for each kind (must sum to 100%):")
+		logging.Infof("\nEnter new percentages for each kind (must sum to 100%%):")
 		newDistribution := make(map[int]float64)
 		totalPercentage := 0.0
 

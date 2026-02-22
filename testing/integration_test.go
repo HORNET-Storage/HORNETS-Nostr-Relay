@@ -2,6 +2,7 @@ package testing
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -729,5 +730,337 @@ func TestRelay_MultipleConnections(t *testing.T) {
 	// Cleanup connections
 	for _, conn := range connections {
 		conn.Close()
+	}
+}
+
+// =============================================================================
+// Publish + Query With Limit
+// =============================================================================
+
+// TestPublishAndQueryWithLimit is an end-to-end test verifying that
+// publishing events and querying with a limit works through the full stack.
+func TestPublishAndQueryWithLimit(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	kp, _ := helpers.GenerateKeyPair()
+
+	// Publish 15 events
+	for i := 0; i < 15; i++ {
+		event, _ := helpers.CreateTextNote(kp, fmt.Sprintf("Note %d", i))
+		if err := conn.Publish(ctx, *event); err != nil {
+			t.Fatalf("Failed to publish event %d: %v", i, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Query with limit of 5
+	filter := nostr.Filter{
+		Authors: []string{kp.PublicKey},
+		Kinds:   []int{1},
+		Limit:   5,
+	}
+	events, err := conn.QuerySync(ctx, filter)
+	if err != nil {
+		t.Fatalf("QuerySync: %v", err)
+	}
+
+	if len(events) > 5 {
+		t.Errorf("Expected at most 5 events, got %d", len(events))
+	}
+
+	// Verify newest-first ordering
+	for i := 1; i < len(events); i++ {
+		if events[i].CreatedAt > events[i-1].CreatedAt {
+			t.Errorf("Events not sorted newest-first at index %d", i)
+		}
+	}
+}
+
+// =============================================================================
+// Publish + Query By ID
+// =============================================================================
+
+// TestPublishAndQueryByID is an end-to-end test for ID-based queries.
+func TestPublishAndQueryByID(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	kp, _ := helpers.GenerateKeyPair()
+
+	event1, _ := helpers.CreateTextNote(kp, "First note")
+	event2, _ := helpers.CreateTextNote(kp, "Second note")
+
+	conn.Publish(ctx, *event1)
+	conn.Publish(ctx, *event2)
+
+	// Query by specific ID
+	filter := nostr.Filter{
+		IDs: []string{event2.ID},
+	}
+	events, err := conn.QuerySync(ctx, filter)
+	if err != nil {
+		t.Fatalf("QuerySync: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].ID != event2.ID {
+		t.Errorf("Expected ID %s, got %s", event2.ID, events[0].ID)
+	}
+}
+
+// =============================================================================
+// Content + Tags Round-Trip
+// =============================================================================
+
+// TestEventContentRoundTrip verifies that event content, tags, and metadata
+// survive a full publish→query round-trip through WebSocket.
+func TestEventContentRoundTrip(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	kp, _ := helpers.GenerateKeyPair()
+
+	// Create event with diverse content and tags
+	tags := nostr.Tags{
+		{"t", "integration-test"},
+		{"e", "0000000000000000000000000000000000000000000000000000000000000000", "wss://relay.example.com", "reply"},
+		{"p", kp.PublicKey, "wss://relay2.example.com"},
+	}
+	event, _ := helpers.CreateTextNote(kp, "Integration test content with unicode: 🔑📝", tags...)
+
+	if err := conn.Publish(ctx, *event); err != nil {
+		t.Fatalf("Failed to publish: %v", err)
+	}
+
+	// Query it back
+	filter := nostr.Filter{IDs: []string{event.ID}}
+	events, err := conn.QuerySync(ctx, filter)
+	if err != nil {
+		t.Fatalf("QuerySync: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	got := events[0]
+	if got.Content != event.Content {
+		t.Errorf("Content mismatch:\n  got:  %q\n  want: %q", got.Content, event.Content)
+	}
+	if got.PubKey != event.PubKey {
+		t.Errorf("PubKey mismatch")
+	}
+	if got.Kind != event.Kind {
+		t.Errorf("Kind mismatch")
+	}
+
+	// Verify tags
+	if len(got.Tags) != len(event.Tags) {
+		t.Fatalf("Tag count mismatch: got %d, want %d", len(got.Tags), len(event.Tags))
+	}
+	for i, tag := range event.Tags {
+		if len(got.Tags[i]) != len(tag) {
+			t.Errorf("Tag[%d] length mismatch: got %d, want %d", i, len(got.Tags[i]), len(tag))
+			continue
+		}
+		for j, val := range tag {
+			if got.Tags[i][j] != val {
+				t.Errorf("Tag[%d][%d] mismatch: got %q, want %q", i, j, got.Tags[i][j], val)
+			}
+		}
+	}
+}
+
+// =============================================================================
+// Tag-Based Query
+// =============================================================================
+
+// TestQueryByTagReturnsCorrectEvents verifies that tag-based queries through
+// the full WebSocket stack return the right events and exclude non-matching ones.
+func TestQueryByTagReturnsCorrectEvents(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	kp, _ := helpers.GenerateKeyPair()
+
+	// Publish 3 events: 2 with tag "t"="hornet", 1 with "t"="other"
+	e1, _ := helpers.CreateTextNote(kp, "Hornet note 1", nostr.Tag{"t", "hornet"})
+	e2, _ := helpers.CreateTextNote(kp, "Hornet note 2", nostr.Tag{"t", "hornet"})
+	e3, _ := helpers.CreateTextNote(kp, "Other note", nostr.Tag{"t", "other"})
+
+	conn.Publish(ctx, *e1)
+	time.Sleep(10 * time.Millisecond)
+	conn.Publish(ctx, *e2)
+	time.Sleep(10 * time.Millisecond)
+	conn.Publish(ctx, *e3)
+
+	// Query by tag "t"="hornet"
+	filter := nostr.Filter{
+		Tags: nostr.TagMap{"t": []string{"hornet"}},
+	}
+	events, err := conn.QuerySync(ctx, filter)
+	if err != nil {
+		t.Fatalf("QuerySync: %v", err)
+	}
+
+	if len(events) != 2 {
+		t.Errorf("Expected 2 events with tag hornet, got %d", len(events))
+	}
+
+	gotIDs := make(map[string]bool)
+	for _, ev := range events {
+		gotIDs[ev.ID] = true
+	}
+	if !gotIDs[e1.ID] || !gotIDs[e2.ID] {
+		t.Errorf("Missing expected events")
+	}
+	if gotIDs[e3.ID] {
+		t.Errorf("Event with tag 'other' should not appear")
+	}
+}
+
+// =============================================================================
+// Multiple Authors Query
+// =============================================================================
+
+// TestMultipleAuthorsQuery verifies querying for multiple authors through
+// the full WebSocket stack.
+func TestMultipleAuthorsQuery(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	kp1, _ := helpers.GenerateKeyPair()
+	kp2, _ := helpers.GenerateKeyPair()
+	kp3, _ := helpers.GenerateKeyPair()
+
+	e1, _ := helpers.CreateTextNote(kp1, "From author 1")
+	e2, _ := helpers.CreateTextNote(kp2, "From author 2")
+	e3, _ := helpers.CreateTextNote(kp3, "From author 3")
+
+	conn.Publish(ctx, *e1)
+	conn.Publish(ctx, *e2)
+	conn.Publish(ctx, *e3)
+
+	// Query for kp1 + kp2 only
+	filter := nostr.Filter{
+		Authors: []string{kp1.PublicKey, kp2.PublicKey},
+		Kinds:   []int{1},
+	}
+	events, err := conn.QuerySync(ctx, filter)
+	if err != nil {
+		t.Fatalf("QuerySync: %v", err)
+	}
+
+	if len(events) != 2 {
+		t.Errorf("Expected 2 events from kp1+kp2, got %d", len(events))
+	}
+
+	for _, ev := range events {
+		if ev.PubKey != kp1.PublicKey && ev.PubKey != kp2.PublicKey {
+			t.Errorf("Unexpected author in results: %s", ev.PubKey)
+		}
+	}
+}
+
+// =============================================================================
+// Sort Order Preserved With Limit
+// =============================================================================
+
+// TestSortOrderPreservedWithLimit verifies that when querying with a limit,
+// the most recent events are returned in newest-first order.
+func TestSortOrderPreservedWithLimit(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	kp, _ := helpers.GenerateKeyPair()
+
+	// Publish 10 events with sequential content
+	for i := 0; i < 10; i++ {
+		event, _ := helpers.CreateTextNote(kp, fmt.Sprintf("Sequential note %d", i))
+		if err := conn.Publish(ctx, *event); err != nil {
+			t.Fatalf("Publish %d: %v", i, err)
+		}
+		time.Sleep(15 * time.Millisecond) // ensure distinct timestamps
+	}
+
+	// Query with limit 3
+	filter := nostr.Filter{
+		Authors: []string{kp.PublicKey},
+		Kinds:   []int{1},
+		Limit:   3,
+	}
+	events, err := conn.QuerySync(ctx, filter)
+	if err != nil {
+		t.Fatalf("QuerySync: %v", err)
+	}
+
+	if len(events) > 3 {
+		t.Errorf("Expected at most 3 events, got %d", len(events))
+	}
+
+	// Verify newest-first
+	for i := 1; i < len(events); i++ {
+		if events[i].CreatedAt > events[i-1].CreatedAt {
+			t.Errorf("Events not sorted newest-first at position %d: %d > %d",
+				i, events[i].CreatedAt, events[i-1].CreatedAt)
+		}
 	}
 }

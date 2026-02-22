@@ -1,9 +1,7 @@
 package kind1
 
 import (
-	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
-	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/nbd-wtf/go-nostr"
@@ -42,59 +40,9 @@ func BuildKind1Handler(store stores.Store) func(read lib_nostr.KindReader, write
 			return
 		}
 
-		var replyingToMissingID *string = nil
-		var dhtKey *string = nil
-		var parentAuthor *string = nil
-		for _, tag := range env.Event.Tags {
-			if tag[0] == "e" && len(tag) == 3 && tag[2] == "reply" {
-				missing := missingEvent(tag[1])
-				if missing {
-					replyingToMissingID = &tag[1]
-				}
-			}
-			if tag[0] == "dht_key" && len(tag) == 2 {
-				dhtKey = &tag[1]
-			}
-			if tag[0] == "p" && len(tag) == 2 {
-				parentAuthor = &tag[1]
-			}
-		}
-
-		if replyingToMissingID != nil && dhtKey != nil && parentAuthor != nil {
-			relayStore := sync.GetRelayStore()
-			if relayStore != nil {
-				relays, err := relayStore.GetRelayListFromDHT(dhtKey)
-				if err != nil {
-					logging.Infof("Failed to get relay list: %v", err)
-					write("NOTICE", "Failed to get relay list.")
-				} else {
-					filter := nostr.Filter{Authors: []string{*parentAuthor}}
-					for _, relay := range relays {
-						// TODO: maybe this should be handled on a different thread
-						//go relayStore.SyncWithRelay(relay, filter)
-						relayStore.SyncWithRelay(relay, filter)
-						relayStore.AddRelay(relay)
-					}
-					relayStore.AddAuthor(*parentAuthor)
-				}
-			} else {
-				logging.Info("relay store has not been initialized")
-				write("NOTICE", "Relay store has not be initialized")
-			}
-		} else {
-			logging.Info("event tags incomplete, cannot sync")
-			logging.Infof("replyToMissingID: %v dhtKey: %v parentAuthor: %v", replyingToMissingID, dhtKey, parentAuthor)
-		}
-
 		// Successfully processed event
 		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
 
 	return handler
-}
-
-func missingEvent(_ string) bool {
-	// TODO: Implement proper event existence check
-	// For now, assume all referenced events are missing to trigger sync
-	return true
 }

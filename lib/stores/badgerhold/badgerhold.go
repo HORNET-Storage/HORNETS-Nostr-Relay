@@ -3,13 +3,10 @@ package badgerhold
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,12 +20,9 @@ import (
 	"go.uber.org/multierr"
 
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/config"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/search"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
-	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/timshannon/badgerhold/v4"
 )
 
@@ -39,12 +33,15 @@ const (
 )
 
 type BadgerholdStore struct {
-	Ctx context.Context
+	Ctx    context.Context
+	cancel context.CancelFunc // Signals GC goroutine and monitor to stop on shutdown
 
 	DatabasePath string
 	Database     *badgerhold.Store
 
 	StatsDatabase statistics.StatisticsStore
+
+	gcSignal chan struct{} // Non-blocking signal from write paths to trigger extra GC cycle
 
 	closed bool
 	mu     sync.RWMutex
@@ -65,7 +62,10 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 
 	var err error
 
-	store.Ctx = context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	store.Ctx = ctx
+	store.cancel = cancel
+	store.gcSignal = make(chan struct{}, 1)
 
 	store.DatabasePath = basepath
 
@@ -90,10 +90,13 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	// - ValueThreshold: 32KB threshold - small metadata stays in LSM, large content goes to vlog
 	// - CompactL0OnClose: Compact on close to reduce startup time
 	//
-	// Note on GC: BadgerDB requires periodic GC via RunValueLogGC(). We run this:
-	// - Every 5 minutes in background
-	// - The 0.5 discard ratio means files with >50% garbage get rewritten
-	// This is normal Badger usage - GC is expected to be called periodically.
+	// GC Strategy (Adaptive):
+	// BadgerDB requires periodic GC via RunValueLogGC() to reclaim dead vlog space.
+	// We use an adaptive system that monitors vlog growth rate and adjusts aggressiveness:
+	// - Normal:   every 5 min, 0.5 ratio, 20 iterations  (stable/idle)
+	// - Elevated: every 1 min, 0.3 ratio, 50 iterations  (moderate writes)
+	// - Critical: every 30s,  0.1 ratio, 100 iterations  (heavy writes)
+	// Additionally, aggressive GC runs on startup and before shutdown.
 	options.Options = options.Options.
 		WithBlockCacheSize(256 << 20).   // 256 MB block cache (good for reads)
 		WithIndexCacheSize(128 << 20).   // 128 MB index cache (caps memory)
@@ -107,6 +110,12 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 	store.Database, err = badgerhold.Open(options)
 	if err != nil {
 		logging.Fatalf("Failed to open main database: %v", err)
+	}
+
+	// Verify (or stamp) the database schema version.
+	// This prevents the relay from running against an un-migrated v1 database.
+	if err := CheckSchemaVersion(store.Database.Badger()); err != nil {
+		logging.Fatalf("Schema version check failed: %v", err)
 	}
 
 	// Check if a custom statistics database path was provided
@@ -127,9 +136,13 @@ func InitStore(basepath string, args ...interface{}) (*BadgerholdStore, error) {
 		return nil, fmt.Errorf("failed to initialize gorm statistics database: %v", err)
 	}
 
-	// Start background garbage collection for Badger value logs
-	// This prevents disk space from growing indefinitely due to old/deleted values
-	go runBadgerGC(store.Database.Badger(), store.Ctx, "main", 10*time.Minute, 0.5)
+	// Run aggressive GC on startup to clean garbage from previous run.
+	// This prevents the delay before the first periodic GC cycle that was causing
+	// 100GB+ garbage accumulation after restarts.
+	runStartupGC(store.Database.Badger())
+
+	// Start adaptive background GC that monitors vlog growth and adjusts aggressiveness
+	go runAdaptiveGC(store)
 
 	// Start disk usage monitoring (logs every 5 minutes)
 	go runDiskUsageMonitor(store, 5*time.Minute)
@@ -145,6 +158,15 @@ func (store *BadgerholdStore) Cleanup() error {
 		return nil
 	}
 	store.closed = true
+
+	// Signal adaptive GC goroutine and disk monitor to stop
+	store.cancel()
+
+	// Brief grace period for goroutines to exit cleanly
+	time.Sleep(200 * time.Millisecond)
+
+	// Run final GC pass before closing to minimize garbage left behind for next startup
+	runFinalGC(store.Database.Badger())
 
 	var result error
 
@@ -194,6 +216,24 @@ func (store *BadgerholdStore) RunGC() int {
 
 	return gcCount
 }
+
+// SignalGC sends a non-blocking signal to the adaptive GC goroutine to run
+// an extra GC cycle. Call this after bulk write operations (e.g., StoreLeavesBatch).
+// Safe to call from any goroutine — the signal is coalesced if GC is already pending.
+func (store *BadgerholdStore) SignalGC() {
+	select {
+	case store.gcSignal <- struct{}{}:
+	default:
+		// Signal already pending — GC will run soon
+	}
+}
+
+// GC pressure levels for adaptive garbage collection
+const (
+	gcPressureNormal   = 0 // Stable or slow vlog growth: 5 min interval, 0.5 ratio
+	gcPressureElevated = 1 // Moderate vlog growth (>256MB): 1 min interval, 0.3 ratio
+	gcPressureCritical = 2 // Rapid vlog growth (>1GB): 30s interval, 0.1 ratio
+)
 
 // Compact performs a full database compaction using Badger's Flatten operation.
 // This should be called when the database has significant bloat from duplicate writes.
@@ -361,242 +401,162 @@ func runDiskUsageMonitor(store *BadgerholdStore, interval time.Duration) {
 	}
 }
 
-// runBadgerGC runs Badger's value log garbage collection periodically.
-// discardRatio: files with garbage ratio > discardRatio will be rewritten (lower = more aggressive)
-// - 0.5 = only compact files with >50% garbage (standard, recommended)
-// - 0.3 = compact files with >30% garbage (more aggressive)
-func runBadgerGC(db *badger.DB, ctx context.Context, name string, interval time.Duration, discardRatio float64) {
-	ticker := time.NewTicker(interval)
+// runAdaptiveGC monitors vlog growth rate and adjusts GC aggressiveness accordingly.
+// Three pressure levels: normal (idle), elevated (moderate writes), critical (heavy writes).
+// Also listens for explicit signals from bulk write operations via store.gcSignal.
+func runAdaptiveGC(store *BadgerholdStore) {
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
+
+	var lastVlogSize int64
+	pressure := gcPressureNormal
 
 	for {
 		select {
 		case <-ticker.C:
-			// Get size before GC
-			_, vlogBefore := db.Size()
-
-			// Run GC iterations until no more files need compaction
-			gcIterations := 0
-			for i := 0; i < 10; i++ {
-				if err := db.RunValueLogGC(discardRatio); err != nil {
-					break
-				}
-				gcIterations++
+			if store.IsClosed() {
+				return
 			}
 
-			// Track GC activity
-			if gcIterations > 0 {
-				gcRunCount.Add(1)
-				_, vlogAfter := db.Size()
-				if vlogBefore > vlogAfter {
-					gcReclaimedBytes.Add(vlogBefore - vlogAfter)
+			db := store.Database.Badger()
+
+			// Measure vlog growth since last cycle to determine pressure
+			_, currentVlog := db.Size()
+
+			if lastVlogSize > 0 {
+				growth := currentVlog - lastVlogSize
+				switch {
+				case growth > 1<<30: // >1 GB growth since last check
+					if pressure != gcPressureCritical {
+						logging.Info("[GC] Pressure: CRITICAL \u2014 vlog growing rapidly")
+					}
+					pressure = gcPressureCritical
+				case growth > 256<<20: // >256 MB growth
+					if pressure != gcPressureElevated {
+						logging.Info("[GC] Pressure: ELEVATED \u2014 moderate vlog growth")
+					}
+					pressure = gcPressureElevated
+				default:
+					if pressure != gcPressureNormal {
+						logging.Info("[GC] Pressure: NORMAL \u2014 vlog growth stable")
+					}
+					pressure = gcPressureNormal
 				}
-				logging.Infof("[GC] Completed %d iterations, reclaimed %d MB",
-					gcIterations, (vlogBefore-vlogAfter)/(1024*1024))
 			}
-		case <-ctx.Done():
+			lastVlogSize = currentVlog
+
+			runGCCycle(db, pressure)
+
+			// Adjust ticker interval based on new pressure level
+			switch pressure {
+			case gcPressureCritical:
+				ticker.Reset(30 * time.Second)
+			case gcPressureElevated:
+				ticker.Reset(1 * time.Minute)
+			default:
+				ticker.Reset(5 * time.Minute)
+			}
+
+		case <-store.gcSignal:
+			// Bulk write path signaled \u2014 run an elevated GC cycle immediately
+			if !store.IsClosed() {
+				runGCCycle(store.Database.Badger(), gcPressureElevated)
+			}
+
+		case <-store.Ctx.Done():
 			return
 		}
 	}
 }
 
+// runGCCycle executes one GC cycle with parameters determined by pressure level.
+// Does not block reads/writes \u2014 BadgerDB GC is concurrent-safe.
+func runGCCycle(db *badger.DB, pressure int) {
+	var discardRatio float64
+	var maxIterations int
+
+	switch pressure {
+	case gcPressureCritical:
+		discardRatio = 0.1 // Very aggressive: compact files with >10% garbage
+		maxIterations = 100
+	case gcPressureElevated:
+		discardRatio = 0.3 // Moderate: compact files with >30% garbage
+		maxIterations = 50
+	default:
+		discardRatio = 0.5 // Conservative: compact files with >50% garbage
+		maxIterations = 20
+	}
+
+	_, vlogBefore := db.Size()
+	gcIterations := 0
+
+	for i := 0; i < maxIterations; i++ {
+		if err := db.RunValueLogGC(discardRatio); err != nil {
+			break
+		}
+		gcIterations++
+	}
+
+	if gcIterations > 0 {
+		gcRunCount.Add(1)
+		_, vlogAfter := db.Size()
+		if vlogBefore > vlogAfter {
+			gcReclaimedBytes.Add(vlogBefore - vlogAfter)
+		}
+
+		pressureNames := []string{"normal", "elevated", "critical"}
+		logging.Infof("[GC] %s: %d iterations, reclaimed %d MB",
+			pressureNames[pressure], gcIterations, (vlogBefore-vlogAfter)/(1024*1024))
+	}
+}
+
+// runStartupGC runs aggressive garbage collection immediately on startup.
+// This cleans up dead vlog space accumulated from the previous run without
+// waiting for the first periodic GC cycle (which could be minutes away).
+func runStartupGC(db *badger.DB) {
+	logging.Info("[GC] Running startup garbage collection...")
+	_, vlogBefore := db.Size()
+	gcCount := 0
+
+	for i := 0; i < 100; i++ {
+		if err := db.RunValueLogGC(0.3); err != nil {
+			break
+		}
+		gcCount++
+	}
+
+	if gcCount > 0 {
+		_, vlogAfter := db.Size()
+		reclaimed := int64(0)
+		if vlogBefore > vlogAfter {
+			reclaimed = (vlogBefore - vlogAfter) / (1024 * 1024)
+		}
+		logging.Infof("[GC] Startup GC completed: %d iterations, reclaimed %d MB", gcCount, reclaimed)
+	} else {
+		logging.Info("[GC] Startup GC: no garbage to collect")
+	}
+}
+
+// runFinalGC runs garbage collection before database close to minimize
+// dead space left behind for the next startup.
+func runFinalGC(db *badger.DB) {
+	logging.Info("[GC] Running final garbage collection before shutdown...")
+	gcCount := 0
+
+	for i := 0; i < 50; i++ {
+		if err := db.RunValueLogGC(0.3); err != nil {
+			break
+		}
+		gcCount++
+	}
+
+	if gcCount > 0 {
+		logging.Infof("[GC] Final GC completed: %d iterations", gcCount)
+	}
+}
+
 func (store *BadgerholdStore) GetStatsStore() statistics.StatisticsStore {
 	return store.StatsDatabase
-}
-
-func (store *BadgerholdStore) QueryEvents(filter nostr.Filter) ([]*nostr.Event, error) {
-	// Check if store is closed before attempting database operations
-	if store.IsClosed() {
-		return nil, fmt.Errorf("database is closed")
-	}
-
-	var results []types.NostrEvent
-
-	jd, _ := json.Marshal(filter)
-	logging.Infof("%s", string(jd))
-
-	query := badgerhold.Where("ID").Ne("")
-	first := true
-
-	if len(filter.Kinds) > 0 {
-		kindsAsInterface := make([]interface{}, len(filter.Kinds))
-		for i, kind := range filter.Kinds {
-			kindsAsInterface[i] = strconv.Itoa(kind)
-		}
-
-		if first {
-			query = badgerhold.Where("Kind").In(kindsAsInterface...)
-			first = false
-		} else {
-			query = query.And("Kind").In(kindsAsInterface...)
-		}
-	}
-
-	if len(filter.Authors) > 0 {
-		authorsAsInterface := make([]interface{}, len(filter.Authors))
-		for i, author := range filter.Authors {
-			authorsAsInterface[i] = author
-		}
-
-		if first {
-			query = badgerhold.Where("PubKey").In(authorsAsInterface...)
-			first = false
-		} else {
-			query = query.And("PubKey").In(authorsAsInterface...)
-		}
-	}
-
-	if filter.Since != nil {
-		query = query.And("CreatedAt").Ge(*filter.Since)
-	}
-	if filter.Until != nil {
-		query = query.And("CreatedAt").Le(*filter.Until)
-	}
-
-	if len(filter.Tags) > 0 {
-		eventIDSet := make(map[string]struct{})
-
-		isFirst := true
-
-		for tagName, tagValues := range filter.Tags {
-			var tagEntries []types.TagEntry
-
-			err := store.Database.Find(&tagEntries, badgerhold.Where("TagName").Eq(strings.ReplaceAll(tagName, "#", "")).And("TagValue").In(toInterfaceSlice(tagValues)...))
-			if err != nil && err != badgerhold.ErrNotFound {
-				return nil, fmt.Errorf("failed to query tag entries for %s: %w", tagName, err)
-			}
-
-			tempEventIDs := make(map[string]struct{})
-			for _, entry := range tagEntries {
-				tempEventIDs[entry.EventID] = struct{}{}
-			}
-
-			if isFirst {
-				eventIDSet = tempEventIDs
-				isFirst = false
-			} else {
-				for id := range eventIDSet {
-					if _, exists := tempEventIDs[id]; !exists {
-						delete(eventIDSet, id)
-					}
-				}
-			}
-		}
-
-		eventIDs := make([]string, 0, len(eventIDSet))
-		for id := range eventIDSet {
-			eventIDs = append(eventIDs, id)
-		}
-
-		if len(eventIDs) == 0 {
-			logging.Infof("No matching events from tags")
-			return []*nostr.Event{}, nil
-		}
-
-		logging.Infof("Found %d events from tags\n", len(eventIDs))
-
-		if first {
-			query = badgerhold.Where("ID").In(toInterfaceSlice(eventIDs)...)
-			first = false
-		} else {
-			query = query.And("ID").In(toInterfaceSlice(eventIDs)...)
-		}
-	}
-
-	err := store.Database.Find(&results, query)
-	if err != nil && err != badgerhold.ErrNotFound {
-		return nil, fmt.Errorf("failed to query events: %w", err)
-	}
-
-	var events []*nostr.Event
-	for _, event := range results {
-		events = append(events, UnwrapEvent(&event))
-	}
-
-	filteredEvents := postFilterEvents(events, filter)
-
-	sortEventsByCreatedAt(filteredEvents)
-
-	if filter.Limit > 0 && len(filteredEvents) > filter.Limit {
-		filteredEvents = filteredEvents[:filter.Limit]
-	}
-
-	return filteredEvents, nil
-}
-
-func sortEventsByCreatedAt(events []*nostr.Event) {
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].CreatedAt.Time().After(events[j].CreatedAt.Time())
-	})
-}
-
-func toInterfaceSlice[T any](items []T) []interface{} {
-	interfaceSlice := make([]interface{}, len(items))
-	for i, item := range items {
-		interfaceSlice[i] = item
-	}
-	return interfaceSlice
-}
-
-func postFilterEvents(events []*nostr.Event, filter nostr.Filter) []*nostr.Event {
-	var filtered []*nostr.Event
-
-	// Parse search query if present
-	var searchQuery search.SearchQuery
-	if filter.Search != "" {
-		searchQuery = search.ParseSearchQuery(filter.Search)
-	}
-
-	for _, event := range events {
-		// Match event ID (if specified)
-		if len(filter.IDs) > 0 && !contains(filter.IDs, event.ID) {
-			continue
-		}
-
-		// Match event tags (handling OR conditions)
-		if len(filter.Tags) > 0 {
-			matchesTag := false
-			for tagName, tagValues := range filter.Tags {
-				if eventHasTag(event, tagName, tagValues) {
-					matchesTag = true
-					break
-				}
-			}
-			if !matchesTag {
-				continue
-			}
-		}
-
-		// Match search term (if specified)
-		if searchQuery.Text != "" && !strings.Contains(strings.ToLower(event.Content), strings.ToLower(searchQuery.Text)) {
-			continue
-		}
-
-		// If the event passes all checks, add it to the results
-		filtered = append(filtered, event)
-	}
-
-	return filtered
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-func eventHasTag(event *nostr.Event, tagName string, tagValues []string) bool {
-	for _, tag := range event.Tags {
-		if len(tag) >= 2 && tag[0] == tagName {
-			if contains(tagValues, tag[1]) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // ExtractMediaURLsFromEvent extracts all media (image and video) URLs from a Nostr event
@@ -708,149 +668,6 @@ func ExtractMediaURLsFromEvent(event *nostr.Event) []string {
 // For backward compatibility
 func ExtractImageURLsFromEvent(event *nostr.Event) []string {
 	return ExtractMediaURLsFromEvent(event)
-}
-
-func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
-	event := WrapEvent(ev)
-
-	// Batch all writes (event + tags) into a single transaction to reduce write amplification
-	err := store.Database.Badger().Update(func(tx *badger.Txn) error {
-		// Store the event
-		if err := store.Database.TxUpsert(tx, event.ID, event); err != nil {
-			return fmt.Errorf("failed to store nostr event: %w", err)
-		}
-
-		// Store all tags in the same transaction
-		for _, tag := range event.Tags {
-			if len(tag) < 2 {
-				continue
-			}
-
-			if len(tag[0]) != 1 {
-				continue
-			}
-
-			entry := types.TagEntry{
-				EventID:  event.ID,
-				TagName:  tag[0],
-				TagValue: tag[1],
-			}
-
-			key := fmt.Sprintf("tag:%s:%s:%s", tag[0], tag[1], event.ID)
-
-			if err := store.Database.TxUpsert(tx, key, entry); err != nil {
-				return fmt.Errorf("failed to store tag entry: %w", err)
-			}
-		}
-
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	// Track for disk monitoring
-	eventsStoredCount.Add(1)
-
-	// Record event statistics
-	if store.StatsDatabase != nil {
-		err = store.StatsDatabase.SaveEventKind(ev)
-		if err != nil {
-			// Log the error but don't fail the operation
-			logging.Infof("Failed to record event statistics: %v\n", err)
-		}
-	}
-
-	// Update search index for text events
-	if err := store.UpdateSearchIndex(ev); err != nil {
-		// Log the error but don't fail the operation
-		logging.Infof("Failed to update search index for event %s: %v\n", ev.ID, err)
-	}
-
-	// Check for images that need moderation - only if image moderation is enabled
-	if cfg, err := config.GetConfig(); err != nil {
-		logging.Infof("Failed to get config for image moderation check: %v", err)
-	} else if cfg.ContentFiltering.ImageModeration.Enabled {
-		// Extract image URLs from the event using our image extractor
-		imageURLs := ExtractImageURLsFromEvent(ev)
-		if len(imageURLs) > 0 {
-			// Check if we should bypass moderation for exclusive mode
-			if ac := websocket.GetAccessControl(); ac != nil {
-				if settings := ac.GetSettings(); settings != nil && strings.ToLower(settings.Mode) == "exclusive" {
-					logging.Infof("Event %s contains %d images, but skipping moderation in exclusive mode", ev.ID, len(imageURLs))
-					// Skip moderation entirely for exclusive mode
-				} else {
-					// Continue with moderation for free and paid modes
-					logging.Infof("Event %s contains %d images, adding to moderation queue", ev.ID, len(imageURLs))
-					err = store.AddToPendingModeration(ev.ID, imageURLs)
-					if err != nil {
-						logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
-					}
-				}
-			} else {
-				// Fallback to current behavior if access control not available
-				logging.Infof("Event %s contains %d images, adding to moderation queue (fallback)", ev.ID, len(imageURLs))
-				err = store.AddToPendingModeration(ev.ID, imageURLs)
-				if err != nil {
-					logging.Infof("Failed to add event %s to pending moderation: %v", ev.ID, err)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func (store *BadgerholdStore) DeleteEvent(eventID string) error {
-	// Find all tag entries for this event to delete them along with the event
-	var tagEntries []types.TagEntry
-	if err := store.Database.Find(&tagEntries, badgerhold.Where("EventID").Eq(eventID)); err != nil {
-		if err != badgerhold.ErrNotFound {
-			logging.Infof("Warning: failed to find tag entries for event %s: %v", eventID, err)
-		}
-	}
-
-	// Batch delete event and all its tags in a single transaction
-	err := store.Database.Badger().Update(func(tx *badger.Txn) error {
-		// Delete all tag entries
-		for _, entry := range tagEntries {
-			key := fmt.Sprintf("tag:%s:%s:%s", entry.TagName, entry.TagValue, eventID)
-			if err := store.Database.TxDelete(tx, key, types.TagEntry{}); err != nil {
-				// Log but don't fail - tag may already be deleted
-				logging.Infof("Warning: failed to delete tag entry %s: %v", key, err)
-			}
-		}
-
-		// Delete the event
-		if err := store.Database.TxDelete(tx, eventID, types.NostrEvent{}); err != nil {
-			return fmt.Errorf("failed to delete event: %w", err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to delete event and tags: %w", err)
-	}
-
-	// Track for disk monitoring
-	eventsDeletedCount.Add(1)
-
-	// Remove event from statistics
-	if store.StatsDatabase != nil {
-		err = store.StatsDatabase.DeleteEventByID(eventID)
-		if err != nil {
-			// Log the error but don't fail the operation
-			logging.Infof("Failed to delete event from statistics: %v\n", err)
-		}
-	}
-
-	// Remove from search index
-	if err := store.RemoveFromSearchIndex(eventID); err != nil {
-		// Log the error but don't fail the operation
-		logging.Infof("Failed to remove event %s from search index: %v\n", eventID, err)
-	}
-
-	return nil
 }
 
 // Blossom Blobs (unchunked data)
@@ -1120,35 +937,4 @@ func (store *BadgerholdStore) SaveAddress(addr *types.Address) error {
 	}
 
 	return nil
-}
-
-func WrapEvent(event *nostr.Event) *types.NostrEvent {
-	kind := strconv.Itoa(event.Kind)
-
-	return &types.NostrEvent{
-		ID:        event.ID,
-		PubKey:    event.PubKey,
-		CreatedAt: event.CreatedAt,
-		Kind:      kind,
-		Tags:      event.Tags,
-		Content:   event.Content,
-		Sig:       event.Sig,
-	}
-}
-
-func UnwrapEvent(event *types.NostrEvent) *nostr.Event {
-	kind, err := strconv.Atoi(event.Kind)
-	if err != nil {
-		logging.Infof("This just means it's failing but this never actually gets printed")
-	}
-
-	return &nostr.Event{
-		ID:        event.ID,
-		PubKey:    event.PubKey,
-		CreatedAt: event.CreatedAt,
-		Kind:      int(kind),
-		Tags:      event.Tags,
-		Content:   event.Content,
-		Sig:       event.Sig,
-	}
 }

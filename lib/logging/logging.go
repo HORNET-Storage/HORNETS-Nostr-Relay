@@ -225,8 +225,12 @@ func (l *Logger) log(level LogLevel, msg string, fields map[string]interface{}) 
 
 	fmt.Fprintln(writer, formatted)
 
-	// For FATAL logs, exit the application
+	// For FATAL logs, always ensure the message is visible on stderr
+	// so the operator sees it even when output is set to "file".
 	if level == FATAL {
+		if l.output == "file" {
+			fmt.Fprintln(os.Stderr, formatted)
+		}
 		os.Exit(1)
 	}
 }

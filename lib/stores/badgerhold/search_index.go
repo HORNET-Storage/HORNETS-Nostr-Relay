@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	types "github.com/HORNET-Storage/hornet-storage/lib"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/timshannon/badgerhold/v4"
 )
@@ -118,15 +118,19 @@ func (store *BadgerholdStore) SearchEvents(searchTokens []string, limit int) ([]
 		return nil, fmt.Errorf("search index query failed: %w", err)
 	}
 
-	// Now fetch the actual events
+	// Now fetch the actual events using raw BadgerDB lookups
 	var events []*nostr.Event
-	for _, entry := range indexEntries {
-		// Fetch the event from the main store
-		var nostrEvent types.NostrEvent
-		err := store.Database.Get(entry.EventID, &nostrEvent)
-		if err == nil {
-			events = append(events, UnwrapEvent(&nostrEvent))
+	err = store.Database.Badger().View(func(tx *badger.Txn) error {
+		for _, entry := range indexEntries {
+			ev, err := getEvent(tx, entry.EventID)
+			if err == nil {
+				events = append(events, ev)
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch events: %w", err)
 	}
 
 	// Sort by relevance (simple scoring based on token matches)
@@ -163,21 +167,33 @@ func (store *BadgerholdStore) RebuildSearchIndex() error {
 		return fmt.Errorf("failed to clear search index: %w", err)
 	}
 
-	// Now rebuild from all kind 1 events
-	var events []types.NostrEvent
-	err = store.Database.Find(&events, badgerhold.Where("Kind").Eq("1"))
-	if err != nil && err != badgerhold.ErrNotFound {
-		return fmt.Errorf("failed to fetch events for indexing: %w", err)
-	}
+	// Iterate all kind-1 events via the eti:1: prefix (raw BadgerDB)
+	prefix := []byte(prefixKindTime + "1:")
+	count := 0
 
-	// Index each event
-	for _, event := range events {
-		unwrapped := UnwrapEvent(&event)
-		if err := store.UpdateSearchIndex(unwrapped); err != nil {
-			// Log error but continue
-			fmt.Printf("Failed to index event %s: %v\n", event.ID, err)
+	err = store.Database.Badger().View(func(tx *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := tx.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			eventID := extractEventIDFromKey(it.Item().KeyCopy(nil))
+			ev, err := getEvent(tx, eventID)
+			if err != nil {
+				continue
+			}
+			if err := store.UpdateSearchIndex(ev); err != nil {
+				fmt.Printf("Failed to index event %s: %v\n", eventID, err)
+			}
+			count++
 		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to rebuild search index: %w", err)
 	}
 
+	fmt.Printf("Rebuilt search index with %d kind-1 events\n", count)
 	return nil
 }

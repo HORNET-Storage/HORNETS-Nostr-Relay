@@ -21,13 +21,6 @@ type NostrEvent struct {
 	Extra map[string]any `json:"-"` // Fields will be added to the parent object during serialization
 }
 
-// TagEntry represents a tag entry for indexing
-type TagEntry struct {
-	EventID  string `badgerhold:"index"`
-	TagName  string `badgerhold:"index"`
-	TagValue string `badgerhold:"index"`
-}
-
 // Kind represents event kind metadata
 type Kind struct {
 	ID               uint `gorm:"primaryKey"`

@@ -503,6 +503,9 @@ func (store *BadgerholdStore) StoreLeavesBatch(root string, leaves []*types.DagL
 		}
 	}
 
+	// Signal the adaptive GC goroutine that a bulk write just completed
+	store.SignalGC()
+
 	return nil
 }
 

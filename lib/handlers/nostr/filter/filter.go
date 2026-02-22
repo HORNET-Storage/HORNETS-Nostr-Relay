@@ -7,7 +7,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
-	"github.com/HORNET-Storage/hornet-storage/lib/sync"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
@@ -30,20 +29,20 @@ func getAuthenticatedPubkey(data []byte) string {
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	if err := json.Unmarshal(data, &wrapper); err == nil {
-		logging.Infof("Wrapper unmarshaled successfully - AuthPubkey: '%s', IsAuthenticated: %v", wrapper.AuthPubkey, wrapper.IsAuthenticated)
+		logging.Debugf("Wrapper unmarshaled successfully - AuthPubkey: '%s', IsAuthenticated: %v", wrapper.AuthPubkey, wrapper.IsAuthenticated)
 		if wrapper.IsAuthenticated && wrapper.AuthPubkey != "" {
-			logging.Infof("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
+			logging.Debugf("Using authenticated pubkey from request wrapper: %s", wrapper.AuthPubkey)
 			return wrapper.AuthPubkey
 		} else {
-			logging.Infof("Wrapper found but not authenticated or empty pubkey")
+			logging.Debugf("Wrapper found but not authenticated or empty pubkey")
 		}
 	} else {
-		logging.Infof("Failed to unmarshal wrapper structure: %v", err)
+		logging.Debugf("Failed to unmarshal wrapper structure: %v", err)
 	}
 
 	// If we couldn't extract from wrapper, fall back to the old method
 	// Find currently authenticated pubkeys by scanning the session store
-	logging.Infof("Falling back to session store check...")
+	logging.Debugf("Falling back to session store check...")
 	var authenticatedPubkeys []string
 	sessions.Sessions.Range(func(key, value interface{}) bool {
 		pubkey, ok := key.(string)
@@ -58,7 +57,7 @@ func getAuthenticatedPubkey(data []byte) string {
 
 		if session.Authenticated {
 			authenticatedPubkeys = append(authenticatedPubkeys, pubkey)
-			logging.Infof("Found authenticated pubkey in sessions: %s", pubkey)
+			logging.Debugf("Found authenticated pubkey in sessions: %s", pubkey)
 		}
 
 		return true // continue
@@ -66,60 +65,37 @@ func getAuthenticatedPubkey(data []byte) string {
 
 	// Log the authenticated pubkeys we found for debugging
 	if len(authenticatedPubkeys) > 0 {
-		logging.Infof("Found %d authenticated pubkeys in session store", len(authenticatedPubkeys))
+		logging.Debugf("Found %d authenticated pubkeys in session store", len(authenticatedPubkeys))
 
 		// Return the first authenticated pubkey we found
 		// In a real implementation, we would match this to the specific connection
 		return authenticatedPubkeys[0]
 	} else {
-		logging.Infof("No authenticated pubkeys found in session store")
+		logging.Debugf("No authenticated pubkeys found in session store")
 	}
 
 	// If we can't determine the authenticated pubkey, return empty string
 	return ""
 }
 
-// ANSI color codes for colorized logging
-const (
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorBlue   = "\033[34m"
-	ColorPurple = "\033[35m"
-	ColorCyan   = "\033[36m"
-	ColorWhite  = "\033[37m"
-
-	// Bold variants
-	ColorRedBold    = "\033[1;31m"
-	ColorGreenBold  = "\033[1;32m"
-	ColorYellowBold = "\033[1;33m"
-	ColorBlueBold   = "\033[1;34m"
-	ColorPurpleBold = "\033[1;35m"
-	ColorCyanBold   = "\033[1;36m"
-	ColorWhiteBold  = "\033[1;37m"
-)
-
 // addLogging adds detailed logging for debugging
 func addLogging(reqEnvelope *nostr.ReqEnvelope, connPubkey string) {
-	logging.Infof(ColorBlue+"Authenticated pubkey for filter request: %s"+ColorReset, connPubkey)
+	logging.Debugf("Authenticated pubkey for filter request: %s", connPubkey)
 
 	// Log the kinds being requested
 	for i, filter := range reqEnvelope.Filters {
-		logging.Infof(ColorCyan+"Filter #%d requests kinds: %v"+ColorReset, i+1, filter.Kinds)
+		logging.Debugf("Filter #%d requests kinds: %v", i+1, filter.Kinds)
 
 		// Log any 'p' tags that might be filtering by pubkey
 		for tagName, tagValues := range filter.Tags {
 			if tagName == "p" {
-				logging.Infof(ColorCyan+"Filter #%d requests events for pubkeys: %v"+ColorReset, i+1, tagValues)
+				logging.Debugf("Filter #%d requests events for pubkeys: %v", i+1, tagValues)
 			}
 		}
 	}
 }
 
 func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
-	// No debug flags - removed all debug and benchmarking code
-
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -137,7 +113,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			Request *nostr.ReqEnvelope `json:"request"`
 		}
 		if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Request != nil {
-			logging.Info("Successfully extracted request from wrapper structure")
+			logging.Debug("Successfully extracted request from wrapper structure")
 			request = *wrapper.Request
 		} else {
 			// Fall back to direct unmarshal (for backward compatibility)
@@ -174,9 +150,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		}
 
 		// Ensure that we respond to the client after processing all filters
-		// defer responder(stream, "EOSE", request.SubscriptionID, "End of stored events")
 		var combinedEvents []*nostr.Event
-		var missingEventIDs []string
 
 		// FIRST: Check access control BEFORE doing any searches
 		connPubkey := getAuthenticatedPubkey(data)
@@ -188,16 +162,13 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			// Check if user has read access
 			err := accessControl.CanRead(connPubkey)
 			if err != nil {
-				logging.Infof(ColorRed+"[ACCESS CONTROL] Read access denied for pubkey: %s"+ColorReset, connPubkey)
+				logging.Infof("[ACCESS CONTROL] Read access denied for pubkey: %s", connPubkey)
 				write("NOTICE", "Read access denied: User not in allowed list")
 				return
 			}
 
-			logging.Infof(ColorGreen+"[ACCESS CONTROL] Read access granted for user: %s"+ColorReset, connPubkey)
+			logging.Debugf("[ACCESS CONTROL] Read access granted for user: %s", connPubkey)
 		}
-
-		// Get global relay store for missing note retrieval
-		relayStore := sync.GetRelayStore()
 
 		// Parse search extensions if any filter has a search
 		var searchQueries []search.SearchQuery
@@ -205,7 +176,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			if filter.Search != "" {
 				searchQuery := search.ParseSearchQuery(filter.Search)
 				searchQueries = append(searchQueries, searchQuery)
-				logging.Infof(ColorCyan+"[SEARCH] Parsed query: text='%s', extensions=%v"+ColorReset, searchQuery.Text, searchQuery.Extensions)
+				logging.Debugf("[SEARCH] Parsed query: text='%s', extensions=%v", searchQuery.Text, searchQuery.Extensions)
 			}
 
 			events, err := store.QueryEvents(filter)
@@ -213,24 +184,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				logging.Infof("Error querying events for filter: %v", err)
 				continue
 			}
-
-			// Check for missing specific event IDs
-			if len(filter.IDs) > 0 {
-				foundIDs := make(map[string]bool)
-				for _, event := range events {
-					foundIDs[event.ID] = true
-				}
-
-				// Find missing event IDs
-				for _, requestedID := range filter.IDs {
-					if !foundIDs[requestedID] {
-						missingEventIDs = append(missingEventIDs, requestedID)
-						logging.Infof(ColorYellow+"[MISSING NOTE] Event ID %s not found locally, will attempt DHT retrieval"+ColorReset, requestedID)
-					}
-				}
-			}
-
-			// No debug logging for database results
 
 			combinedEvents = append(combinedEvents, events...)
 		}
@@ -240,179 +193,115 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		for _, sq := range searchQueries {
 			if sq.IsSpamIncluded() {
 				includeSpam = true
-				logging.Infof(ColorYellow + "[SEARCH] include:spam extension detected - will include blocked/pending events" + ColorReset)
+				logging.Debugf("[SEARCH] include:spam extension detected - will include blocked/pending events")
 				break
-			}
-		}
-
-		// Attempt to retrieve missing events via DHT (with timeout protection)
-		if len(missingEventIDs) > 0 && relayStore != nil {
-			logging.Infof(ColorCyan+"[MISSING NOTE] Attempting to retrieve %d missing events via DHT"+ColorReset, len(missingEventIDs))
-
-			// Limit the number of missing events we try to retrieve to prevent excessive delays
-			maxMissingEvents := 5
-			if len(missingEventIDs) > maxMissingEvents {
-				logging.Infof(ColorYellow+"[MISSING NOTE] Limiting DHT retrieval to %d events (requested %d)"+ColorReset, maxMissingEvents, len(missingEventIDs))
-				missingEventIDs = missingEventIDs[:maxMissingEvents]
-			}
-
-			for _, eventID := range missingEventIDs {
-				logging.Infof(ColorCyan+"[MISSING NOTE] Searching for event %s via DHT"+ColorReset, eventID)
-
-				// Strategy 1: If we have author filters in any filter, use those for DHT lookup
-				var potentialAuthors []string
-				for _, filter := range request.Filters {
-					if len(filter.Authors) > 0 {
-						potentialAuthors = append(potentialAuthors, filter.Authors...)
-					}
-				}
-
-				// Try to retrieve from each potential author's relay list (limited attempts)
-				var foundEvent *nostr.Event
-				maxAuthors := 3 // Limit to prevent excessive DHT lookups
-				for i, authorPubkey := range potentialAuthors {
-					if i >= maxAuthors {
-						break
-					}
-
-					response, err := sync.RetrieveMissingNote(eventID, authorPubkey, relayStore, store)
-					if err != nil {
-						logging.Infof(ColorRed+"[MISSING NOTE] Error retrieving event %s for author %s: %v"+ColorReset, eventID, authorPubkey, err)
-						continue
-					}
-
-					if response.Found && response.Event != nil {
-						logging.Infof(ColorGreen+"[MISSING NOTE] Successfully retrieved event %s from %s"+ColorReset, eventID, response.RelayURL)
-						foundEvent = response.Event
-						break
-					}
-				}
-
-				// Strategy 2: If no authors specified or no event found, try a broader DHT search
-				if foundEvent == nil {
-					logging.Infof(ColorYellow+"[MISSING NOTE] Event %s not found via author-specific search, trying broader DHT search"+ColorReset, eventID)
-
-					// Try to find the event by querying multiple known relay lists
-					// This could be enhanced to iterate through all DHT entries
-					// For now, we'll just log that we tried
-					logging.Infof(ColorYellow+"[MISSING NOTE] Broader DHT search for event %s not yet implemented"+ColorReset, eventID)
-				}
-
-				// If we found the event, add it to combined events
-				if foundEvent != nil {
-					combinedEvents = append(combinedEvents, foundEvent)
-					logging.Infof(ColorGreen+"[MISSING NOTE] Added retrieved event %s to response"+ColorReset, eventID)
-				}
 			}
 		}
 
 		// Deduplicate events
 		uniqueEvents := deduplicateEvents(combinedEvents)
 
-		// No verbose debug logging
-
 		// Get the authenticated pubkey for the current connection
 		connPubkey = getAuthenticatedPubkey(data)
 
-		// Get moderation mode from relay_settings (default to strict if not specified)
-		var isStrict bool = true // Default to strict mode
+		// Only run moderation filtering when image moderation is enabled.
+		// When disabled, no events are ever blocked or pending, so the batch
+		// DB lookups would just waste I/O on every single query.
+		moderationEnabled := viper.GetBool("content_filtering.image_moderation.enabled")
 
-		// First try to get the moderation mode directly from viper
-		moderationMode := viper.GetString("content_filtering.image_moderation.mode")
-		if moderationMode == "passive" {
-			isStrict = false
-			logging.Info("[MODERATION] Using passive moderation mode")
-		}
+		if moderationEnabled {
+			// Get moderation mode from config (default to strict if not specified)
+			var isStrict bool = true // Default to strict mode
 
-		// Filter out blocked events and handle pending moderation events based on mode
-		var filteredEvents []*nostr.Event
-		var blockedCount int
-		var pendingCount int
-		var pendingAllowedCount int
+			moderationMode := viper.GetString("event_filtering.moderation_mode")
+			if moderationMode == "passive" {
+				isStrict = false
+				logging.Debug("[MODERATION] Using passive moderation mode")
+			}
 
-		// Always apply moderation filtering (unless include:spam is present)
-		for _, event := range uniqueEvents {
-			// First check if event is blocked (blocked events are normally filtered out)
-			isBlocked, err := store.IsEventBlocked(event.ID)
+			// Filter out blocked events and handle pending moderation events based on mode
+			var filteredEvents []*nostr.Event
+			var blockedCount int
+			var pendingCount int
+			var pendingAllowedCount int
+
+			// Batch-lookup blocked and pending status for all events at once
+			// instead of doing N individual DB queries per event.
+			eventIDs := make([]string, len(uniqueEvents))
+			for i, e := range uniqueEvents {
+				eventIDs[i] = e.ID
+			}
+
+			blockedMap, err := store.BatchCheckEventsBlocked(eventIDs)
 			if err != nil {
-				logging.Infof("Error checking if event %s is blocked: %v", event.ID, err)
-				// If there's an error, assume not blocked
-				filteredEvents = append(filteredEvents, event)
-				continue
+				logging.Infof("Error batch-checking blocked events: %v", err)
+				blockedMap = make(map[string]bool)
 			}
 
-			if isBlocked {
-				logging.Infof(ColorRedBold+"[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s (failed image moderation)"+ColorReset,
-					event.ID, event.Kind, event.PubKey)
-				blockedCount++
-
-				// If include:spam is present, include even blocked events
-				if includeSpam {
-					logging.Infof(ColorYellow+"[SEARCH] Including blocked event %s due to include:spam"+ColorReset, event.ID)
-					filteredEvents = append(filteredEvents, event)
-				} else {
-					// Skip this event - it's blocked for moderation reasons
-					continue
-				}
-			}
-
-			// Then check if event is pending moderation
-			isPending, err := store.IsPendingModeration(event.ID)
+			pendingMap, err := store.BatchCheckPendingModeration(eventIDs)
 			if err != nil {
-				logging.Infof("Error checking if event %s is pending moderation: %v", event.ID, err)
-				// If there's an error, assume not pending
-				if !isBlocked { // Only add if not already added as blocked
-					filteredEvents = append(filteredEvents, event)
-				}
-				continue
+				logging.Infof("Error batch-checking pending moderation: %v", err)
+				pendingMap = make(map[string]bool)
 			}
 
-			if isPending {
-				pendingCount++
+			// Apply moderation filtering (unless include:spam is present)
+			for _, event := range uniqueEvents {
+				isBlocked := blockedMap[event.ID]
 
-				// If include:spam is present, always include pending events
-				if includeSpam {
-					logging.Infof(ColorYellow+"[SEARCH] Including pending event %s due to include:spam"+ColorReset, event.ID)
-					if !isBlocked { // Only add if not already added as blocked
+				if isBlocked {
+					logging.Debugf("[MODERATION] BLOCKED EVENT: ID=%s, Kind=%d, PubKey=%s", event.ID, event.Kind, event.PubKey)
+					blockedCount++
+
+					// If include:spam is present, include even blocked events
+					if includeSpam {
 						filteredEvents = append(filteredEvents, event)
-					}
-					pendingAllowedCount++
-				} else {
-					// Handle based on moderation mode
-					if !isStrict {
-						// Passive mode: include all pending events
-						logging.Infof(ColorYellowBold+"[MODERATION] PASSIVE MODE: Including pending event %s for all users"+ColorReset, event.ID)
-						filteredEvents = append(filteredEvents, event)
-						pendingAllowedCount++
-					} else if connPubkey != "" && connPubkey == event.PubKey {
-						// Strict mode: only include if requester is author
-						logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Including pending event %s for author %s"+ColorReset,
-							event.ID, connPubkey)
-						filteredEvents = append(filteredEvents, event)
-						pendingAllowedCount++
 					} else {
-						// Strict mode: exclude if requester is not author
-						logging.Infof(ColorYellowBold+"[MODERATION] STRICT MODE: Excluding pending event %s (not author)"+ColorReset, event.ID)
-						// Skip this event in strict mode if requester is not the author
+						// Skip this event - it's blocked for moderation reasons
 						continue
 					}
 				}
-			} else {
-				// Not blocked or pending, add to filtered events
-				if !isBlocked { // Only add if not already added as blocked
-					filteredEvents = append(filteredEvents, event)
+
+				isPending := pendingMap[event.ID]
+
+				if isPending {
+					pendingCount++
+
+					// If include:spam is present, always include pending events
+					if includeSpam {
+						if !isBlocked {
+							filteredEvents = append(filteredEvents, event)
+						}
+						pendingAllowedCount++
+					} else {
+						// Handle based on moderation mode
+						if !isStrict {
+							// Passive mode: include all pending events
+							filteredEvents = append(filteredEvents, event)
+							pendingAllowedCount++
+						} else if connPubkey != "" && connPubkey == event.PubKey {
+							// Strict mode: only include if requester is author
+							filteredEvents = append(filteredEvents, event)
+							pendingAllowedCount++
+						} else {
+							// Strict mode: exclude if requester is not author
+							continue
+						}
+					}
+				} else {
+					// Not blocked or pending, add to filtered events
+					if !isBlocked {
+						filteredEvents = append(filteredEvents, event)
+					}
 				}
 			}
-		}
 
-		// Replace uniqueEvents with the filtered set
-		if blockedCount > 0 || pendingCount > 0 {
-			logging.Infof(ColorRedBold+"[MODERATION] Filtered out %d blocked events, %d/%d pending events allowed"+ColorReset,
-				blockedCount, pendingAllowedCount, pendingCount)
-			uniqueEvents = filteredEvents
+			// Replace uniqueEvents with the filtered set
+			if blockedCount > 0 || pendingCount > 0 {
+				logging.Debugf("[MODERATION] Filtered out %d blocked events, %d/%d pending events allowed",
+					blockedCount, pendingAllowedCount, pendingCount)
+				uniqueEvents = filteredEvents
+			}
 		}
-
-		// No verbose debug logging
 
 		// Add detailed logging
 		addLogging(&request, connPubkey)
@@ -431,13 +320,13 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				for _, e := range uniqueEvents {
 					if e.PubKey == connPubkey {
 						nonFilterableEvents = append(nonFilterableEvents, e)
-						logging.Infof(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (authored by requester)"+ColorReset,
+						logging.Debugf("[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (authored by requester)",
 							e.ID, e.Kind, e.PubKey)
 					} else if e.Kind == 1 { // Only filter kind 1 (text notes)
 						filterableEvents = append(filterableEvents, e)
 					} else {
 						nonFilterableEvents = append(nonFilterableEvents, e)
-						logging.Infof(ColorGreenBold+"[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)"+ColorReset,
+						logging.Debugf("[CONTENT FILTER] EXEMPT EVENT: ID=%s, Kind=%d, PubKey=%s (non-filterable event kind)",
 							e.ID, e.Kind, e.PubKey)
 					}
 				}
@@ -446,15 +335,15 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				originalCount := len(filterableEvents)
 
 				// Log event details before filtering for diagnostics
-				logging.Infof(ColorCyanBold+"[CONTENT FILTER] PROCESSING: %d filterable events for user %s"+ColorReset, originalCount, connPubkey)
+				logging.Debugf("[CONTENT FILTER] PROCESSING: %d filterable events for user %s", originalCount, connPubkey)
 				for _, e := range filterableEvents {
-					logging.Infof(ColorCyan+"[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s"+ColorReset,
+					logging.Debugf("[CONTENT FILTER] EVENT TO FILTER: ID=%s, Kind=%d, PubKey=%s, Content: %s",
 						e.ID, e.Kind, e.PubKey, truncateString(e.Content, 50))
 				}
 
 				// Apply mute word filtering if mute words are present
 				if len(pref.MuteWords) > 0 {
-					logging.Infof(ColorCyanBold+"[CONTENT FILTER] APPLYING MUTE WORD FILTER FOR USER: %s"+ColorReset, connPubkey)
+					logging.Debugf("[CONTENT FILTER] APPLYING MUTE WORD FILTER FOR USER: %s", connPubkey)
 
 					// Create a filtered list that excludes events with muted words
 					var muteFilteredEvents []*nostr.Event
@@ -465,7 +354,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 						// Check if event content contains any muted word
 						for _, muteWord := range pref.MuteWords {
 							if muteWord != "" && strings.Contains(strings.ToLower(e.Content), strings.ToLower(muteWord)) {
-								logging.Infof(ColorRedBold+"[CONTENT FILTER] MUTED WORD: '%s' found in event ID=%s"+ColorReset,
+								logging.Debugf("[CONTENT FILTER] MUTED WORD: '%s' found in event ID=%s",
 									muteWord, e.ID)
 								containsMutedWord = true
 								break
@@ -481,20 +370,18 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 					// Replace the filterable events with the mute-filtered list
 					filterableEvents = muteFilteredEvents
 
-					logging.Infof(ColorYellowBold+"[CONTENT FILTER] MUTE FILTER: %d/%d events passed mute word filtering"+ColorReset,
+					logging.Debugf("[CONTENT FILTER] MUTE FILTER: %d/%d events passed mute word filtering",
 						len(filterableEvents), originalCount)
 				}
 
 				// Combine filtered events with non-filterable events
 				uniqueEvents = append(nonFilterableEvents, filterableEvents...)
-				logging.Infof(ColorYellowBold+"[CONTENT FILTER] MUTE-ONLY FILTER: %d events passed mute filtering, %d exempt events"+ColorReset,
+				logging.Debugf("[CONTENT FILTER] MUTE-ONLY FILTER: %d events passed mute filtering, %d exempt events",
 					len(filterableEvents), len(nonFilterableEvents))
 			} else {
-				logging.Infof(ColorCyan+"Content filtering not enabled for user %s"+ColorReset, connPubkey)
+				logging.Debugf("Content filtering not enabled for user %s", connPubkey)
 			}
 		}
-
-		// No verbose debug logging
 
 		// Send each unique event to the client
 		for _, event := range uniqueEvents {
@@ -506,7 +393,7 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				// If the authenticated user doesn't match the author
 				if connPubkey != "" && connPubkey != eventPubkey {
 					// Skip this event - user is not authorized to see filter preferences for other users
-					logging.Infof("DENIED: Skipping kind 10010 event for pubkey %s - requested by different pubkey %s",
+					logging.Debugf("DENIED: Skipping kind 10010 event for pubkey %s - requested by different pubkey %s",
 						eventPubkey, connPubkey)
 					continue
 				}
@@ -514,30 +401,30 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 			// Special handling for kind 11888 events
 			if event.Kind == 11888 {
-				logging.Infof("Processing kind 11888 event with ID: %s", event.ID)
+				logging.Debugf("Processing kind 11888 event with ID: %s", event.ID)
 
 				// Extract the pubkey the event is about (from the p tag)
 				eventPubkey := ""
 				for _, tag := range event.Tags {
 					if tag[0] == "p" && len(tag) > 1 {
 						eventPubkey = tag[1]
-						logging.Infof("Kind 11888 event is about pubkey: %s", eventPubkey)
+						logging.Debugf("Kind 11888 event is about pubkey: %s", eventPubkey)
 						break
 					}
 				}
 
 				// Log the auth and authorization check
-				logging.Infof("Auth check for kind 11888: event pubkey=%s, connection pubkey=%s",
+				logging.Debugf("Auth check for kind 11888: event pubkey=%s, connection pubkey=%s",
 					eventPubkey, connPubkey)
 
 				// If the pubkey in the event is not empty and doesn't match the authenticated user
 				if eventPubkey != "" && connPubkey != "" && eventPubkey != connPubkey {
 					// Skip this event - user is not authorized to see subscription details for other users
-					logging.Infof("DENIED: Skipping kind 11888 event for pubkey %s - requested by different pubkey %s",
+					logging.Debugf("DENIED: Skipping kind 11888 event for pubkey %s - requested by different pubkey %s",
 						eventPubkey, connPubkey)
 					continue
 				} else {
-					logging.Infof("ALLOWED: Showing kind 11888 event for pubkey %s to connection with pubkey %s",
+					logging.Debugf("ALLOWED: Showing kind 11888 event for pubkey %s to connection with pubkey %s",
 						eventPubkey, connPubkey)
 				}
 
@@ -545,14 +432,14 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 				// Run update asynchronously to avoid blocking event processing
 				if subManager != nil {
 					go func(eventCopy *nostr.Event, manager *subscription.SubscriptionManager) {
-						logging.Infof("Checking if kind 11888 event needs update...")
+						logging.Debugf("Checking if kind 11888 event needs update...")
 						updatedEvent, err := manager.CheckAndUpdateSubscriptionEvent(eventCopy)
 						if err != nil {
-							logging.Infof("Error updating kind 11888 event: %v", err)
+							logging.Debugf("Error updating kind 11888 event: %v", err)
 						} else if updatedEvent != eventCopy {
-							logging.Infof("Event was updated with new information")
+							logging.Debugf("Event was updated with new information")
 						} else {
-							logging.Infof("Event did not need updating")
+							logging.Debugf("Event did not need updating")
 						}
 					}(event, subManager)
 				}
@@ -572,22 +459,22 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 				// Only allow the referenced user to see these events
 				if userPubkey != "" && connPubkey != "" && connPubkey != userPubkey {
-					logging.Infof(ColorRedBold+"[MODERATION] DENIED: Skipping kind %d event - requested by %s but references user %s"+ColorReset,
+					logging.Debugf("[MODERATION] DENIED: Skipping kind %d event - requested by %s but references user %s",
 						event.Kind, connPubkey, userPubkey)
 					continue
 				} else {
-					logging.Infof(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind %d event for user %s"+ColorReset,
+					logging.Debugf("[MODERATION] ALLOWED: Showing kind %d event for user %s",
 						event.Kind, userPubkey)
 				}
 			} else if event.Kind == 19842 {
 				// Disputes are created by users
 				// Only allow the author to see their own disputes
 				if connPubkey != "" && connPubkey != event.PubKey {
-					logging.Infof(ColorRedBold+"[MODERATION] DENIED: Skipping kind 19842 dispute event - requested by %s but created by %s"+ColorReset,
+					logging.Debugf("[MODERATION] DENIED: Skipping kind 19842 dispute event - requested by %s but created by %s",
 						connPubkey, event.PubKey)
 					continue
 				} else {
-					logging.Infof(ColorGreenBold+"[MODERATION] ALLOWED: Showing kind 19842 dispute event created by %s"+ColorReset,
+					logging.Debugf("[MODERATION] ALLOWED: Showing kind 19842 dispute event created by %s",
 						event.PubKey)
 				}
 			}

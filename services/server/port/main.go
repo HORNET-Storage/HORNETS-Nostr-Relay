@@ -67,7 +67,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30008"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30009"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30023"
-	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30044"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30078"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind30079"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind443"
@@ -89,7 +88,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	negentropy "github.com/HORNET-Storage/hornet-storage/lib/sync"
+	synckeys "github.com/HORNET-Storage/hornet-storage/lib/sync"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 )
 
@@ -217,7 +216,7 @@ func main() {
 	dhtKey := viper.GetString("relay.dht_key")
 
 	if len(dhtKey) <= 0 {
-		dhtKey, err := negentropy.DeriveKeyFromNsec(serializedPrivateKey)
+		dhtKey, err := synckeys.DeriveKeyFromNsec(serializedPrivateKey)
 		if err != nil {
 			logging.Errorf("Failed to generate DHT key: %v", err)
 		} else {
@@ -488,35 +487,6 @@ func main() {
 	logging.Infof("Host started with id: %s\n", host.ID())
 	logging.Infof("Host started with address: %s\n", host.Addrs())
 
-	syncDB, err := negentropy.InitSyncDB()
-	if err != nil {
-		logging.Fatalf("failed to connect database: %s", err.Error())
-	}
-
-	negentropy.SetupNegentropyEventHandler(host, "host", store)
-	skipdht := true
-	if !skipdht {
-		libp2pAddrs := []string{}
-		for _, addr := range host.Addrs() {
-			libp2pAddrs = append(libp2pAddrs, addr.String())
-		}
-		// Use UpdateConfig with save=false for runtime-only values
-		// This prevents them from being persisted to config.yaml
-		config.UpdateConfig("LibP2PID", host.ID().String(), false)
-		config.UpdateConfig("LibP2PAddrs", libp2pAddrs, false)
-		selfRelay := ws.GetRelayInfo()
-		logging.Infof("Self Relay: %+v\n", selfRelay)
-
-		dhtServer := negentropy.DefaultDHTServer()
-		defer dhtServer.Close()
-
-		// this periodically syncs with other relays, and uploads user keys to dht
-		uploadInterval := time.Hour * 2
-		syncInterval := time.Hour * 3
-		relayStore := negentropy.NewRelayStore(syncDB, dhtServer, host, store, uploadInterval, syncInterval)
-		logging.Infof("Created relay store: %+v", relayStore)
-	}
-
 	// Register All Nostr Stream Handlers
 	// Always register all specific handlers for registered kinds
 	logging.Info("Registering all specific kind handlers...")
@@ -550,7 +520,6 @@ func main() {
 	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 	nostr.RegisterHandler("kind/30078", kind30078.BuildKind30078Handler(store))
 	nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
-	nostr.RegisterHandler("kind/30044", kind30044.BuildKind30044Handler(store))
 	nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
 	nostr.RegisterHandler("kind/16630", kind16630.BuildKind16630Handler(store))
 	nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))

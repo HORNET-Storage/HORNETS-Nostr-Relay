@@ -175,7 +175,6 @@ func StartServer(store stores.Store, ctx context.Context) error {
 		return wallet.SaveWalletAddresses(c, store)
 	})
 
-
 	// ================================
 	// SECURED API ROUTES
 	// ================================

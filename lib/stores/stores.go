@@ -66,6 +66,8 @@ type Store interface {
 	DeleteResolutionEventsOlderThan(age int64) (int, error)
 	IsEventBlocked(eventID string) (bool, error)
 	UnmarkEventBlocked(eventID string) error
+	BatchCheckEventsBlocked(eventIDs []string) (map[string]bool, error)
+	BatchCheckPendingModeration(eventIDs []string) (map[string]bool, error)
 
 	// Dispute Moderation
 	AddToPendingDisputeModeration(disputeID string, ticketID string, eventID string, mediaURL string, disputeReason string, userPubKey string) error

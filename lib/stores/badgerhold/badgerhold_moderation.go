@@ -177,6 +177,46 @@ func (store *BadgerholdStore) UnmarkEventBlocked(eventID string) error {
 	return store.Database.Delete(key, lib.BlockedEvent{})
 }
 
+// BatchCheckEventsBlocked checks multiple event IDs at once and returns a map of eventID -> blocked.
+// This avoids N individual DB lookups when filtering query results.
+func (store *BadgerholdStore) BatchCheckEventsBlocked(eventIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(eventIDs))
+	for _, id := range eventIDs {
+		key := fmt.Sprintf("blocked:%s", id)
+		var blocked lib.BlockedEvent
+		err := store.Database.Get(key, &blocked)
+		if err == badgerhold.ErrNotFound {
+			// not blocked — skip
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		result[id] = true
+	}
+	return result, nil
+}
+
+// BatchCheckPendingModeration checks multiple event IDs at once and returns a map of eventID -> pending.
+// This avoids N individual DB lookups when filtering query results.
+func (store *BadgerholdStore) BatchCheckPendingModeration(eventIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(eventIDs))
+	for _, id := range eventIDs {
+		key := fmt.Sprintf("pending_mod:%s", id)
+		var pending lib.PendingModeration
+		err := store.Database.Get(key, &pending)
+		if err == badgerhold.ErrNotFound {
+			// not pending — skip
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		result[id] = true
+	}
+	return result, nil
+}
+
 // DeleteBlockedEventsOlderThan deletes events that have been blocked for longer than the specified age (in seconds)
 func (store *BadgerholdStore) DeleteBlockedEventsOlderThan(age int64) (int, error) {
 	var blockedEvents []lib.BlockedEvent

@@ -13,16 +13,20 @@ import (
 )
 
 func TestNIP50SearchFunctionality(t *testing.T) {
-	// Initialize test store
-	store, err := badgerhold.InitStore("./test-db")
+	// Initialize test store with a fresh temp directory
+	store, err := badgerhold.InitStore(t.TempDir())
 	require.NoError(t, err)
 	defer store.Cleanup()
 
-	// Create test events
+	// Create test events with proper 64-char hex IDs (as per Nostr spec)
+	testID1 := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0001"
+	testID2 := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0002"
+	testID3 := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0003"
+
 	now := time.Now()
 	events := []*nostr.Event{
 		{
-			ID:        "test1",
+			ID:        testID1,
 			PubKey:    "pubkey1",
 			CreatedAt: nostr.Timestamp(now.Unix()),
 			Kind:      1,
@@ -30,7 +34,7 @@ func TestNIP50SearchFunctionality(t *testing.T) {
 			Tags:      nostr.Tags{},
 		},
 		{
-			ID:        "test2",
+			ID:        testID2,
 			PubKey:    "pubkey2",
 			CreatedAt: nostr.Timestamp(now.Unix() - 60),
 			Kind:      1,
@@ -38,7 +42,7 @@ func TestNIP50SearchFunctionality(t *testing.T) {
 			Tags:      nostr.Tags{},
 		},
 		{
-			ID:        "test3",
+			ID:        testID3,
 			PubKey:    "pubkey3",
 			CreatedAt: nostr.Timestamp(now.Unix() - 120),
 			Kind:      1,
@@ -54,7 +58,7 @@ func TestNIP50SearchFunctionality(t *testing.T) {
 	}
 
 	// Mark test2 as blocked (spam)
-	err = store.MarkEventBlocked("test2", now.Unix())
+	err = store.MarkEventBlocked(testID2, now.Unix())
 	require.NoError(t, err)
 
 	// Test 1: Basic search without extensions
@@ -74,9 +78,9 @@ func TestNIP50SearchFunctionality(t *testing.T) {
 			foundIDs[event.ID] = true
 		}
 
-		assert.True(t, foundIDs["test1"])
-		assert.True(t, foundIDs["test3"])
-		assert.False(t, foundIDs["test2"])
+		assert.True(t, foundIDs[testID1])
+		assert.True(t, foundIDs[testID3])
+		assert.False(t, foundIDs[testID2])
 	})
 
 	// Test 2: Search with extensions parsing (testing the parser works)
@@ -147,7 +151,7 @@ func TestNIP50SearchFunctionality(t *testing.T) {
 
 		// Should find test1 which contains "bitcoin"
 		assert.Len(t, indexedEvents, 1)
-		assert.Equal(t, "test1", indexedEvents[0].ID)
+		assert.Equal(t, testID1, indexedEvents[0].ID)
 	})
 }
 

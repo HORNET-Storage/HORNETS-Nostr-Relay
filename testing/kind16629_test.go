@@ -2,6 +2,8 @@ package testing
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -26,6 +28,28 @@ func publishExpectReject(ctx context.Context, conn *nostr.Relay, event *nostr.Ev
 	events, _ := conn.QuerySync(ctx, filter)
 
 	return len(events) == 0 // True if rejection was successful
+}
+
+// buildPermissionTags creates the required tag set for a valid kind 16629 permission event.
+// repoAuthor should be the event pubkey for personal repos (clone tag cross-validates this).
+// For org repos with an a-tag, pass the org address as both repoAuthor and aTag.
+func buildPermissionTags(rTag, repoName, repoAuthor, aTag string, pTags ...nostr.Tag) nostr.Tags {
+	cloneURL := fmt.Sprintf("nestr://localhost?id=%s&repo_author=%s&repo_name=%s",
+		url.QueryEscape(rTag), url.QueryEscape(repoAuthor), url.QueryEscape(repoName))
+
+	tags := nostr.Tags{
+		{"r", rTag},
+		{"n", repoName},
+		{"clone", cloneURL},
+		{"relay", "ws://localhost:9000"},
+	}
+	if aTag != "" {
+		tags = append(tags, nostr.Tag{"a", aTag})
+	}
+	for _, p := range pTags {
+		tags = append(tags, p)
+	}
+	return tags
 }
 
 // ============================================================================
@@ -87,16 +111,15 @@ func TestKind16629_ValidateRTag_RegularRepo(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tags := nostr.Tags{
-				{"r", tc.rTag},
-				{"p", collaborator.PublicKey, "write"},
-			}
-
-			// Skip the test if r tag is empty - the event won't have the tag at all
+			var tags nostr.Tags
 			if tc.rTag == "" {
+				// Without r tag, validation should reject for missing r tag
 				tags = nostr.Tags{
 					{"p", collaborator.PublicKey, "write"},
 				}
+			} else {
+				tags = buildPermissionTags(tc.rTag, "myrepo", owner.PublicKey, "",
+					nostr.Tag{"p", collaborator.PublicKey, "write"})
 			}
 
 			event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
@@ -171,10 +194,8 @@ func TestKind16629_ValidateRTag_OrgRepo(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tags := nostr.Tags{
-				{"r", tc.rTag},
-				{"p", collaborator.PublicKey, "write"},
-			}
+			tags := buildPermissionTags(tc.rTag, "myrepo", orgOwner.PublicKey, "",
+				nostr.Tag{"p", collaborator.PublicKey, "write"})
 
 			event, err := helpers.CreateGenericEvent(orgOwner, 16629, "", tags)
 			if err != nil {
@@ -266,10 +287,8 @@ func TestKind16629_ValidateATag(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tags := nostr.Tags{
-				{"r", rTag},
-				{"p", collaborator.PublicKey, "write"},
-			}
+			tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+				nostr.Tag{"p", collaborator.PublicKey, "write"})
 
 			if tc.includeATag {
 				tags = append(tags, nostr.Tag{"a", tc.aTag})
@@ -352,10 +371,8 @@ func TestKind16629_ValidatePermissionTag(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tags := nostr.Tags{
-				{"r", rTag},
-				{"p", collaborator.PublicKey, tc.permissionLevel},
-			}
+			tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+				nostr.Tag{"p", collaborator.PublicKey, tc.permissionLevel})
 
 			event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
 			if err != nil {
@@ -398,10 +415,8 @@ func TestKind16629_RegularRepo_OwnerCanCreate(t *testing.T) {
 	collaborator, _ := helpers.GenerateKeyPair()
 
 	rTag := owner.PublicKey + ":myrepo"
-	tags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 
 	event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
 	if err != nil {
@@ -444,10 +459,8 @@ func TestKind16629_RegularRepo_NonOwnerCannotCreate(t *testing.T) {
 
 	// r tag identifies owner's repo
 	rTag := owner.PublicKey + ":myrepo"
-	tags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	tags := buildPermissionTags(rTag, "myrepo", attacker.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 
 	// Attacker tries to create permission event for owner's repo
 	event, err := helpers.CreateGenericEvent(attacker, 16629, "", tags)
@@ -482,10 +495,8 @@ func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
 	rTag := owner.PublicKey + ":myrepo"
 
 	// Create first permission event
-	tags1 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator1.PublicKey, "write"},
-	}
+	tags1 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator1.PublicKey, "write"})
 	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
 	err = conn.Publish(ctx, *event1)
 	if err != nil {
@@ -496,11 +507,9 @@ func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Update with new permissions
-	tags2 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator1.PublicKey, "maintainer"},
-		{"p", collaborator2.PublicKey, "write"},
-	}
+	tags2 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator1.PublicKey, "maintainer"},
+		nostr.Tag{"p", collaborator2.PublicKey, "write"})
 	event2, _ := helpers.CreateGenericEvent(owner, 16629, "", tags2)
 	err = conn.Publish(ctx, *event2)
 	if err != nil {
@@ -548,10 +557,8 @@ func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
 	rTag := owner.PublicKey + ":myrepo"
 
 	// Owner creates initial permission event
-	tags1 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	tags1 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
 	err = conn.Publish(ctx, *event1)
 	if err != nil {
@@ -566,10 +573,8 @@ func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
 	}
 
 	// Attacker tries to update (we don't wait for this, it will be rejected with NOTICE)
-	tags2 := nostr.Tags{
-		{"r", rTag},
-		{"p", attacker.PublicKey, "maintainer"},
-	}
+	tags2 := buildPermissionTags(rTag, "myrepo", attacker.PublicKey, "",
+		nostr.Tag{"p", attacker.PublicKey, "maintainer"})
 	event2, _ := helpers.CreateGenericEvent(attacker, 16629, "", tags2)
 
 	// Use a short timeout context for the attacker's publish - we expect it to fail
@@ -631,10 +636,8 @@ func TestKind16629_OrgRepo_OwnerCanCreate(t *testing.T) {
 
 	// Create permission event for org repo
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
-	tags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	tags := buildPermissionTags(rTag, "myrepo", orgOwner.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 
 	event, _ := helpers.CreateGenericEvent(orgOwner, 16629, "", tags)
 	err = conn.Publish(ctx, *event)
@@ -694,10 +697,8 @@ func TestKind16629_OrgRepo_MemberCanCreateFirst(t *testing.T) {
 
 	// Member creates permission event for org repo
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":newrepo"
-	permTags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	permTags := buildPermissionTags(rTag, "newrepo", member.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 	permEvent, _ := helpers.CreateGenericEvent(member, 16629, "", permTags)
 	err = conn.Publish(ctx, *permEvent)
 	if err != nil {
@@ -738,10 +739,8 @@ func TestKind16629_OrgRepo_NonMemberCannotCreate(t *testing.T) {
 
 	// Non-member tries to create permission event
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
-	tags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	tags := buildPermissionTags(rTag, "myrepo", nonMember.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 	event, _ := helpers.CreateGenericEvent(nonMember, 16629, "", tags)
 
 	// Use publishExpectReject for expected rejection
@@ -794,10 +793,8 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 
 	// Member creates first permission event
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
-	tags1 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator1.PublicKey, "write"},
-	}
+	tags1 := buildPermissionTags(rTag, "myrepo", member.PublicKey, "",
+		nostr.Tag{"p", collaborator1.PublicKey, "write"})
 	event1, _ := helpers.CreateGenericEvent(member, 16629, "", tags1)
 	err = conn.Publish(ctx, *event1)
 	if err != nil {
@@ -807,10 +804,8 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Member tries to update (should fail - only owner can update)
-	tags2 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator2.PublicKey, "write"},
-	}
+	tags2 := buildPermissionTags(rTag, "myrepo", member.PublicKey, "",
+		nostr.Tag{"p", collaborator2.PublicKey, "write"})
 	event2, _ := helpers.CreateGenericEvent(member, 16629, "", tags2)
 	rejected := publishExpectReject(ctx, conn, event2)
 	if !rejected {
@@ -836,11 +831,9 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 
 	// Org owner updates (should succeed)
 	time.Sleep(100 * time.Millisecond)
-	tags3 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator1.PublicKey, "maintainer"},
-		{"p", collaborator2.PublicKey, "write"},
-	}
+	tags3 := buildPermissionTags(rTag, "myrepo", orgOwner.PublicKey, "",
+		nostr.Tag{"p", collaborator1.PublicKey, "maintainer"},
+		nostr.Tag{"p", collaborator2.PublicKey, "write"})
 	event3, _ := helpers.CreateGenericEvent(orgOwner, 16629, "", tags3)
 	err = conn.Publish(ctx, *event3)
 	if err != nil {
@@ -912,10 +905,8 @@ func TestKind16629_OrgRepo_DeletedInvitationInvalidatesMembership(t *testing.T) 
 
 	// Member tries to create permission event (should fail - invitation deleted)
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":newrepo"
-	permTags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	permTags := buildPermissionTags(rTag, "newrepo", member.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 	permEvent, _ := helpers.CreateGenericEvent(member, 16629, "", permTags)
 
 	// Use publishExpectReject for expected rejection
@@ -960,10 +951,8 @@ func TestKind16629_OrgRepo_PendingInvitationNotValid(t *testing.T) {
 
 	// Invited user tries to create permission event without accepting
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
-	permTags := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	permTags := buildPermissionTags(rTag, "myrepo", invitedUser.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 	permEvent, _ := helpers.CreateGenericEvent(invitedUser, 16629, "", permTags)
 
 	// Use publishExpectReject for expected rejection
@@ -997,20 +986,16 @@ func TestKind16629_ReplacementDeletesOldEvent(t *testing.T) {
 	rTag := owner.PublicKey + ":myrepo"
 
 	// Create first event
-	tags1 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator1.PublicKey, "write"},
-	}
+	tags1 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator1.PublicKey, "write"})
 	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
 	conn.Publish(ctx, *event1)
 
 	time.Sleep(100 * time.Millisecond)
 
 	// Create second event (replacement)
-	tags2 := nostr.Tags{
-		{"r", rTag},
-		{"p", collaborator2.PublicKey, "maintainer"},
-	}
+	tags2 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator2.PublicKey, "maintainer"})
 	event2, _ := helpers.CreateGenericEvent(owner, 16629, "", tags2)
 	conn.Publish(ctx, *event2)
 
@@ -1057,10 +1042,8 @@ func TestKind16629_MultipleReplacementsOnlyKeepsLatest(t *testing.T) {
 	var lastEventID string
 	// Create multiple events
 	for i := 0; i < 5; i++ {
-		tags := nostr.Tags{
-			{"r", rTag},
-			{"p", collaborator.PublicKey, "write"},
-		}
+		tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
+			nostr.Tag{"p", collaborator.PublicKey, "write"})
 		event, _ := helpers.CreateGenericEvent(owner, 16629, "", tags)
 		conn.Publish(ctx, *event)
 		lastEventID = event.ID
@@ -1109,18 +1092,14 @@ func TestKind16629_DifferentReposSameOwner(t *testing.T) {
 	rTag2 := owner.PublicKey + ":repo2"
 
 	// Create permission for repo1
-	tags1 := nostr.Tags{
-		{"r", rTag1},
-		{"p", collaborator.PublicKey, "write"},
-	}
+	tags1 := buildPermissionTags(rTag1, "repo1", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "write"})
 	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
 	conn.Publish(ctx, *event1)
 
 	// Create permission for repo2
-	tags2 := nostr.Tags{
-		{"r", rTag2},
-		{"p", collaborator.PublicKey, "maintainer"},
-	}
+	tags2 := buildPermissionTags(rTag2, "repo2", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "maintainer"})
 	event2, _ := helpers.CreateGenericEvent(owner, 16629, "", tags2)
 	conn.Publish(ctx, *event2)
 
@@ -1148,10 +1127,8 @@ func TestKind16629_DifferentReposSameOwner(t *testing.T) {
 
 	// Updating repo1 should not affect repo2
 	time.Sleep(50 * time.Millisecond)
-	tags1Updated := nostr.Tags{
-		{"r", rTag1},
-		{"p", collaborator.PublicKey, "triage"},
-	}
+	tags1Updated := buildPermissionTags(rTag1, "repo1", owner.PublicKey, "",
+		nostr.Tag{"p", collaborator.PublicKey, "triage"})
 	event1Updated, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1Updated)
 	conn.Publish(ctx, *event1Updated)
 

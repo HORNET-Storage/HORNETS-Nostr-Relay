@@ -117,6 +117,11 @@ func terminateIfBlocked(c *websocket.Conn, state *connectionState, store stores.
 }
 
 func BuildServer(store stores.Store) *fiber.App {
+	// Start the async notification processor before accepting connections.
+	// Events are queued via notifyListeners() and fan-out happens on a
+	// dedicated goroutine, so websocket handlers are never blocked.
+	StartNotificationProcessor()
+
 	app := fiber.New()
 
 	// Middleware for handling relay information requests
