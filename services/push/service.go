@@ -53,6 +53,14 @@ type PushMessage struct {
 	MutableContent bool // iOS-specific: allows app to modify notification before display
 }
 
+// ReferencedEventInfo contains details about the event being reacted to, reposted, or replied to
+type ReferencedEventInfo struct {
+	EventID string
+	Kind    int
+	Content string
+	Author  string
+}
+
 // APNSClient interface for Apple Push Notification service
 type APNSClient interface {
 	SendNotification(deviceToken string, message *PushMessage) error
@@ -427,6 +435,69 @@ func (ps *PushService) getAuthorOfRefEvent(event *nostr.Event) string {
 	return ""
 }
 
+// getReferencedEventInfo returns details about the event referenced by an 'e' tag.
+// Used to include original event context in push notification payloads.
+func (ps *PushService) getReferencedEventInfo(event *nostr.Event) *ReferencedEventInfo {
+	var refEventID string
+
+	// 1. Look for 'e' tag with marker 'reply'
+	for _, tag := range event.Tags {
+		if len(tag) >= 4 && tag[0] == "e" && tag[3] == "reply" {
+			refEventID = tag[1]
+			break
+		}
+	}
+
+	// 2. If no reply marker, look for the last 'e' tag (NIP-10 convention)
+	if refEventID == "" {
+		for i := len(event.Tags) - 1; i >= 0; i-- {
+			tag := event.Tags[i]
+			if len(tag) >= 2 && tag[0] == "e" {
+				refEventID = tag[1]
+				break
+			}
+		}
+	}
+
+	if refEventID == "" {
+		return nil
+	}
+
+	// Always include the referenced event ID from the e-tag
+	info := &ReferencedEventInfo{
+		EventID: refEventID,
+	}
+
+	// Try to enrich with kind/content from the DB (optional)
+	filter := nostr.Filter{
+		IDs:   []string{refEventID},
+		Limit: 1,
+	}
+
+	events, err := ps.store.QueryEvents(filter)
+	if err != nil {
+		logging.Errorf("Failed to query referenced event %s for notification context: %v", refEventID, err)
+		return info // still return with just the ID
+	}
+
+	if len(events) == 0 {
+		logging.Warnf("Referenced event %s not found for notification context (ID still included)", refEventID)
+		return info // still return with just the ID
+	}
+
+	ref := events[0]
+	content := ref.Content
+	if len(content) > 100 {
+		content = content[:100] + "..."
+	}
+
+	info.Kind = ref.Kind
+	info.Content = content
+	info.Author = ref.PubKey
+
+	return info
+}
+
 // getAuthorName looks up the profile of the event author to get their name
 func (ps *PushService) getAuthorName(pubkey string) string {
 	// Special case for test notifications
@@ -599,6 +670,22 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 	default:
 		message.Title = "New Notification"
 		message.Body = "You have a new notification"
+	}
+
+	// Add referenced event info for kinds that reference another event
+	switch event.Kind {
+	case 1, 6, 7, 1808, 1809:
+		if refInfo := ps.getReferencedEventInfo(event); refInfo != nil {
+			message.Data["referenced_event_id"] = refInfo.EventID
+			if refInfo.Kind != 0 {
+				message.Data["referenced_event_kind"] = refInfo.Kind
+			}
+			if refInfo.Content != "" {
+				message.Data["referenced_event_content"] = refInfo.Content
+			}
+			logging.Infof("📎 Added referenced event info - ID: %s, Kind: %d, Content: %s",
+				refInfo.EventID, refInfo.Kind, refInfo.Content)
+		}
 	}
 
 	logging.Infof("📱 Formatted notification - Title: %s, Body: %s, Recipient: %s",
