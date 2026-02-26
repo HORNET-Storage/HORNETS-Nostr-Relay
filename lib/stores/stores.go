@@ -46,6 +46,8 @@ type Store interface {
 	// Ownership management
 	ClaimOwnership(root string, publicKey string, signature string) error
 	GetOwnership(root string) ([]types.DagOwnership, error)
+	ReleaseOwnership(root string, publicKey string) error
+	HasOwnership(root string) (bool, error)
 	FindRootForLeaf(leafHash string) (string, error)
 
 	// Nostr

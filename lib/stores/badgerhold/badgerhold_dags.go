@@ -943,6 +943,37 @@ func (store *BadgerholdStore) GetOwnership(root string) ([]types.DagOwnership, e
 	return ownerships, nil
 }
 
+// ReleaseOwnership removes a single ownership record for a specific root and pubkey.
+// This is used during cascade deletion to release a contributor's claim on a DAG
+// without destroying the DAG if other owners (e.g. forks) still reference it.
+func (store *BadgerholdStore) ReleaseOwnership(root string, publicKey string) error {
+	// New format key: root:pubkey
+	ownershipKey := root + ":" + publicKey
+	err := store.Database.Delete(ownershipKey, types.DagOwnership{})
+	if err != nil && errors.Is(err, badgerhold.ErrNotFound) {
+		// Fallback: try old key format root:pubkey:root
+		oldKey := root + ":" + publicKey + ":" + root
+		err = store.Database.Delete(oldKey, types.DagOwnership{})
+		if err != nil && errors.Is(err, badgerhold.ErrNotFound) {
+			return nil // Already gone, not an error
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("failed to release ownership for root %s pubkey %s: %w", root, publicKey, err)
+	}
+	return nil
+}
+
+// HasOwnership checks whether any ownership records remain for a given DAG root.
+// Returns true if at least one owner exists, false if the DAG is orphaned.
+func (store *BadgerholdStore) HasOwnership(root string) (bool, error) {
+	ownerships, err := store.GetOwnership(root)
+	if err != nil {
+		return false, err
+	}
+	return len(ownerships) > 0, nil
+}
+
 // FindRootForLeaf attempts to find the root hash that contains the given leaf hash.
 // This is useful when a client provides a leaf hash instead of a root hash.
 // Returns the root hash if found, empty string if not found.

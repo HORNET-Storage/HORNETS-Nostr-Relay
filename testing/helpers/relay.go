@@ -27,6 +27,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind3"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind5"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind7"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/kind72"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/universal"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -403,6 +404,7 @@ func registerTestHandlers(store *badgerhold.BadgerholdStore, privateKeyStr strin
 	nostrHandlers.RegisterHandler("kind/1", kind1.BuildKind1Handler(store))
 	nostrHandlers.RegisterHandler("kind/3", kind3.BuildKind3Handler(store))
 	nostrHandlers.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
+	nostrHandlers.RegisterHandler("kind/72", kind72.BuildKind72Handler(store))
 	nostrHandlers.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
 	nostrHandlers.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
 

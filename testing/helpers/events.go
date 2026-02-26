@@ -173,7 +173,26 @@ func CreateGenericEvent(kp *TestKeyPair, kind int, content string, tags nostr.Ta
 	return event, nil
 }
 
-// CreateReplaceableEvent creates a replaceable event (kinds 0, 3, or 10000-19999)
+// CreateCascadeDeleteEvent creates a kind 72 cascade delete event.
+// resourceID is the "r" tag (GUID), permissionKind is the "k" tag (e.g. "16629").
+func CreateCascadeDeleteEvent(kp *TestKeyPair, resourceID string, permissionKind string, reason string) (*nostr.Event, error) {
+	tags := nostr.Tags{
+		{"r", resourceID},
+		{"k", permissionKind},
+	}
+
+	event := &nostr.Event{
+		PubKey:    kp.PublicKey,
+		CreatedAt: nostr.Timestamp(time.Now().Unix()),
+		Kind:      72,
+		Tags:      tags,
+		Content:   reason,
+	}
+	if err := event.Sign(kp.PrivateKey); err != nil {
+		return nil, fmt.Errorf("failed to sign event: %w", err)
+	}
+	return event, nil
+}
 func CreateReplaceableEvent(kp *TestKeyPair, kind int, content string) (*nostr.Event, error) {
 	event := &nostr.Event{
 		PubKey:    kp.PublicKey,
