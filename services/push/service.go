@@ -273,9 +273,9 @@ func (ps *PushService) shouldNotify(event *nostr.Event) bool {
 	case 1809: // Audio post repost
 		logging.Infof("✅ Event kind 1809 (Audio post repost) will trigger notifications")
 		return true
-	case 3: // Contact lists (new followers)
-		logging.Infof("✅ Event kind 3 (Contact list) will trigger notifications")
-		return true
+	// case 3: // Contact lists (new followers) - DISABLED as too spammy on nostr
+	// 	logging.Infof("✅ Event kind 3 (Contact list) will trigger notifications")
+	// 	return true
 	// case 4: // Traditional DMs - DISABLED to prevent duplicates with kind 1059
 	// We only use kind 1059 (Gift Wrap) for encrypted DMs now
 	// logging.Infof("✅ Event kind 4 (DM) will trigger notifications")
@@ -359,13 +359,13 @@ func (ps *PushService) getNotificationRecipients(event *nostr.Event) []string {
 			logging.Infof("👤 Added recipient for reaction (original author): %s", author)
 		}
 
-	case 3: // Contact list - notify the users being followed
-		for _, tag := range event.Tags {
-			if len(tag) >= 2 && tag[0] == "p" {
-				addRecipient(tag[1])
-				logging.Infof("👤 Added recipient for new follower: %s", tag[1])
-			}
-		}
+	// case 3: // Contact list - DISABLED as too spammy on nostr
+	// 	for _, tag := range event.Tags {
+	// 		if len(tag) >= 2 && tag[0] == "p" {
+	// 			addRecipient(tag[1])
+	// 			logging.Infof("👤 Added recipient for new follower: %s", tag[1])
+	// 		}
+	// 	}
 
 	// case 4: // Traditional DM - DISABLED to prevent duplicates with kind 1059
 	// for _, tag := range event.Tags {
@@ -633,9 +633,9 @@ func (ps *PushService) formatNotificationMessage(event *nostr.Event, recipient s
 		message.Title = "Audio Repost"
 		message.Body = fmt.Sprintf("%s reposted your audio post", authorName)
 
-	case 3: // Contact list
-		message.Title = "New Follower"
-		message.Body = fmt.Sprintf("%s started following you", authorName)
+	// case 3: // Contact list - DISABLED as too spammy on nostr
+	// 	message.Title = "New Follower"
+	// 	message.Body = fmt.Sprintf("%s started following you", authorName)
 
 	// case 4: // Traditional DM - DISABLED to prevent duplicates with kind 1059
 	// 	message.Title = "New Message"
