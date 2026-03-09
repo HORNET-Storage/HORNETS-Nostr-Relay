@@ -827,7 +827,7 @@ func setDefaults() {
 	viper.SetDefault("push_notifications.service.batch_size", 100)
 	viper.SetDefault("push_notifications.service.retry_attempts", 3)
 	viper.SetDefault("push_notifications.service.retry_delay", "5s")
-	viper.SetDefault("push_notifications.service.follow_gated", true)
+	viper.SetDefault("push_notifications.service.follow_gated", false)
 	viper.SetDefault("push_notifications.service.follow_cache_size", 500)
 	viper.SetDefault("push_notifications.service.follow_cache_ttl", "5m")
 }
