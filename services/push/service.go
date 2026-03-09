@@ -811,7 +811,21 @@ func (ps *PushService) loadFollowSet(pubkey string) map[string]bool {
 
 // warmFollowCacheFromEvent updates the follow cache directly from a kind 3 event.
 // Called when ProcessEvent receives a kind 3 event (before shouldNotify filters it out).
+// Checks the store first to avoid overwriting the cache with a stale contact list.
 func (ps *PushService) warmFollowCacheFromEvent(event *nostr.Event) {
+	// Don't warm cache with stale data — check if store already has a newer kind 3
+	existingFilter := nostr.Filter{
+		Authors: []string{event.PubKey},
+		Kinds:   []int{3},
+		Limit:   1,
+	}
+	if existing, err := ps.store.QueryEvents(existingFilter); err == nil && len(existing) > 0 {
+		if existing[0].CreatedAt > event.CreatedAt {
+			logging.Debugf("🔄 Skipping cache warm for %s — store has newer kind 3", shortenPubkey(event.PubKey))
+			return
+		}
+	}
+
 	follows := make(map[string]bool)
 	for _, tag := range event.Tags {
 		if len(tag) >= 2 && tag[0] == "p" {
