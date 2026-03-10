@@ -1,4 +1,4 @@
-package kind16630
+package kind77
 
 import (
 	jsoniter "github.com/json-iterator/go"
@@ -9,7 +9,7 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 )
 
-func BuildKind16630Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+func BuildKind77Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -53,29 +53,49 @@ func BuildKind16630Handler(store stores.Store) func(read lib_nostr.KindReader, w
 	return handler
 }
 
-// validateTags checks if the tags array contains the expected structure for a Kind 16630 branch event.
+// validateTags checks if the tags array contains the expected structure for a Kind 77 repo announcement event.
 func validateTags(tags nostr.Tags) string {
 	hasRepoTag := false
-	hasBranchTag := false
+	hasTypeTag := false
+
+	validTypes := map[string]bool{
+		"repo-created":   true,
+		"repo-forked":    true,
+		"issue-created":  true,
+		"issue-closed":   true,
+		"issue-reopened": true,
+		"pr-created":     true,
+		"pr-closed":      true,
+		"pr-reopened":    true,
+		"pr-merged":      true,
+		"star":           true,
+		"comment":        true,
+		"review":         true,
+		"label-added":    true,
+		"label-removed":  true,
+		"assigned":       true,
+	}
 
 	for _, tag := range tags {
-		// Ensure the repository tag is present and correctly formatted
-		if tag[0] == "r" && len(tag) == 2 {
+		if len(tag) < 2 {
+			continue
+		}
+		if tag[0] == "r" {
 			hasRepoTag = true
 		}
-
-		// Ensure at least one valid branch tag is present
-		if tag[0] == "b" && len(tag) == 3 {
-			hasBranchTag = true
+		if tag[0] == "type" {
+			if !validTypes[tag[1]] {
+				return "Invalid 'type' tag value: " + tag[1]
+			}
+			hasTypeTag = true
 		}
 	}
 
-	// Validate required tags
 	if !hasRepoTag {
 		return "Missing 'r' tag (repository identifier)."
 	}
-	if !hasBranchTag {
-		return "Missing valid 'b' tag (branch name)."
+	if !hasTypeTag {
+		return "Missing 'type' tag (announcement type)."
 	}
 
 	return ""
