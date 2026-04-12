@@ -145,6 +145,11 @@ func extractInterfaceValues(data ...interface{}) []interface{} {
 	return extracted
 }
 
+// ExtractInterfaceValues is the exported form of extractInterfaceValues.
+func ExtractInterfaceValues(data ...interface{}) []interface{} {
+	return extractInterfaceValues(data...)
+}
+
 func CloseStream(stream network.Stream) {
 	if err := stream.CloseWrite(); err != nil {
 		logging.Infof("Error closing stream: %s\n", err)

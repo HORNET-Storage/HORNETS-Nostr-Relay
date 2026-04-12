@@ -1,43 +1,32 @@
 package query
 
 import (
-	"context"
-
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
-
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
-	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 )
 
-func AddQueryHandler(libp2phost host.Host, store stores.Store) {
-	libp2phost.SetStreamHandler("/query", middleware.SessionMiddleware(libp2phost)(BuildQueryStreamHandler(store)))
+func AddQueryHandler(listener *hsListener.HyperswarmListener, store stores.Store) {
+	listener.SetStreamHandler("/query", BuildQueryStreamHandler(store))
 }
 
-func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
-	queryStreamHandler := func(stream network.Stream) {
-		ctx := context.Background()
+func BuildQueryStreamHandler(store stores.Store) hsListener.StreamHandler {
+	queryStreamHandler := func(stream lib_types.Stream) {
+		defer stream.Close()
 
-		libp2pStream := libp2p_stream.New(stream, ctx)
-
-		message, err := lib_stream.WaitForAdvancedQueryMessage(libp2pStream)
+		message, err := lib_stream.WaitForAdvancedQueryMessage(stream)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to recieve upload message in time", err)
-
-			stream.Close()
+			lib_stream.WriteErrorToStream(stream, "Failed to recieve upload message in time", err)
 			return
 		}
 
 		hashes, err := store.QueryDag(message.Filter)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to query database", err)
-
-			stream.Close()
+			lib_stream.WriteErrorToStream(stream, "Failed to query database", err)
 			return
 		}
 
@@ -47,14 +36,10 @@ func BuildQueryStreamHandler(store stores.Store) func(network.Stream) {
 			Hashes: hashes,
 		}
 
-		if err := lib_stream.WriteMessageToStream(libp2pStream, response); err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to encode response", err)
-
-			stream.Close()
+		if err := lib_stream.WriteMessageToStream(stream, response); err != nil {
+			lib_stream.WriteErrorToStream(stream, "Failed to encode response", err)
 			return
 		}
-
-		stream.Close()
 	}
 
 	return queryStreamHandler

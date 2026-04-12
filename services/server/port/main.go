@@ -16,9 +16,12 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/lib/sidecar"
 	"github.com/HORNET-Storage/hornet-storage/services/push"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
@@ -29,12 +32,6 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 
 	"github.com/spf13/viper"
-
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
-
-	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
-	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
@@ -86,7 +83,9 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/claim"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
+	nostr_relay "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/nostr_relay"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/services"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
@@ -292,21 +291,27 @@ func main() {
 		logging.Info("Startup configuration saved successfully")
 	}
 
-	port := config.GetPort("hornets")
-	portStr := fmt.Sprintf("%d", port)
-
-	host := libp2p.GetHostOnPort(serializedPrivateKey, portStr)
-
-	if viper.GetBool("server.upnp") {
-		upnp := upnp.Get()
-
-		err = upnp.ForwardPort(uint16(port), "LaterCondition")
-		if err != nil {
-			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
-				"port": port,
-			})
-		}
+	// Create HyperDHT listener via sidecar
+	hsClient, err := sidecar.GetClient()
+	if err != nil {
+		logging.Fatal("Failed to connect to hyperswarm sidecar", map[string]interface{}{
+			"error": err,
+		})
 	}
+	defer sidecar.Close()
+
+	listener := hsListener.NewHyperswarmListener(hsClient)
+	defer listener.Close()
+
+	_, dhtPublicKey, err := listener.CreateServerFromSeed(dhtKey)
+	if err != nil {
+		logging.Fatal("Failed to create HyperDHT server", map[string]interface{}{
+			"error": err,
+		})
+	}
+
+	// Store DHT public key for NIP-11 advertisement
+	viper.Set("DHTPublicKey", dhtPublicKey)
 
 	// Create and initialize database
 	store, err := badgerhold.InitStore(config.GetPath("store"))
@@ -478,16 +483,17 @@ func main() {
 	}
 
 	// Stream Handlers
-	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+	download.AddDownloadHandler(listener, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		return true
 	})
 
-	upload.AddUploadHandlerForLibp2p(ctx, host, store, nil, nil)
-	query.AddQueryHandler(host, store)
-	claim.AddClaimOwnershipHandler(host, store)
+	upload.AddUploadHandler(listener, store, nil, nil)
+	query.AddQueryHandler(listener, store)
+	claim.AddClaimOwnershipHandler(listener, store)
+	services.AddServicesHandler(listener)
+	nostr_relay.AddNostrRelayHandler(listener, store)
 
-	logging.Infof("Host started with id: %s\n", host.ID())
-	logging.Infof("Host started with address: %s\n", host.Addrs())
+	logging.Infof("HyperDHT server started with public key: %s\n", dhtPublicKey)
 
 	// Register All Nostr Stream Handlers
 	// Always register all specific handlers for registered kinds
@@ -544,14 +550,16 @@ func main() {
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
 	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
 
-	// Auth event not supported for the libp2p connections yet
+	// Auth event not supported for the stream connections yet
 	//nostr.RegisterHandler("auth", auth.BuildAuthHandler(store))
 
-	// Register a libp2p handler for every stream handler
+	// Register a hyperswarm handler for every nostr stream handler
 	for kind := range nostr.GetHandlers() {
 		handler := nostr.GetHandler(kind)
 
-		wrapper := func(stream network.Stream) {
+		wrapper := func(stream lib_types.Stream) {
+			defer stream.Close()
+
 			read := func() ([]byte, error) {
 				decoder := json.NewDecoder(stream)
 
@@ -573,11 +581,9 @@ func main() {
 			}
 
 			handler(read, write)
-
-			stream.Close()
 		}
 
-		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), middleware.SessionMiddleware(host)(wrapper))
+		listener.SetStreamHandler("/nostr/event/"+kind, wrapper)
 	}
 
 	// Web Panel

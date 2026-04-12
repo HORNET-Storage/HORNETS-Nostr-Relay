@@ -9,22 +9,19 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gofiber/contrib/websocket"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
-	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	badgerhold_store "github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 )
 
 type CanUploadDagFunc func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool
@@ -32,28 +29,24 @@ type HandleUploadedDagFunc func(dag *merkle_dag.Dag, pubKey *string)
 
 var activeUploads sync.Map
 
-func AddUploadHandlerForLibp2p(ctx context.Context, libp2phost host.Host, store stores.Store, canUploadDag CanUploadDagFunc, handleRecievedDag HandleUploadedDagFunc) {
+func AddUploadHandler(listener *hsListener.HyperswarmListener, store stores.Store, canUploadDag CanUploadDagFunc, handleRecievedDag HandleUploadedDagFunc) {
 	handler := BuildUploadStreamHandler(store, canUploadDag, handleRecievedDag)
 
-	wrapper := func(stream network.Stream) {
-		read := func() (*lib_types.UploadMessage, error) {
-			libp2pStream := libp2p_stream.New(stream, ctx)
+	wrapper := func(stream lib_types.Stream) {
+		defer stream.Close()
 
-			return lib_stream.WaitForUploadMessage(libp2pStream)
+		read := func() (*lib_types.UploadMessage, error) {
+			return lib_stream.WaitForUploadMessage(stream)
 		}
 
 		write := func(message interface{}) error {
-			libp2pStream := libp2p_stream.New(stream, ctx)
-
-			return lib_stream.WriteMessageToStream(libp2pStream, message)
+			return lib_stream.WriteMessageToStream(stream, message)
 		}
 
 		handler(read, write)
-
-		stream.Close()
 	}
 
-	libp2phost.SetStreamHandler("/upload", middleware.SessionMiddleware(libp2phost)(wrapper))
+	listener.SetStreamHandler("/upload", wrapper)
 }
 
 func AddUploadHandlerForWebsockets(store stores.Store, canUploadDag CanUploadDagFunc, handleRecievedDag HandleUploadedDagFunc) func(*websocket.Conn) {

@@ -604,15 +604,15 @@ func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
 }
 
 // validateRelayTag validates the relay tag format.
-// Expected format: ws://<host>:<port>[/path] or wss://<host>[/path]
+// Expected format: ws://<host>:<port>[/path], wss://<host>[/path], or nestr://<dht-key>
 func validateRelayTag(relayURL string) string {
 	parsed, err := url.Parse(relayURL)
 	if err != nil {
 		return fmt.Sprintf("Invalid 'relay' tag: failed to parse URL: %s", err)
 	}
 
-	if parsed.Scheme != "ws" && parsed.Scheme != "wss" {
-		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://' or 'wss://' scheme, got '%s://'", parsed.Scheme)
+	if parsed.Scheme != "ws" && parsed.Scheme != "wss" && parsed.Scheme != "nestr" {
+		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://', 'wss://', or 'nestr://' scheme, got '%s://'", parsed.Scheme)
 	}
 
 	if parsed.Host == "" {

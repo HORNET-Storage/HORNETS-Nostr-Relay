@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -36,8 +35,8 @@ func DeriveKeyFromNsec(nsec string) (string, error) {
 	clampedPrivateKey[31] &= 127 // Clear the highest bit
 	clampedPrivateKey[31] |= 64  // Set the second highest bit
 
-	// Calculate hash using SHA1
-	hash := sha1.Sum(clampedPrivateKey[:32])
+	// Calculate hash using SHA-256 (produces 32 bytes required by libsodium crypto_sign_seed_keypair)
+	hash := sha256.Sum256(clampedPrivateKey[:32])
 
 	// Return the hash as a hexadecimal string
 	return hex.EncodeToString(hash[:]), nil
@@ -53,8 +52,8 @@ func GetDHTKeyForPubkey(pubkey string) (string, error) {
 		return "", fmt.Errorf("invalid pubkey hex: %w", err)
 	}
 
-	// For public keys, we use SHA1 directly
-	hash := sha1.Sum(pubkeyBytes)
+	// For public keys, we use SHA-256 directly (32 bytes for libsodium compatibility)
+	hash := sha256.Sum256(pubkeyBytes)
 
 	// Return the hash as a hexadecimal string
 	return hex.EncodeToString(hash[:]), nil
@@ -156,14 +155,14 @@ func CreateDHTKeyFromPrivateKey(privateKey *btcec.PrivateKey) (string, error) {
 	clampedPrivateKey[31] &= 127
 	clampedPrivateKey[31] |= 64
 
-	hash := sha1.Sum(clampedPrivateKey[:32])
+	hash := sha256.Sum256(clampedPrivateKey[:32])
 	return hex.EncodeToString(hash[:]), nil
 }
 
 // CreateDHTKeyFromPublicKey creates a DHT key from a btcec.PublicKey
 func CreateDHTKeyFromPublicKey(publicKey *btcec.PublicKey) (string, error) {
 	publicKeyBytes := schnorr.SerializePubKey(publicKey)
-	hash := sha1.Sum(publicKeyBytes)
+	hash := sha256.Sum256(publicKeyBytes)
 	return hex.EncodeToString(hash[:]), nil
 }
 
@@ -185,7 +184,7 @@ func GenerateDHTKey(privateKeyHex string) (string, error) {
 	clampedPrivateKey[31] &= 127
 	clampedPrivateKey[31] |= 64
 
-	hash := sha1.Sum(clampedPrivateKey[:32])
+	hash := sha256.Sum256(clampedPrivateKey[:32])
 	scalar := hash[:]
 	dhtKey := hex.EncodeToString(scalar)
 

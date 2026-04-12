@@ -359,19 +359,18 @@ func GetRelayInfo() NIP11RelayInfo {
 	relayInfo.Services = buildServicesMap()
 
 	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("relay.private_key"))
-	libp2pId := viper.GetString("LibP2PID")
-	libp2pAddrs := viper.GetStringSlice("LibP2PAddrs")
-	if libp2pId != "" && len(libp2pAddrs) > 0 && err == nil {
+	dhtPubkey := viper.GetString("DHTPublicKey")
+	if dhtPubkey != "" && err == nil {
+		relayInfo.DHTPubkey = dhtPubkey
 		relayInfo.HornetExtension = &HornetExtension{
-			LibP2PID:    libp2pId,
-			LibP2PAddrs: libp2pAddrs,
+			DHTPubkey: dhtPubkey,
 		}
 		err = SignRelay(&relayInfo, privKey)
 		if err != nil {
 			logging.Infof("Error signing relay info: %v", err)
 		}
 	} else {
-		logging.Infof("Not advertising hornet extension because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
+		logging.Infof("Not advertising hornet extension because dht_pubkey == %s", dhtPubkey)
 	}
 
 	return relayInfo
@@ -399,12 +398,14 @@ func buildServicesMap() RelayServices {
 		hostKey := fmt.Sprintf("server.services.%s.host", serviceName)
 		pathKey := fmt.Sprintf("server.services.%s.path", serviceName)
 		pubkeyKey := fmt.Sprintf("server.services.%s.pubkey", serviceName)
+		dhtPubkeyKey := fmt.Sprintf("server.services.%s.dht_pubkey", serviceName)
 
 		endpoint := &ServiceEndpoint{
-			Host:   viper.GetString(hostKey),
-			Port:   port,
-			Path:   viper.GetString(pathKey),
-			Pubkey: viper.GetString(pubkeyKey),
+			Host:      viper.GetString(hostKey),
+			Port:      port,
+			Path:      viper.GetString(pathKey),
+			Pubkey:    viper.GetString(pubkeyKey),
+			DHTPubkey: viper.GetString(dhtPubkeyKey),
 		}
 
 		services[serviceName] = endpoint
@@ -476,16 +477,9 @@ func PackRelayForSig(nr *NIP11RelayInfo) []byte {
 	packed = append(packed, 0)
 
 	if nr.HornetExtension != nil {
-		// Pack ID
-		packed = append(packed, []byte(nr.HornetExtension.LibP2PID)...)
+		// Pack DHT public key
+		packed = append(packed, []byte(nr.HornetExtension.DHTPubkey)...)
 		packed = append(packed, 0) // null terminator
-
-		// Pack Addrs
-		for _, addr := range nr.HornetExtension.LibP2PAddrs {
-			packed = append(packed, []byte(addr)...)
-			packed = append(packed, 0) // null terminator
-		}
-		packed = append(packed, 0) // double null terminator to indicate end of Addrs
 
 		// Pack LastUpdated
 		unixTime := nr.HornetExtension.LastUpdated.Unix()

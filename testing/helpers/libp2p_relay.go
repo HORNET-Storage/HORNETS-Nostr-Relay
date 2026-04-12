@@ -2,54 +2,44 @@
 package helpers
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
-	"github.com/multiformats/go-multiaddr"
-
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/lib/sidecar"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/spf13/viper"
 )
 
-// TestLibp2pRelay represents a test relay instance with libp2p support
+// TestLibp2pRelay represents a test relay instance with hyperswarm support
 type TestLibp2pRelay struct {
-	Store      *badgerhold.BadgerholdStore
-	Host       host.Host
-	Multiaddr  string // Full multiaddr including peer ID
-	DataDir    string
-	PrivateKey string
-	PublicKey  string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	mu         sync.Mutex
-	running    bool
+	Store        *badgerhold.BadgerholdStore
+	Listener     *hsListener.HyperswarmListener
+	DHTPublicKey string
+	DataDir      string
+	PrivateKey   string
+	PublicKey    string
+	mu           sync.Mutex
+	running      bool
 }
 
-// TestLibp2pRelayConfig holds configuration for a test libp2p relay
+// TestLibp2pRelayConfig holds configuration for a test relay
 type TestLibp2pRelayConfig struct {
 	DataDir    string
 	PrivateKey string // Optional - will generate if empty
 }
 
-// DefaultTestLibp2pConfig returns a default test configuration for libp2p relay
+// DefaultTestLibp2pConfig returns a default test configuration
 func DefaultTestLibp2pConfig() TestLibp2pRelayConfig {
 	return TestLibp2pRelayConfig{
 		DataDir:    "",
@@ -57,13 +47,13 @@ func DefaultTestLibp2pConfig() TestLibp2pRelayConfig {
 	}
 }
 
-// NewTestLibp2pRelay creates and starts a new test libp2p relay
+// NewTestLibp2pRelay creates and starts a new test relay
 func NewTestLibp2pRelay(cfg TestLibp2pRelayConfig) (*TestLibp2pRelay, error) {
 	// Create temp directory if not specified
 	dataDir := cfg.DataDir
 	if dataDir == "" {
 		var err error
-		dataDir, err = os.MkdirTemp("", "hornet-test-libp2p-relay-*")
+		dataDir, err = os.MkdirTemp("", "hornet-test-relay-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp directory: %w", err)
 		}
@@ -90,15 +80,14 @@ func NewTestLibp2pRelay(cfg TestLibp2pRelayConfig) (*TestLibp2pRelay, error) {
 		privateKeyStr = viper.GetString("relay.private_key")
 	}
 
-	// Deserialize private key
-	privateKey, publicKey, err := signing.DeserializePrivateKey(privateKeyStr)
+	// Deserialize private key for public key extraction
+	_, publicKey, err := signing.DeserializePrivateKey(privateKeyStr)
 	if err != nil {
 		os.RemoveAll(dataDir)
 		store.Cleanup()
 		return nil, fmt.Errorf("failed to deserialize private key: %w", err)
 	}
 
-	// Get serialized public key
 	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
 	if err != nil {
 		os.RemoveAll(dataDir)
@@ -106,51 +95,30 @@ func NewTestLibp2pRelay(cfg TestLibp2pRelayConfig) (*TestLibp2pRelay, error) {
 		return nil, fmt.Errorf("failed to serialize public key: %w", err)
 	}
 
-	// Create libp2p host
-	libp2pPrivateKey, err := crypto.UnmarshalSecp256k1PrivateKey(privateKey.Serialize())
+	// Create hyperswarm listener via sidecar
+	hsClient := sidecar.GetClient()
+	listener := hsListener.NewHyperswarmListener(hsClient)
+
+	dhtKey := viper.GetString("relay.dht_key")
+	_, dhtPublicKey, err := listener.CreateServerFromSeed(dhtKey)
 	if err != nil {
 		os.RemoveAll(dataDir)
 		store.Cleanup()
-		return nil, fmt.Errorf("failed to unmarshal libp2p private key: %w", err)
+		return nil, fmt.Errorf("failed to create HyperDHT server: %w", err)
 	}
-
-	// Listen on random port
-	listenAddr := "/ip4/127.0.0.1/udp/0/quic-v1"
-
-	libp2pHost, err := libp2p.New(
-		libp2p.Identity(libp2pPrivateKey),
-		libp2p.ListenAddrStrings(listenAddr),
-		libp2p.Transport(libp2pquic.NewTransport),
-	)
-	if err != nil {
-		os.RemoveAll(dataDir)
-		store.Cleanup()
-		return nil, fmt.Errorf("failed to create libp2p host: %w", err)
-	}
-
-	// Create context
-	ctx, cancel := context.WithCancel(context.Background())
 
 	relay := &TestLibp2pRelay{
-		Store:      store,
-		Host:       libp2pHost,
-		DataDir:    dataDir,
-		PrivateKey: privateKeyStr,
-		PublicKey:  *serializedPublicKey,
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-
-	// Build multiaddr with peer ID
-	for _, addr := range libp2pHost.Addrs() {
-		relay.Multiaddr = fmt.Sprintf("%s/p2p/%s", addr.String(), libp2pHost.ID().String())
-		break
+		Store:        store,
+		Listener:     listener,
+		DHTPublicKey: dhtPublicKey,
+		DataDir:      dataDir,
+		PrivateKey:   privateKeyStr,
+		PublicKey:    *serializedPublicKey,
 	}
 
 	// Register DAG handlers
-	if err := relay.registerHandlers(ctx); err != nil {
-		cancel()
-		libp2pHost.Close()
+	if err := relay.registerHandlers(); err != nil {
+		listener.Close()
 		store.Cleanup()
 		os.RemoveAll(dataDir)
 		return nil, fmt.Errorf("failed to register handlers: %w", err)
@@ -160,43 +128,23 @@ func NewTestLibp2pRelay(cfg TestLibp2pRelayConfig) (*TestLibp2pRelay, error) {
 	return relay, nil
 }
 
-// registerHandlers registers the DAG handlers on the libp2p host
-func (r *TestLibp2pRelay) registerHandlers(ctx context.Context) error {
-	// Allow all uploads for testing
+// registerHandlers registers the DAG handlers on the hyperswarm listener
+func (r *TestLibp2pRelay) registerHandlers() error {
 	canUpload := func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		return true
 	}
 
-	// No-op handler for received DAGs
 	handleReceived := func(dag *merkle_dag.Dag, pubKey *string) {}
 
-	// Allow all downloads for testing
 	canDownload := func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
 		return true
 	}
 
-	// Register upload handler
-	upload.AddUploadHandlerForLibp2p(ctx, r.Host, r.Store, canUpload, handleReceived)
-
-	// Register download handler
-	download.AddDownloadHandler(r.Host, r.Store, canDownload)
-
-	// Register query handler
-	query.AddQueryHandler(r.Host, r.Store)
+	upload.AddUploadHandler(r.Listener, r.Store, canUpload, handleReceived)
+	download.AddDownloadHandler(r.Listener, r.Store, canDownload)
+	query.AddQueryHandler(r.Listener, r.Store)
 
 	return nil
-}
-
-// GetConnectionManager creates a connection manager connected to this relay
-func (r *TestLibp2pRelay) GetConnectionManager(ctx context.Context) (*connmgr.GenericConnectionManager, error) {
-	cm := connmgr.NewGenericConnectionManager()
-
-	err := cm.ConnectWithLibp2p(ctx, "test-relay", r.Multiaddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to relay: %w", err)
-	}
-
-	return cm, nil
 }
 
 // Stop stops the test relay and cleans up resources
@@ -208,18 +156,12 @@ func (r *TestLibp2pRelay) Stop() error {
 		return nil
 	}
 
-	// Cancel context
-	r.cancel()
-
-	// Close libp2p host
-	if r.Host != nil {
-		if err := r.Host.Close(); err != nil {
-			logging.Errorf("Error closing libp2p host: %v", err)
+	// Close hyperswarm listener
+	if r.Listener != nil {
+		if err := r.Listener.Close(); err != nil {
+			logging.Errorf("Error closing hyperswarm listener: %v", err)
 		}
 	}
-
-	// Wait for goroutines
-	r.wg.Wait()
 
 	// Close database
 	if r.Store != nil {
@@ -238,7 +180,6 @@ func (r *TestLibp2pRelay) Cleanup() error {
 		return err
 	}
 
-	// Remove test data directory
 	if r.DataDir != "" {
 		if err := os.RemoveAll(r.DataDir); err != nil {
 			return fmt.Errorf("failed to remove test data: %w", err)
@@ -252,8 +193,7 @@ func (r *TestLibp2pRelay) Cleanup() error {
 func (r *TestLibp2pRelay) WaitForReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		// Check if host is ready by verifying it has addresses
-		if len(r.Host.Addrs()) > 0 {
+		if r.DHTPublicKey != "" {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -261,60 +201,25 @@ func (r *TestLibp2pRelay) WaitForReady(timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for relay to be ready")
 }
 
-// initTestLibp2pConfig initializes viper config for libp2p testing
+// initTestLibp2pConfig initializes viper config for testing
 func initTestLibp2pConfig(dataDir string, cfg TestLibp2pRelayConfig) {
 	viper.Reset()
 
-	// Server config
 	viper.Set("server.data_path", dataDir)
 
-	// Generate keys if not provided
 	if cfg.PrivateKey == "" {
-		// Use a deterministic test key for reproducibility
 		viper.Set("relay.private_key", "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5")
 	} else {
 		viper.Set("relay.private_key", cfg.PrivateKey)
 	}
 
-	// DAG upload settings - allow all for tests
+	viper.Set("relay.dht_key", "test-dht-key-seed")
+
 	viper.Set("upload.enabled_uploads", []string{"all"})
 	viper.Set("content_filtering.image_moderation.enabled", false)
 
-	// Logging - minimal for tests
 	viper.Set("logging.level", "error")
 	viper.Set("logging.output", "stdout")
 
-	// Initialize config system
 	config.InitConfigForTesting()
 }
-
-// TestConnectionNotifier is a connection notifier for testing
-type TestConnectionNotifier struct {
-	ConnectedChan    chan struct{}
-	DisconnectedChan chan struct{}
-}
-
-func NewTestConnectionNotifier() *TestConnectionNotifier {
-	return &TestConnectionNotifier{
-		ConnectedChan:    make(chan struct{}, 10),
-		DisconnectedChan: make(chan struct{}, 10),
-	}
-}
-
-func (n *TestConnectionNotifier) Connected(net network.Network, conn network.Conn) {
-	select {
-	case n.ConnectedChan <- struct{}{}:
-	default:
-	}
-}
-
-func (n *TestConnectionNotifier) Disconnected(net network.Network, conn network.Conn) {
-	select {
-	case n.DisconnectedChan <- struct{}{}:
-	default:
-	}
-}
-
-func (n *TestConnectionNotifier) Listen(net network.Network, multiaddr multiaddr.Multiaddr) {}
-
-func (n *TestConnectionNotifier) ListenClose(net network.Network, multiaddr multiaddr.Multiaddr) {}

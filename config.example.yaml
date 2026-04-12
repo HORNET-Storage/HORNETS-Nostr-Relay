@@ -288,3 +288,15 @@ server:
             host: ""
             port: 11006
             pubkey: ""
+            dht_pubkey: ""
+# Hyperswarm sidecar configuration
+# A single sidecar process is shared by all HORNET applications on the machine.
+# The relay starts it in persistent mode; other tools (gitnestr, airlock) connect to it.
+sidecar:
+    # RPC address of the sidecar process
+    address: "127.0.0.1:9100"
+    # Path to the hornets-hyperswarm binary. If set, the relay will start the
+    # sidecar automatically if one is not already running.
+    executable: ""
+    # Mode when starting a new sidecar: "persistent" (recommended for relay)
+    mode: "persistent"
