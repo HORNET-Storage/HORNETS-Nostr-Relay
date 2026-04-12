@@ -16,6 +16,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
@@ -240,7 +241,188 @@ func GetPath(subPath string) string {
 	return filepath.Join(GetDataDir(), subPath)
 }
 
-// SaveConfig saves the current configuration to file
+// safeWriteKeys performs a read-modify-write on the YAML config file,
+// updating only the specified dot-path keys. This avoids the
+// viper.WriteConfig() problem where viper dumps its entire (possibly
+// incomplete) in-memory tree and nukes keys it doesn't know about.
+//
+// Must be called while writeMutex is held.
+func safeWriteKeys(keys map[string]interface{}) error {
+	configPath := viper.ConfigFileUsed()
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	// Read existing file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Parse into ordered map
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("failed to parse config YAML: %w", err)
+	}
+
+	// root is a Document node; its first child is the mapping
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return fmt.Errorf("unexpected YAML structure")
+	}
+	mapping := root.Content[0]
+
+	for dotPath, value := range keys {
+		setYAMLNode(mapping, strings.Split(dotPath, "."), value)
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config YAML: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// safeRemoveKey removes a dot-path key from the YAML config file without
+// rewriting the rest of the file. Must be called while writeMutex is held.
+func safeRemoveKey(dotPath string) error {
+	configPath := viper.ConfigFileUsed()
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("failed to parse config YAML: %w", err)
+	}
+
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return fmt.Errorf("unexpected YAML structure")
+	}
+
+	removeYAMLNode(root.Content[0], strings.Split(dotPath, "."))
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config YAML: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// removeYAMLNode removes a key from a yaml.Node mapping tree by dot-path segments.
+func removeYAMLNode(mapping *yaml.Node, path []string) {
+	if mapping.Kind != yaml.MappingNode || len(path) == 0 {
+		return
+	}
+
+	key := path[0]
+	rest := path[1:]
+
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			if len(rest) == 0 {
+				// Remove this key-value pair
+				mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+				return
+			}
+			if mapping.Content[i+1].Kind == yaml.MappingNode {
+				removeYAMLNode(mapping.Content[i+1], rest)
+			}
+			return
+		}
+	}
+}
+
+// setYAMLNode traverses/creates the path in a yaml.Node mapping tree and
+// sets the leaf to the given value.
+func setYAMLNode(mapping *yaml.Node, path []string, value interface{}) {
+	if mapping.Kind != yaml.MappingNode {
+		return
+	}
+
+	key := path[0]
+	rest := path[1:]
+
+	// Search existing keys
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			if len(rest) == 0 {
+				// Leaf: replace value node
+				mapping.Content[i+1] = valueToYAMLNode(value)
+				return
+			}
+			// Recurse into sub-mapping
+			if mapping.Content[i+1].Kind == yaml.MappingNode {
+				setYAMLNode(mapping.Content[i+1], rest, value)
+				return
+			}
+			// Exists but not a mapping — replace with one so we can nest
+			newMap := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			mapping.Content[i+1] = newMap
+			setYAMLNode(newMap, rest, value)
+			return
+		}
+	}
+
+	// Key not found — append
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+	if len(rest) == 0 {
+		mapping.Content = append(mapping.Content, keyNode, valueToYAMLNode(value))
+	} else {
+		newMap := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		mapping.Content = append(mapping.Content, keyNode, newMap)
+		setYAMLNode(newMap, rest, value)
+	}
+}
+
+// valueToYAMLNode converts a Go value into a yaml.Node scalar.
+func valueToYAMLNode(v interface{}) *yaml.Node {
+	n := &yaml.Node{Kind: yaml.ScalarNode}
+	switch val := v.(type) {
+	case string:
+		n.Tag = "!!str"
+		n.Value = val
+	case int:
+		n.Tag = "!!int"
+		n.Value = strconv.Itoa(val)
+	case int64:
+		n.Tag = "!!int"
+		n.Value = strconv.FormatInt(val, 10)
+	case float64:
+		if val == float64(int64(val)) {
+			n.Tag = "!!int"
+			n.Value = strconv.FormatInt(int64(val), 10)
+		} else {
+			n.Tag = "!!float"
+			n.Value = strconv.FormatFloat(val, 'f', -1, 64)
+		}
+	case bool:
+		n.Tag = "!!bool"
+		n.Value = strconv.FormatBool(val)
+	default:
+		n.Tag = "!!str"
+		n.Value = fmt.Sprintf("%v", val)
+	}
+	return n
+}
+
+// SaveConfig saves the current configuration to file.
+// WARNING: This uses viper.WriteConfig() which rewrites the entire file.
+// Prefer UpdateConfig or UpdateMultipleSections for surgical updates.
 func SaveConfig() error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
@@ -271,7 +453,7 @@ func UpdateConfig(key string, value interface{}, save bool) error {
 	viper.Set(key, value)
 
 	if save {
-		if err := viper.WriteConfig(); err != nil {
+		if err := safeWriteKeys(map[string]interface{}{key: value}); err != nil {
 			return err
 		}
 	}
@@ -286,7 +468,7 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
-	hasChanges := false
+	changedKeys := make(map[string]interface{})
 
 	// Process each section
 	for sectionName, sectionValue := range settings {
@@ -297,7 +479,7 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 			if !isConfigValueEqual(currentValue, sectionValue) {
 				log.Printf("Updating %s: %v -> %v", sectionName, currentValue, sectionValue)
 				viper.Set(sectionName, sectionValue)
-				hasChanges = true
+				changedKeys[sectionName] = sectionValue
 			}
 			continue
 		}
@@ -315,7 +497,7 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 					if !isConfigValueEqual(currentValue, nestedValue) {
 						log.Printf("  Updating %s: %v -> %v", nestedKey, currentValue, nestedValue)
 						viper.Set(nestedKey, nestedValue)
-						hasChanges = true
+						changedKeys[nestedKey] = nestedValue
 					}
 				}
 			} else {
@@ -323,16 +505,16 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 				if !isConfigValueEqual(currentValue, fieldValue) {
 					log.Printf("  Updating %s: %v -> %v", fullKey, currentValue, fieldValue)
 					viper.Set(fullKey, fieldValue)
-					hasChanges = true
+					changedKeys[fullKey] = fieldValue
 				}
 			}
 		}
 	}
 
 	// Only save if there were changes
-	if hasChanges {
+	if len(changedKeys) > 0 {
 		log.Println("Saving configuration changes...")
-		if err := viper.WriteConfig(); err != nil {
+		if err := safeWriteKeys(changedKeys); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
@@ -486,7 +668,7 @@ func UpdateNIPMapping(kind, nip string) error {
 	mappings[kind] = nip
 	viper.Set("nip_mappings", mappings)
 
-	if err := viper.WriteConfig(); err != nil {
+	if err := safeWriteKeys(map[string]interface{}{"nip_mappings." + kind: nip}); err != nil {
 		return err
 	}
 
@@ -506,7 +688,8 @@ func RemoveNIPMapping(kind string) error {
 	delete(mappings, kind)
 	viper.Set("nip_mappings", mappings)
 
-	if err := viper.WriteConfig(); err != nil {
+	// For removal we need to rewrite — use safeRemoveKey
+	if err := safeRemoveKey("nip_mappings." + kind); err != nil {
 		return err
 	}
 
