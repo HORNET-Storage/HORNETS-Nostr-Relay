@@ -12,7 +12,8 @@ import (
 // ServicesResponse is the JSON payload returned by the /services protocol handler.
 // It provides the same service discovery information that NIP-11 offers via HTTP,
 // enabling clients to discover services purely over the DHT without needing an
-// HTTP endpoint.
+// HTTP endpoint. Includes full NIP-11 relay info fields so browser clients can
+// display relay metadata without a separate HTTP connection.
 type ServicesResponse struct {
 	// Relay's secp256k1 public key (Nostr identity)
 	Pubkey string `json:"pubkey,omitempty"`
@@ -26,8 +27,14 @@ type ServicesResponse struct {
 	// Base port for offset calculations (informational)
 	BasePort int `json:"base_port,omitempty"`
 
-	// Relay name
-	Name string `json:"name,omitempty"`
+	// NIP-11 relay information fields
+	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Contact       string `json:"contact,omitempty"`
+	Icon          string `json:"icon,omitempty"`
+	Software      string `json:"software,omitempty"`
+	Version       string `json:"version,omitempty"`
+	SupportedNIPs []int  `json:"supported_nips,omitempty"`
 }
 
 // AddServicesHandler registers the /services protocol on the hyperswarm listener.
@@ -43,10 +50,16 @@ func BuildServicesStreamHandler() hsListener.StreamHandler {
 		defer stream.Close()
 
 		resp := ServicesResponse{
-			Pubkey:    viper.GetString("relay.public_key"),
-			DHTPubkey: viper.GetString("DHTPublicKey"),
-			BasePort:  viper.GetInt("server.port"),
-			Name:      viper.GetString("relay.name"),
+			Pubkey:        viper.GetString("relay.public_key"),
+			DHTPubkey:     viper.GetString("DHTPublicKey"),
+			BasePort:      viper.GetInt("server.port"),
+			Name:          viper.GetString("relay.name"),
+			Description:   viper.GetString("relay.description"),
+			Contact:       viper.GetString("relay.contact"),
+			Icon:          viper.GetString("relay.icon"),
+			Software:      viper.GetString("relay.software"),
+			Version:       viper.GetString("relay.version"),
+			SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
 		}
 
 		// Get airlock DHT pubkey from services config
