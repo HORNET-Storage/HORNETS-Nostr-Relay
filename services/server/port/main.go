@@ -96,6 +96,9 @@ import (
 var (
 	compactDB      = flag.Bool("compact", false, "Run database compaction to reclaim any potential disk space before starting regular services")
 	memoryProfiler = flag.Bool("profile", false, "Run pprof memory profiler enabling memory usage debugging")
+	bootstrapSetup = flag.Bool("bootstrap-setup", false, "Run first-time setup server before starting relay services")
+	setupHost      = flag.String("setup-host", "127.0.0.1", "Host/interface for first-time setup server")
+	setupPort      = flag.Int("setup-port", 11012, "Port for first-time setup server")
 )
 
 func init() {
@@ -159,6 +162,21 @@ func main() {
 		logging.Fatal("Failed to load configuration", map[string]interface{}{
 			"error": err,
 		})
+	}
+
+	if *bootstrapSetup {
+		if err := runBootstrapSetup(ctx, *setupHost, *setupPort); err != nil {
+			logging.Fatalf("Bootstrap setup failed: %v", err)
+		}
+
+		if err := config.InitConfig(); err != nil {
+			logging.Fatalf("Failed to reinitialize config after bootstrap setup: %v", err)
+		}
+
+		settings, err = config.GetConfig()
+		if err != nil {
+			logging.Fatalf("Failed to reload config after bootstrap setup: %v", err)
+		}
 	}
 
 	serializedPrivateKey := viper.GetString("relay.private_key")
