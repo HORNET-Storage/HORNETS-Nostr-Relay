@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -143,6 +146,36 @@ func init() {
 	}
 }
 
+func deriveAirlockDHTPublicKeyFromPrivateKey(privateKey string) (string, error) {
+	privateKeyBytes, err := signing.DecodeKey(strings.TrimSpace(privateKey))
+	if err != nil {
+		return "", fmt.Errorf("invalid Airlock private key: %w", err)
+	}
+
+	if len(privateKeyBytes) != ed25519.SeedSize {
+		return "", fmt.Errorf("invalid Airlock private key length: expected %d bytes, got %d", ed25519.SeedSize, len(privateKeyBytes))
+	}
+
+	ed25519PrivateKey := ed25519.NewKeyFromSeed(privateKeyBytes)
+	ed25519PublicKey := ed25519PrivateKey.Public().(ed25519.PublicKey)
+	return hex.EncodeToString(ed25519PublicKey), nil
+}
+
+func syncAirlockServiceDHTPubkey() (string, error) {
+	airlockConfigPath := defaultAirlockConfigPath()
+	airlockConfig := readYAMLMap(airlockConfigPath)
+	if len(airlockConfig) == 0 {
+		return "", fmt.Errorf("airlock config not found at %s", airlockConfigPath)
+	}
+
+	privateKey := strings.TrimSpace(fmt.Sprint(airlockConfig["private_key"]))
+	if privateKey == "" {
+		return "", fmt.Errorf("airlock private_key missing in %s", airlockConfigPath)
+	}
+
+	return deriveAirlockDHTPublicKeyFromPrivateKey(privateKey)
+}
+
 func main() {
 	ctx := context.Background()
 	wg := new(sync.WaitGroup)
@@ -183,12 +216,15 @@ func main() {
 
 	// Add diagnostic logging for config state
 	logging.Info("Config initialization diagnostic", map[string]interface{}{
-		"config_file_exists": viper.ConfigFileUsed() != "",
-		"config_file_path":   viper.ConfigFileUsed(),
-		"private_key_exists": len(serializedPrivateKey) > 0,
-		"dht_key_exists":     len(viper.GetString("relay.dht_key")) > 0,
-		"public_key_exists":  len(viper.GetString("relay.public_key")) > 0,
-		"wallet_key_exists":  len(viper.GetString("external_services.wallet.key")) > 0,
+		"config_file_exists":     viper.ConfigFileUsed() != "",
+		"config_file_path":       viper.ConfigFileUsed(),
+		"private_key_exists":     len(serializedPrivateKey) > 0,
+		"legacy_dht_key_exists":  len(viper.GetString("relay.dht_key")) > 0,
+		"dht_seed_exists":        len(viper.GetString("relay.dht_seed")) > 0,
+		"dht_public_key_exists":  len(viper.GetString("relay.dht_public_key")) > 0,
+		"dht_private_key_exists": len(viper.GetString("relay.dht_private_key")) > 0,
+		"public_key_exists":      len(viper.GetString("relay.public_key")) > 0,
+		"wallet_key_exists":      len(viper.GetString("external_services.wallet.key")) > 0,
 	})
 
 	// Track if we need to save config at the end
@@ -232,20 +268,87 @@ func main() {
 		}
 	}
 
-	dhtKey := viper.GetString("relay.dht_key")
-
-	if len(dhtKey) <= 0 {
-		dhtKey, err := synckeys.DeriveKeyFromNsec(serializedPrivateKey)
-		if err != nil {
-			logging.Errorf("Failed to generate DHT key: %v", err)
+	legacyDHTSeed := strings.TrimSpace(viper.GetString("relay.dht_key"))
+	dhtSeed := strings.TrimSpace(viper.GetString("relay.dht_seed"))
+	if dhtSeed == "" && legacyDHTSeed != "" {
+		dhtSeed = legacyDHTSeed
+		if err := config.UpdateConfig("relay.dht_seed", dhtSeed, true); err != nil {
+			logging.Errorf("Failed to migrate legacy relay.dht_key to relay.dht_seed: %v", err)
 		} else {
-			// Use UpdateConfig with save=false
-			config.UpdateConfig("relay.dht_key", dhtKey, true)
 			configNeedsSave = true
-
-			logging.Info("Generated new server DHT key", map[string]interface{}{
-				"dht_key": dhtKey,
+			logging.Info("Migrated legacy relay DHT seed configuration", map[string]interface{}{
+				"dht_seed": dhtSeed,
 			})
+		}
+	}
+	if legacyDHTSeed != "" {
+		if err := config.RemoveConfigKey("relay.dht_key"); err != nil {
+			logging.Errorf("Failed to remove legacy relay.dht_key config entry: %v", err)
+		} else {
+			logging.Info("Removed legacy relay.dht_key config entry", nil)
+		}
+	}
+
+	var dhtIdentity *synckeys.DHTIdentity
+	if dhtSeed == "" {
+		dhtIdentity, err = synckeys.DeriveDHTIdentityFromPrivateKey(serializedPrivateKey)
+		if err != nil {
+			logging.Errorf("Failed to derive DHT identity from relay private key: %v", err)
+		} else {
+			dhtSeed = dhtIdentity.Seed
+			if err := config.UpdateConfig("relay.dht_seed", dhtSeed, true); err != nil {
+				logging.Errorf("Failed to save derived relay DHT seed: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Generated new relay DHT seed from private key", map[string]interface{}{
+					"dht_seed": dhtSeed,
+				})
+			}
+		}
+	} else {
+		dhtIdentity, err = synckeys.DeriveDHTIdentityFromSeed(dhtSeed)
+		if err != nil {
+			logging.Errorf("Failed to derive DHT identity from configured seed: %v", err)
+		}
+	}
+
+	if dhtIdentity != nil {
+		if currentDHTPublicKey := strings.TrimSpace(viper.GetString("relay.dht_public_key")); currentDHTPublicKey != dhtIdentity.PublicKey {
+			if err := config.UpdateConfig("relay.dht_public_key", dhtIdentity.PublicKey, true); err != nil {
+				logging.Errorf("Failed to save relay DHT public key: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Updated relay DHT public key in configuration", map[string]interface{}{
+					"dht_public_key": dhtIdentity.PublicKey,
+				})
+			}
+		}
+
+		if currentDHTPrivateKey := strings.TrimSpace(viper.GetString("relay.dht_private_key")); currentDHTPrivateKey != dhtIdentity.PrivateKey {
+			if err := config.UpdateConfig("relay.dht_private_key", dhtIdentity.PrivateKey, true); err != nil {
+				logging.Errorf("Failed to save relay DHT private key: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Updated relay DHT private key in configuration", map[string]interface{}{
+					"dht_private_key": dhtIdentity.PrivateKey,
+				})
+			}
+		}
+	}
+
+	if viper.GetInt("server.services.airlock.port") > 0 {
+		airlockDHTPublicKey, err := syncAirlockServiceDHTPubkey()
+		if err != nil {
+			logging.Errorf("Failed to synchronize Airlock DHT public key for service discovery: %v", err)
+		} else if currentAirlockDHTPublicKey := strings.TrimSpace(viper.GetString("server.services.airlock.dht_pubkey")); currentAirlockDHTPublicKey != airlockDHTPublicKey {
+			if err := config.UpdateConfig("server.services.airlock.dht_pubkey", airlockDHTPublicKey, true); err != nil {
+				logging.Errorf("Failed to save Airlock DHT public key for service discovery: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Synchronized Airlock DHT public key for service discovery", map[string]interface{}{
+					"airlock_dht_public_key": airlockDHTPublicKey,
+				})
+			}
 		}
 	}
 
@@ -321,7 +424,7 @@ func main() {
 	listener := hsListener.NewHyperswarmListener(hsClient)
 	defer listener.Close()
 
-	_, dhtPublicKey, err := listener.CreateServerFromSeed(dhtKey)
+	_, dhtPublicKey, err := listener.CreateServerFromSeed(dhtSeed)
 	if err != nil {
 		logging.Fatal("Failed to create HyperDHT server", map[string]interface{}{
 			"error": err,
@@ -330,6 +433,19 @@ func main() {
 
 	// Store DHT public key for NIP-11 advertisement
 	viper.Set("DHTPublicKey", dhtPublicKey)
+	if currentDHTPublicKey := strings.TrimSpace(viper.GetString("relay.dht_public_key")); currentDHTPublicKey != dhtPublicKey {
+		if err := config.UpdateConfig("relay.dht_public_key", dhtPublicKey, true); err != nil {
+			logging.Errorf("Failed to save sidecar DHT public key: %v", err)
+		} else {
+			configNeedsSave = true
+			logging.Info("Synchronized relay DHT public key with sidecar server", map[string]interface{}{
+				"dht_public_key": dhtPublicKey,
+			})
+		}
+	}
+	if dhtIdentity != nil && dhtIdentity.PublicKey != dhtPublicKey {
+		logging.Errorf("Derived DHT public key does not match sidecar server public key: derived=%s sidecar=%s", dhtIdentity.PublicKey, dhtPublicKey)
+	}
 
 	// Create and initialize database
 	store, err := badgerhold.InitStore(config.GetPath("store"))
@@ -420,7 +536,7 @@ func main() {
 	subscription.InitGlobalManager(
 		store,
 		privateKey,
-		dhtKey,
+		dhtPublicKey,
 		settings.AllowedUsersSettings.Tiers,
 	)
 	logging.Info("Global subscription manager initialized successfully")

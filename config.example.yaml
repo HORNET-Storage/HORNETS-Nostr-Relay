@@ -2,17 +2,13 @@ allowed_users:
     batch_update_on_startup: false
     last_updated: 0
     mode: public
-    read_access:
-        enabled: true
-        scope: all_users
+    read: all_users
     tiers:
         - monthly_limit_bytes: 104857600
           name: Basic
           price_sats: 0
           unlimited: false
-    write_access:
-        enabled: true
-        scope: all_users
+    write: all_users
 content_filtering:
     image_moderation:
         check_interval_seconds: 30
@@ -65,12 +61,12 @@ event_filtering:
         - kind30023
         - kind30078
         - kind30079
-        - kind76
-        - kind75
-        - kind74
+        - kind72
         - kind73
-        - kind16629
-        - kind16630
+        - kind74
+        - kind75
+        - kind76
+        - kind77
         - kind1809
     media_definitions:
         audio:
@@ -160,10 +156,12 @@ event_filtering:
         - 30023
         - 30078
         - 30079
-        - 76
-        - 75
-        - 74
+        - 72
         - 73
+        - 74
+        - 75
+        - 76
+        - 77
 external_services:
     moderator:
         url: http://moderator:8000
@@ -245,7 +243,9 @@ push_notifications:
 relay:
     contact: support@hornetstorage.com
     description: HORNETS relay, the home of GitNestr
-    dht_key: 020439cb396ec92c283048f989c342fe3833cc5a
+    dht_seed: ""
+    dht_public_key: ""
+    dht_private_key: ""
     icon: http://localhost:11002/logo-dark-192.png
     name: HORNETS
     private_key: c600149fe1207dd0cf5284d0a4bd767dc192181940d2a2b08f9571445f308a02

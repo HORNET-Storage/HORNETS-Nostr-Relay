@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,35 +12,67 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 )
 
-// DeriveKeyFromNsec derives a DHT key from a user's nsec (private key)
-// This provides a consistent way to generate DHT keys from private keys
-// using the same approach as GenerateDHTKey for consistency
-func DeriveKeyFromNsec(nsec string) (string, error) {
-	// Extract private key bytes using the signing package
-	privateKeyBytes, err := signing.DecodeKey(nsec)
+type DHTIdentity struct {
+	Seed       string
+	PublicKey  string
+	PrivateKey string
+}
+
+func DeriveDHTSeedFromPrivateKey(privateKey string) (string, error) {
+	privateKeyBytes, err := signing.DecodeKey(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("invalid nsec: %w", err)
 	}
 
-	// Ensure we have the correct length
 	if len(privateKeyBytes) != 32 {
 		return "", fmt.Errorf("invalid private key length: expected 32 bytes, got %d", len(privateKeyBytes))
 	}
 
-	// Create a copy for clamping
 	clampedPrivateKey := make([]byte, len(privateKeyBytes))
 	copy(clampedPrivateKey, privateKeyBytes)
 
-	// Apply clamping as per Ed25519 specification
-	clampedPrivateKey[0] &= 248  // Clear the lowest 3 bits
-	clampedPrivateKey[31] &= 127 // Clear the highest bit
-	clampedPrivateKey[31] |= 64  // Set the second highest bit
+	clampedPrivateKey[0] &= 248
+	clampedPrivateKey[31] &= 127
+	clampedPrivateKey[31] |= 64
 
-	// Calculate hash using SHA-256 (produces 32 bytes required by libsodium crypto_sign_seed_keypair)
 	hash := sha256.Sum256(clampedPrivateKey[:32])
-
-	// Return the hash as a hexadecimal string
 	return hex.EncodeToString(hash[:]), nil
+}
+
+func DeriveDHTIdentityFromSeed(seed string) (*DHTIdentity, error) {
+	seedBytes, err := hex.DecodeString(seed)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DHT seed: %w", err)
+	}
+
+	if len(seedBytes) != ed25519.SeedSize {
+		return nil, fmt.Errorf("invalid DHT seed length: expected %d bytes, got %d", ed25519.SeedSize, len(seedBytes))
+	}
+
+	privateKey := ed25519.NewKeyFromSeed(seedBytes)
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+
+	return &DHTIdentity{
+		Seed:       seed,
+		PublicKey:  hex.EncodeToString(publicKey),
+		PrivateKey: hex.EncodeToString(privateKey),
+	}, nil
+}
+
+func DeriveDHTIdentityFromPrivateKey(privateKey string) (*DHTIdentity, error) {
+	seed, err := DeriveDHTSeedFromPrivateKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return DeriveDHTIdentityFromSeed(seed)
+}
+
+// DeriveKeyFromNsec derives a DHT key from a user's nsec (private key)
+// This provides a consistent way to generate DHT keys from private keys
+// using the same approach as GenerateDHTKey for consistency
+func DeriveKeyFromNsec(nsec string) (string, error) {
+	return DeriveDHTSeedFromPrivateKey(nsec)
 }
 
 // GetDHTKeyForPubkey derives a DHT key for a given public key

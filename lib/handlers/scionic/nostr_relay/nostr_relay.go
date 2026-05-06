@@ -9,7 +9,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -217,21 +216,20 @@ func handleEvent(env *nostr.EventEnvelope, writeFn lib_nostr.KindWriter, store s
 			return json.Marshal(env)
 		}
 		handler(read, writeFn)
-	} else {
-		// Unregistered kind — use universal handler if allowed
-		if viper.GetBool("event_filtering.allow_unregistered_kinds") {
-			universalHandler := lib_nostr.GetHandler("universal")
-			if universalHandler != nil {
-				read := func() ([]byte, error) {
-					return json.Marshal(env)
-				}
-				universalHandler(read, writeFn)
-			} else {
-				writeFn("OK", env.Event.ID, false, "Universal handler not available")
+	} else if lib_nostr.IsKindAllowed(env.Kind) {
+		universalHandler := lib_nostr.GetHandler("universal")
+		if universalHandler != nil {
+			logging.Infof("/nostr: handling allowed kind %d with universal handler", env.Kind)
+			read := func() ([]byte, error) {
+				return json.Marshal(env)
 			}
+			universalHandler(read, writeFn)
 		} else {
-			writeFn("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
+			writeFn("OK", env.Event.ID, false, "Universal handler not available")
 		}
+	} else {
+		logging.Infof("/nostr: rejected kind %d (not allowed by event filtering config)", env.Kind)
+		writeFn("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
 	}
 }
 

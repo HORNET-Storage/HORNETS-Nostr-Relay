@@ -394,6 +394,78 @@ func TestKind16629_ValidatePermissionTag(t *testing.T) {
 	}
 }
 
+func TestKind16629_ValidateRelayTag_DHTPublicKey(t *testing.T) {
+	relay := setupKind16629TestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect to relay: %v", err)
+	}
+	defer conn.Close()
+
+	owner, _ := helpers.GenerateKeyPair()
+	collaborator, _ := helpers.GenerateKeyPair()
+	dhtKey := "f51a2356dd4aa7678658adaf659a8b43b51a94075b1fed254fc39d64211bf25d"
+
+	tests := []struct {
+		name        string
+		relayTag    string
+		expectError bool
+	}{
+		{
+			name:        "Valid raw DHT public key",
+			relayTag:    dhtKey,
+			expectError: false,
+		},
+		{
+			name:        "Valid nestr DHT public key",
+			relayTag:    "nestr://" + dhtKey,
+			expectError: false,
+		},
+		{
+			name:        "Invalid nestr DHT public key",
+			relayTag:    "nestr://abc123",
+			expectError: true,
+		},
+	}
+
+	for index, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repoName := fmt.Sprintf("myrepo-%d", index)
+			rTag := owner.PublicKey + ":" + repoName
+			tags := buildPermissionTags(rTag, repoName, owner.PublicKey, "",
+				nostr.Tag{"p", collaborator.PublicKey, "write"})
+
+			for i, tag := range tags {
+				if len(tag) >= 2 && tag[0] == "relay" {
+					tags[i][1] = tc.relayTag
+				}
+			}
+
+			event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
+			if err != nil {
+				t.Fatalf("Failed to create event: %v", err)
+			}
+
+			if tc.expectError {
+				rejected := publishExpectReject(ctx, conn, event)
+				if !rejected {
+					t.Errorf("Expected event to be rejected, but it was stored")
+				}
+			} else {
+				err = conn.Publish(ctx, *event)
+				if err != nil {
+					t.Errorf("Expected event to be accepted, but got error: %v", err)
+				}
+			}
+		})
+	}
+}
+
 // ============================================================================
 // Test: Regular Repo Permissions
 // ============================================================================

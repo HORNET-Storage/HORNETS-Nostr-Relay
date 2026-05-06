@@ -72,7 +72,10 @@ type RelayConfig struct {
 	SupportedNIPs []int  `mapstructure:"supported_nips"`
 	SecretKey     string `mapstructure:"secret_key"`
 	PrivateKey    string `mapstructure:"private_key"`
-	DHTKey        string `mapstructure:"dht_key"`
+	PublicKey     string `mapstructure:"public_key"`
+	DHTSeed       string `mapstructure:"dht_seed"`
+	DHTPublicKey  string `mapstructure:"dht_public_key"`
+	DHTPrivateKey string `mapstructure:"dht_private_key"`
 }
 
 // ContentFilteringConfig holds content filtering configuration

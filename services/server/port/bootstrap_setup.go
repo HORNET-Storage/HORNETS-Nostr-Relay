@@ -109,6 +109,42 @@ func readPreferredYAMLMap(paths ...string) map[string]interface{} {
 	return map[string]interface{}{}
 }
 
+func ensureNestedMap(parent map[string]interface{}, key string) map[string]interface{} {
+	if existing, ok := parent[key].(map[string]interface{}); ok && existing != nil {
+		return existing
+	}
+
+	nested := map[string]interface{}{}
+	parent[key] = nested
+	return nested
+}
+
+func syncAirlockDHTPubkeyIntoRelayConfig(relayConfig map[string]interface{}, airlockConfig map[string]interface{}) error {
+	if relayConfig == nil {
+		return nil
+	}
+
+	privateKey := strings.TrimSpace(fmt.Sprint(airlockConfig["private_key"]))
+	if privateKey == "" {
+		relayCfg, _ := relayConfig["relay"].(map[string]interface{})
+		privateKey = strings.TrimSpace(fmt.Sprint(relayCfg["private_key"]))
+	}
+	if privateKey == "" {
+		return nil
+	}
+
+	airlockDHTPublicKey, err := deriveAirlockDHTPublicKeyFromPrivateKey(privateKey)
+	if err != nil {
+		return err
+	}
+
+	serverCfg := ensureNestedMap(relayConfig, "server")
+	servicesCfg := ensureNestedMap(serverCfg, "services")
+	airlockServiceCfg := ensureNestedMap(servicesCfg, "airlock")
+	airlockServiceCfg["dht_pubkey"] = airlockDHTPublicKey
+	return nil
+}
+
 func renderBootstrapSetupPage(token string) string {
 	return fmt.Sprintf(`<!doctype html>
 <html>
@@ -408,8 +444,8 @@ func renderBootstrapSetupPage(token string) string {
 							<input id="relay_public_key" class="key-input" placeholder="leave blank to derive from the private key">
 						</div>
 						<div class="field">
-							<label for="relay_dht_key">DHT seed</label>
-							<input id="relay_dht_key" class="key-input" placeholder="leave blank to derive automatically">
+							<label for="relay_dht_seed">DHT seed</label>
+							<input id="relay_dht_seed" class="key-input" placeholder="leave blank to derive automatically">
 						</div>
 					</div>
 					<div class="actions">
@@ -488,7 +524,7 @@ func renderBootstrapSetupPage(token string) string {
 		const token = %q;
 		const EXAMPLE_RELAY_PRIVATE_KEY = "c600149fe1207dd0cf5284d0a4bd767dc192181940d2a2b08f9571445f308a02";
 		const EXAMPLE_RELAY_PUBLIC_KEY = "336b884334a2ad004b9b5c0d24ea727e0dfa9d9f6088d37386731611a2b38bcd";
-		const EXAMPLE_RELAY_DHT_KEY = "020439cb396ec92c283048f989c342fe3833cc5a";
+		const EXAMPLE_RELAY_DHT_SEED = "";
 		const EXAMPLE_RELAY_SECRET_KEY = "hornets-secret-key";
 		const EXAMPLE_AIRLOCK_PRIVATE_KEY = "nsec1yas03jagdjsr8su00g92jurf7am3dldvu9tckyz796z8efpa594qp2nelz";
 		let defaults = { relayConfig: {}, airlockConfig: {}, airlockConfigPath: "" };
@@ -559,7 +595,7 @@ func renderBootstrapSetupPage(token string) string {
 			relay.relay.service_tag = el("relay_service_tag").value.trim() || relay.relay.service_tag || "hornet-storage-service";
 			relay.relay.private_key = relayPrivateKey;
 			relay.relay.public_key = el("relay_public_key").value.trim();
-			relay.relay.dht_key = el("relay_dht_key").value.trim();
+			relay.relay.dht_seed = el("relay_dht_seed").value.trim();
 			relay.relay.secret_key = generatedSecret;
 
 			const airlockPort = el("airlock_port").value.trim();
@@ -618,7 +654,7 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_private_key").value = sanitizeSeededValue(relay.private_key, EXAMPLE_RELAY_PRIVATE_KEY);
 			el("relay_service_tag").value = relay.service_tag || "hornet-storage-service";
 			el("relay_public_key").value = sanitizeSeededValue(relay.public_key, EXAMPLE_RELAY_PUBLIC_KEY);
-			el("relay_dht_key").value = sanitizeSeededValue(relay.dht_key, EXAMPLE_RELAY_DHT_KEY);
+			el("relay_dht_seed").value = sanitizeSeededValue(relay.dht_seed || relay.dht_key, EXAMPLE_RELAY_DHT_SEED);
 			el("relay_secret_key").value = generatedRelaySecret;
 
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";
@@ -638,7 +674,7 @@ func renderBootstrapSetupPage(token string) string {
 		function generateRelayKey() {
 			el("relay_private_key").value = randomHex(32);
 			el("relay_public_key").value = "";
-			el("relay_dht_key").value = "";
+			el("relay_dht_seed").value = "";
 			buildPayload();
 			setStatus("Generated a relay private key. Public and DHT keys will be derived automatically.");
 		}
@@ -770,6 +806,9 @@ func runBootstrapSetup(ctx context.Context, host string, port int) error {
 		if priv == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": "relay.private_key is required"})
 		}
+		if err := syncAirlockDHTPubkeyIntoRelayConfig(payload.RelayConfig, payload.AirlockConfig); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": err.Error()})
+		}
 
 		return c.JSON(fiber.Map{
 			"ok":                  true,
@@ -782,6 +821,15 @@ func runBootstrapSetup(ctx context.Context, host string, port int) error {
 		var payload setupPayload
 		if err := c.BodyParser(&payload); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
+		}
+		if payload.RelayConfig == nil {
+			payload.RelayConfig = map[string]interface{}{}
+		}
+		if payload.AirlockConfig == nil {
+			payload.AirlockConfig = map[string]interface{}{}
+		}
+		if err := syncAirlockDHTPubkeyIntoRelayConfig(payload.RelayConfig, payload.AirlockConfig); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		if payload.RelayConfig != nil && len(payload.RelayConfig) > 0 {

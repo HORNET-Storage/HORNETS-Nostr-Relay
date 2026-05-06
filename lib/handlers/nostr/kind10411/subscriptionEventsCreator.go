@@ -151,7 +151,7 @@ func CreateKind10411Event(privateKey *secp256k1.PrivateKey, publicKey *secp256k1
 		SupportedNIPs:     cfg.Relay.SupportedNIPs,
 		Software:          cfg.Relay.Software,
 		Version:           cfg.Relay.Version,
-		DHTkey:            cfg.Relay.DHTKey,
+		DHTkey:            cfg.Relay.DHTPublicKey,
 		SubscriptionTiers: tierInfos,
 	}
 
@@ -256,7 +256,7 @@ func CreateNIP88Event(relayPrivKey *btcec.PrivateKey, userPubKey string, store s
 		{"npub", userPubKey},
 		{"relay-bitcoin-address", addr.Address},
 		// Add Lightning invoice if applicable
-		{"relay-dht-key", cfg.Relay.DHTKey},
+		{"relay-dht-key", cfg.Relay.DHTPublicKey},
 	}
 
 	event := &nostr.Event{

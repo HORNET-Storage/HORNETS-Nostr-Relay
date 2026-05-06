@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -61,21 +60,17 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 		}
 		// Use the specific handler
 		handleEventWithHandler(c, env, handler)
-	} else {
-		// No specific handler - this is an unregistered kind
-		if viper.GetBool("event_filtering.allow_unregistered_kinds") {
-			// Use universal handler for unregistered kinds
-			universalHandler := lib_nostr.GetHandler("universal")
-			if universalHandler != nil {
-				logging.Infof("Handling unregistered kind %d with universal handler", env.Kind)
-				handleEventWithHandler(c, env, universalHandler)
-			} else {
-				write("OK", env.Event.ID, false, "Universal handler not available")
-			}
+	} else if lib_nostr.IsKindAllowed(env.Kind) {
+		universalHandler := lib_nostr.GetHandler("universal")
+		if universalHandler != nil {
+			logging.Infof("Handling allowed kind %d with universal handler", env.Kind)
+			handleEventWithHandler(c, env, universalHandler)
 		} else {
-			logging.Infof("Rejected unregistered kind %d (allow_unregistered_kinds=false)", env.Kind)
-			write("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
+			write("OK", env.Event.ID, false, "Universal handler not available")
 		}
+	} else {
+		logging.Infof("Rejected kind %d (not allowed by event filtering config)", env.Kind)
+		write("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
 	}
 }
 

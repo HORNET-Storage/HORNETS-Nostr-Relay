@@ -99,7 +99,7 @@ func NewTestLibp2pRelay(cfg TestLibp2pRelayConfig) (*TestLibp2pRelay, error) {
 	hsClient := sidecar.GetClient()
 	listener := hsListener.NewHyperswarmListener(hsClient)
 
-	dhtKey := viper.GetString("relay.dht_key")
+	dhtKey := viper.GetString("relay.dht_seed")
 	_, dhtPublicKey, err := listener.CreateServerFromSeed(dhtKey)
 	if err != nil {
 		os.RemoveAll(dataDir)
@@ -213,7 +213,7 @@ func initTestLibp2pConfig(dataDir string, cfg TestLibp2pRelayConfig) {
 		viper.Set("relay.private_key", cfg.PrivateKey)
 	}
 
-	viper.Set("relay.dht_key", "test-dht-key-seed")
+	viper.Set("relay.dht_seed", "test-dht-key-seed")
 
 	viper.Set("upload.enabled_uploads", []string{"all"})
 	viper.Set("content_filtering.image_moderation.enabled", false)

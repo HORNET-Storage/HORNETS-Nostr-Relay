@@ -124,8 +124,54 @@ func InitConfig() error {
 	return nil
 }
 
+func normalizeAllowedUsersConfigValues() {
+	if strings.TrimSpace(viper.GetString("allowed_users.read")) == "" {
+		legacyRead := strings.TrimSpace(viper.GetString("allowed_users.read_access.scope"))
+		if legacyRead != "" {
+			viper.Set("allowed_users.read", legacyRead)
+		}
+	}
+
+	if strings.TrimSpace(viper.GetString("allowed_users.write")) == "" {
+		legacyWrite := strings.TrimSpace(viper.GetString("allowed_users.write_access.scope"))
+		if legacyWrite != "" {
+			viper.Set("allowed_users.write", legacyWrite)
+		}
+	}
+}
+
+func normalizeRelayDHTConfigValues() {
+	if strings.TrimSpace(viper.GetString("relay.dht_seed")) == "" {
+		legacyDHTSeed := strings.TrimSpace(viper.GetString("relay.dht_key"))
+		if legacyDHTSeed != "" {
+			viper.Set("relay.dht_seed", legacyDHTSeed)
+		}
+	}
+}
+
+func canonicalConfigKey(key string) string {
+	switch key {
+	case "relay.dht_key":
+		return "relay.dht_seed"
+	default:
+		return key
+	}
+}
+
+func legacyConfigAliasesForKey(key string) []string {
+	switch key {
+	case "relay.dht_seed":
+		return []string{"relay.dht_key"}
+	default:
+		return nil
+	}
+}
+
 // reloadConfigCache loads the configuration from viper into the cache
 func reloadConfigCache() error {
+	normalizeAllowedUsersConfigValues()
+	normalizeRelayDHTConfigValues()
+
 	config := &types.Config{}
 	if err := viper.Unmarshal(config); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
@@ -442,19 +488,27 @@ func UpdateConfig(key string, value interface{}, save bool) error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
+	canonicalKey := canonicalConfigKey(key)
+
 	// Check if the value actually changed
-	currentValue := viper.Get(key)
+	currentValue := viper.Get(canonicalKey)
 	if isConfigValueEqual(currentValue, value) {
-		log.Printf("No change for %s, skipping update", key)
+		log.Printf("No change for %s, skipping update", canonicalKey)
 		return nil
 	}
 
-	log.Printf("Updating %s: %v -> %v", key, currentValue, value)
-	viper.Set(key, value)
+	log.Printf("Updating %s: %v -> %v", canonicalKey, currentValue, value)
+	viper.Set(canonicalKey, value)
 
 	if save {
-		if err := safeWriteKeys(map[string]interface{}{key: value}); err != nil {
+		if err := safeWriteKeys(map[string]interface{}{canonicalKey: value}); err != nil {
 			return err
+		}
+
+		for _, legacyKey := range legacyConfigAliasesForKey(canonicalKey) {
+			if err := safeRemoveKey(legacyKey); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -469,17 +523,22 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 	defer writeMutex.Unlock()
 
 	changedKeys := make(map[string]interface{})
+	keysToRemove := make(map[string]struct{})
 
 	// Process each section
 	for sectionName, sectionValue := range settings {
 		sectionMap, ok := sectionValue.(map[string]interface{})
 		if !ok {
 			// Handle simple top-level values
-			currentValue := viper.Get(sectionName)
+			canonicalSectionName := canonicalConfigKey(sectionName)
+			currentValue := viper.Get(canonicalSectionName)
 			if !isConfigValueEqual(currentValue, sectionValue) {
-				log.Printf("Updating %s: %v -> %v", sectionName, currentValue, sectionValue)
-				viper.Set(sectionName, sectionValue)
-				changedKeys[sectionName] = sectionValue
+				log.Printf("Updating %s: %v -> %v", canonicalSectionName, currentValue, sectionValue)
+				viper.Set(canonicalSectionName, sectionValue)
+				changedKeys[canonicalSectionName] = sectionValue
+				for _, legacyKey := range legacyConfigAliasesForKey(canonicalSectionName) {
+					keysToRemove[legacyKey] = struct{}{}
+				}
 			}
 			continue
 		}
@@ -492,20 +551,27 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 			// Handle nested sections
 			if nestedMap, ok := fieldValue.(map[string]interface{}); ok {
 				for nestedField, nestedValue := range nestedMap {
-					nestedKey := fullKey + "." + nestedField
+					nestedKey := canonicalConfigKey(fullKey + "." + nestedField)
 					currentValue := viper.Get(nestedKey)
 					if !isConfigValueEqual(currentValue, nestedValue) {
 						log.Printf("  Updating %s: %v -> %v", nestedKey, currentValue, nestedValue)
 						viper.Set(nestedKey, nestedValue)
 						changedKeys[nestedKey] = nestedValue
+						for _, legacyKey := range legacyConfigAliasesForKey(nestedKey) {
+							keysToRemove[legacyKey] = struct{}{}
+						}
 					}
 				}
 			} else {
-				currentValue := viper.Get(fullKey)
+				canonicalKey := canonicalConfigKey(fullKey)
+				currentValue := viper.Get(canonicalKey)
 				if !isConfigValueEqual(currentValue, fieldValue) {
-					log.Printf("  Updating %s: %v -> %v", fullKey, currentValue, fieldValue)
-					viper.Set(fullKey, fieldValue)
-					changedKeys[fullKey] = fieldValue
+					log.Printf("  Updating %s: %v -> %v", canonicalKey, currentValue, fieldValue)
+					viper.Set(canonicalKey, fieldValue)
+					changedKeys[canonicalKey] = fieldValue
+					for _, legacyKey := range legacyConfigAliasesForKey(canonicalKey) {
+						keysToRemove[legacyKey] = struct{}{}
+					}
 				}
 			}
 		}
@@ -516,6 +582,12 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 		log.Println("Saving configuration changes...")
 		if err := safeWriteKeys(changedKeys); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		for keyToRemove := range keysToRemove {
+			if err := safeRemoveKey(keyToRemove); err != nil {
+				return fmt.Errorf("failed to clean up legacy config key %s: %w", keyToRemove, err)
+			}
 		}
 
 		// Reload cache after save
@@ -697,6 +769,22 @@ func RemoveNIPMapping(kind string) error {
 	return reloadConfigCache()
 }
 
+// RemoveConfigKey removes a single configuration key from the YAML file and cache.
+func RemoveConfigKey(key string) error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	if err := safeRemoveKey(key); err != nil {
+		return err
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		return err
+	}
+
+	return reloadConfigCache()
+}
+
 // GetNIPForKind returns the NIP number for a given kind
 func GetNIPForKind(kind int) (int, error) {
 	kindStr := strconv.Itoa(kind)
@@ -819,7 +907,9 @@ func setDefaults() {
 	viper.SetDefault("relay.secret_key", "hornets-secret-key")
 	viper.SetDefault("relay.private_key", "")
 	viper.SetDefault("relay.public_key", "")
-	viper.SetDefault("relay.dht_key", "")
+	viper.SetDefault("relay.dht_seed", "")
+	viper.SetDefault("relay.dht_public_key", "")
+	viper.SetDefault("relay.dht_private_key", "")
 
 	// Content filtering defaults
 	viper.SetDefault("content_filtering.text_filter.enabled", true)
@@ -838,6 +928,7 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
+		72, 73, 74, 75, 76, 77, // Repository event kinds
 		443, 444, 445, // MIP kinds (MLS group messaging)
 		1059,                   // NIP-59 Gift Wrap (encrypted DMs)
 		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
@@ -853,7 +944,7 @@ func setDefaults() {
 		30023, 30078, 30079, // Long-form content kinds
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051", "kind72", "kind73", "kind74", "kind75", "kind76", "kind77", "kind16629", "kind16630"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -880,12 +971,10 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.media_definitions.binary.extensions", []string{".bin", ".dat", ".blob"})
 	viper.SetDefault("event_filtering.media_definitions.binary.max_size_mb", 100)
 
-	// Allowed users defaults - free mode for rapid testing
+	// Allowed users defaults - public relay for rapid testing
 	viper.SetDefault("allowed_users.mode", "public")
-	viper.SetDefault("allowed_users.read_access.enabled", true)
-	viper.SetDefault("allowed_users.read_access.scope", "all_users")
-	viper.SetDefault("allowed_users.write_access.enabled", true)
-	viper.SetDefault("allowed_users.write_access.scope", "all_users")
+	viper.SetDefault("allowed_users.read", "all_users")
+	viper.SetDefault("allowed_users.write", "all_users")
 	viper.SetDefault("allowed_users.last_updated", 0)
 	viper.SetDefault("allowed_users.batch_update_on_startup", false) // Disable batch update by default for performance
 
@@ -1065,17 +1154,21 @@ func GetAllSettingsAsMap() (map[string]interface{}, error) {
 
 	// Relay settings
 	settings["relay"] = map[string]interface{}{
-		"name":           cfg.Relay.Name,
-		"description":    cfg.Relay.Description,
-		"contact":        cfg.Relay.Contact,
-		"icon":           cfg.Relay.Icon,
-		"software":       cfg.Relay.Software,
-		"version":        cfg.Relay.Version,
-		"service_tag":    cfg.Relay.ServiceTag,
-		"supported_nips": cfg.Relay.SupportedNIPs,
-		"secret_key":     cfg.Relay.SecretKey,
-		"private_key":    cfg.Relay.PrivateKey,
-		"dht_key":        cfg.Relay.DHTKey,
+		"name":            cfg.Relay.Name,
+		"description":     cfg.Relay.Description,
+		"contact":         cfg.Relay.Contact,
+		"icon":            cfg.Relay.Icon,
+		"software":        cfg.Relay.Software,
+		"version":         cfg.Relay.Version,
+		"service_tag":     cfg.Relay.ServiceTag,
+		"supported_nips":  cfg.Relay.SupportedNIPs,
+		"secret_key":      cfg.Relay.SecretKey,
+		"private_key":     cfg.Relay.PrivateKey,
+		"public_key":      cfg.Relay.PublicKey,
+		"dht_seed":        cfg.Relay.DHTSeed,
+		"dht_public_key":  cfg.Relay.DHTPublicKey,
+		"dht_private_key": cfg.Relay.DHTPrivateKey,
+		"dht_key":         cfg.Relay.DHTSeed,
 	}
 
 	// Content filtering settings

@@ -336,6 +336,10 @@ func isValidHexPubkey(s string) bool {
 	return true
 }
 
+func isValidDHTPublicKey(s string) bool {
+	return isValidHexPubkey(s)
+}
+
 // validateRepoIdentifier validates a repository identifier which can be in one of three formats:
 // - GUID: UUID v4 format (e.g., "550e8400-e29b-41d4-a716-446655440000")
 // - Regular repo (legacy): "pubkey:reponame" where pubkey is a 64-char hex string
@@ -604,8 +608,12 @@ func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
 }
 
 // validateRelayTag validates the relay tag format.
-// Expected format: ws://<host>:<port>[/path], wss://<host>[/path], or nestr://<dht-key>
+// Expected format: ws://<host>:<port>[/path], wss://<host>[/path], nestr://<dht-key>, or a raw 64-char DHT public key.
 func validateRelayTag(relayURL string) string {
+	if isValidDHTPublicKey(relayURL) {
+		return ""
+	}
+
 	parsed, err := url.Parse(relayURL)
 	if err != nil {
 		return fmt.Sprintf("Invalid 'relay' tag: failed to parse URL: %s", err)
@@ -617,6 +625,16 @@ func validateRelayTag(relayURL string) string {
 
 	if parsed.Host == "" {
 		return "Invalid 'relay' tag: missing host"
+	}
+
+	if parsed.Scheme == "nestr" {
+		host := parsed.Hostname()
+		if !isValidDHTPublicKey(host) {
+			return "Invalid 'relay' tag: nestr relay address must contain a 64-character DHT public key"
+		}
+		if parsed.Port() != "" || parsed.Path != "" {
+			return "Invalid 'relay' tag: nestr relay address must be 'nestr://<dht-public-key>'"
+		}
 	}
 
 	return ""
