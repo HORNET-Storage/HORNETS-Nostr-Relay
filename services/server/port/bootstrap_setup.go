@@ -418,7 +418,7 @@ func renderBootstrapSetupPage(token string) string {
 			</div>
 			<div class="actions">
 				<button class="secondary" type="button" onclick="generateRelayKey()">Generate Relay Key</button>
-				<button class="ghost" type="button" onclick="validateSetup()">Validate</button>
+				<button class="ghost" type="button" onclick="skipSetup()">Skip Setup</button>
 				<button class="primary" type="button" onclick="applySetup()">Apply Setup</button>
 			</div>
 			<div id="status" class="status">Waiting for input...</div>
@@ -668,7 +668,7 @@ func renderBootstrapSetupPage(token string) string {
 			el("airlock_config_path").value = defaults.airlockConfigPath || "";
 
 			buildPayload();
-			setStatus("Defaults loaded. Add your relay identity and private key, then validate or apply.");
+			setStatus("Defaults loaded. Add your relay identity and private key, then apply setup.");
 		}
 
 		function generateRelayKey() {
@@ -697,14 +697,22 @@ func renderBootstrapSetupPage(token string) string {
 				const payload = buildPayload();
 				const { res, data } = await request("/setup/validate", "POST", payload);
 				setStatus(JSON.stringify({ status: res.status, result: data }, null, 2), res.ok);
+				return { ok: res.ok, payload, data };
 			} catch (error) {
 				setStatus(String(error), false);
+				return { ok: false, payload: null, data: { error: String(error) } };
 			}
 		}
 
 		async function applySetup() {
 			try {
-				const payload = buildPayload();
+				setStatus("Validating setup before applying...", true);
+				const validation = await validateSetup();
+				if (!validation.ok || !validation.payload) {
+					return;
+				}
+
+				const payload = validation.payload;
 				const { res, data } = await request("/setup/apply", "POST", payload);
 				setStatus(JSON.stringify({ status: res.status, result: data }, null, 2), res.ok);
 				if (res.ok) {
@@ -715,6 +723,15 @@ func renderBootstrapSetupPage(token string) string {
 			} catch (error) {
 				setStatus(String(error), false);
 			}
+		}
+
+		function skipSetup() {
+			setStatus("Setup skipped for now. It will appear again next time if the relay still needs setup.", true);
+			if (window.self !== window.top) {
+				window.parent.postMessage({ type: "hornets-relay-setup-skip" }, "*");
+				return;
+			}
+			window.close();
 		}
 
 		["input", "change"].forEach((eventName) => {
