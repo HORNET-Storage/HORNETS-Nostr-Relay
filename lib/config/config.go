@@ -874,7 +874,7 @@ func setDefaults() {
 	// Server defaults
 	viper.SetDefault("server.port", 11000)
 	viper.SetDefault("server.bind_address", "0.0.0.0")
-	viper.SetDefault("server.upnp", false)
+	viper.SetDefault("server.upnp", true)
 	viper.SetDefault("server.nostr", true)
 	viper.SetDefault("server.hornets", true)
 	viper.SetDefault("server.web", true)

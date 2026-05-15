@@ -26,6 +26,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sidecar"
 	"github.com/HORNET-Storage/hornet-storage/services/push"
+	hsClient "github.com/hornet-storage/hornets-hyperswarm/clients/go/hyperswarm"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 
@@ -130,17 +131,28 @@ func init() {
 
 	// Initialze upnp system if enabled
 	if viper.GetBool("server.upnp") {
-		upnp, err := upnp.Init(ctx)
+		upnpManager, err := upnp.Init(ctx)
 		if err != nil {
 			logging.Error("UPnP init failed", map[string]interface{}{
 				"error": err,
 			})
+			return
+		}
+		if upnpManager == nil {
+			logging.Error("UPnP init failed", map[string]interface{}{
+				"error": "no UPnP router discovered",
+			})
+			return
 		}
 
-		ip, err := upnp.ExternalIP()
+		ip, err := upnpManager.ExternalIP()
 		if err == nil {
 			logging.Info("UPnP External IP", map[string]interface{}{
 				"ip": ip,
+			})
+		} else {
+			logging.Error("Failed to get UPnP external IP", map[string]interface{}{
+				"error": err,
 			})
 		}
 	}
@@ -174,6 +186,49 @@ func syncAirlockServiceDHTPubkey() (string, error) {
 	}
 
 	return deriveAirlockDHTPublicKeyFromPrivateKey(privateKey)
+}
+
+func forwardSidecarDHTPort(client *hsClient.Client) func() {
+	if !viper.GetBool("server.upnp") {
+		return func() {}
+	}
+
+	upnpManager := upnp.Get()
+	if upnpManager == nil {
+		logging.Warn("UPnP is enabled but no router was discovered for HyperDHT port mapping", nil)
+		return func() {}
+	}
+
+	status, err := client.Status()
+	if err != nil {
+		logging.Error("Failed to read sidecar status for HyperDHT UPnP mapping", map[string]interface{}{
+			"error": err,
+		})
+		return func() {}
+	}
+	if status == nil || status.DHT == nil || status.DHT.Port <= 0 || status.DHT.Port > 65535 {
+		logging.Warn("Sidecar HyperDHT port unavailable for UPnP mapping", map[string]interface{}{
+			"status": status,
+		})
+		return func() {}
+	}
+
+	port := uint16(status.DHT.Port)
+	if err := upnpManager.ForwardPort(port, "Hornet Storage HyperDHT"); err != nil {
+		logging.Error("Failed to forward HyperDHT port using UPnP", map[string]interface{}{
+			"port":  port,
+			"error": err,
+		})
+		return func() {}
+	}
+
+	logging.Info("Forwarded HyperDHT port using UPnP", map[string]interface{}{
+		"port": port,
+	})
+
+	return func() {
+		upnpManager.RemovePort(port)
+	}
 }
 
 func main() {
@@ -420,6 +475,8 @@ func main() {
 		})
 	}
 	defer sidecar.Close()
+	cleanupDHTUPnP := forwardSidecarDHTPort(hsClient)
+	defer cleanupDHTUPnP()
 
 	listener := hsListener.NewHyperswarmListener(hsClient)
 	defer listener.Close()

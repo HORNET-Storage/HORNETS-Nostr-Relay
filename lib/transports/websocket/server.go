@@ -256,6 +256,8 @@ func BuildBlossomServer(store stores.Store) *fiber.App {
 func StartBlossomServer(app *fiber.App) error {
 	address := viper.GetString("server.address")
 	port := config.GetPort("blossom")
+	cleanupUPnP := forwardPortIfEnabled(port, "Hornet Storage Blossom")
+	defer cleanupUPnP()
 
 	logging.Info("Starting Blossom server", map[string]interface{}{
 		"address": address,
@@ -265,17 +267,6 @@ func StartBlossomServer(app *fiber.App) error {
 	err := app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
 		logging.Fatalf("error starting blossom server: %v\n", err)
-	}
-
-	if viper.GetBool("server.upnp") {
-		upnp := upnp.Get()
-
-		err := upnp.ForwardPort(uint16(port), "Hornet Storage Blossom")
-		if err != nil {
-			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
-				"port": port,
-			})
-		}
 	}
 
 	return err
@@ -290,24 +281,46 @@ func StartServer(app *fiber.App) error {
 
 	address := viper.GetString("server.address")
 	port := config.GetPort("nostr")
+	cleanupUPnP := forwardPortIfEnabled(port, "Hornet Storage Nostr Relay")
+	defer cleanupUPnP()
 
 	err = app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
 		logging.Fatalf("error starting nostr server: %v\n", err)
 	}
 
-	if viper.GetBool("server.upnp") {
-		upnp := upnp.Get()
+	return err
+}
 
-		err := upnp.ForwardPort(uint16(port), "Hornet Storage Nostr Relay")
-		if err != nil {
-			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
-				"port": port,
-			})
-		}
+func forwardPortIfEnabled(port int, description string) func() {
+	if !viper.GetBool("server.upnp") {
+		return func() {}
 	}
 
-	return err
+	upnpManager := upnp.Get()
+	if upnpManager == nil {
+		logging.Warn("UPnP is enabled but no router was discovered", map[string]interface{}{
+			"port": port,
+		})
+		return func() {}
+	}
+
+	if err := upnpManager.ForwardPort(uint16(port), description); err != nil {
+		logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+			"port":  port,
+			"error": err,
+		})
+		return func() {}
+	}
+
+	logging.Info("Forwarded port using UPnP", map[string]interface{}{
+		"port":        port,
+		"description": description,
+	})
+
+	return func() {
+		upnpManager.RemovePort(uint16(port))
+	}
 }
 
 func handleRelayInfoRequests(c *fiber.Ctx) error {

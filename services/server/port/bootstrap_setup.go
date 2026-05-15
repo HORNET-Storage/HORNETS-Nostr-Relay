@@ -240,6 +240,21 @@ func renderBootstrapSetupPage(token string) string {
 			display: grid;
 			gap: 10px;
 		}
+		.check-field {
+			gap: 8px;
+		}
+		.check-row {
+			display: inline-flex;
+			align-items: center;
+			gap: 10px;
+			color: var(--text);
+			font-weight: 700;
+		}
+		.check-row input {
+			width: auto;
+			margin: 0;
+			accent-color: var(--accent);
+		}
 		h2,
 		h3 {
 			margin: 0 0 10px;
@@ -431,6 +446,13 @@ func renderBootstrapSetupPage(token string) string {
 				<section class="subcard">
 					<h3>Relay Overrides</h3>
 					<div class="form-grid">
+						<div class="field full check-field">
+							<label class="check-row" for="relay_upnp">
+								<input id="relay_upnp" type="checkbox">
+								<span>Enable UPnP port mapping</span>
+							</label>
+							<div class="hint">Recommended for home-hosted relays. Disable if your network is manually configured or managed externally.</div>
+						</div>
 						<div class="field">
 							<label for="relay_service_tag">Service tag</label>
 							<input id="relay_service_tag" placeholder="hornet-storage-service">
@@ -583,6 +605,7 @@ func renderBootstrapSetupPage(token string) string {
 			const airlock = JSON.parse(JSON.stringify(defaults.airlockConfig || {}));
 
 			relay.relay = relay.relay || {};
+			relay.server = relay.server || {};
 			airlock.sidecar = airlock.sidecar || {};
 
 			const relayPrivateKey = el("relay_private_key").value.trim();
@@ -597,6 +620,7 @@ func renderBootstrapSetupPage(token string) string {
 			relay.relay.public_key = el("relay_public_key").value.trim();
 			relay.relay.dht_seed = el("relay_dht_seed").value.trim();
 			relay.relay.secret_key = generatedSecret;
+			relay.server.upnp = Boolean(el("relay_upnp").checked);
 
 			const airlockPort = el("airlock_port").value.trim();
 			airlock.bind_address = el("airlock_bind_address").value.trim() || airlock.bind_address || "0.0.0.0";
@@ -643,6 +667,7 @@ func renderBootstrapSetupPage(token string) string {
 			defaults = await res.json();
 
 			const relay = defaults.relayConfig?.relay || {};
+			const server = defaults.relayConfig?.server || {};
 			const airlock = defaults.airlockConfig || {};
 
 			generatedRelaySecret = sanitizeSeededValue(relay.secret_key, EXAMPLE_RELAY_SECRET_KEY) || randomHex(32);
@@ -656,6 +681,7 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_public_key").value = sanitizeSeededValue(relay.public_key, EXAMPLE_RELAY_PUBLIC_KEY);
 			el("relay_dht_seed").value = sanitizeSeededValue(relay.dht_seed || relay.dht_key, EXAMPLE_RELAY_DHT_SEED);
 			el("relay_secret_key").value = generatedRelaySecret;
+			el("relay_upnp").checked = typeof server.upnp === "boolean" ? server.upnp : true;
 
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";
 			el("airlock_port").value = String(airlock.port || 11006);
