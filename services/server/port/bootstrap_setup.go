@@ -13,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -23,6 +25,7 @@ type setupPayload struct {
 	RelayConfig       map[string]interface{} `json:"relayConfig"`
 	AirlockConfig     map[string]interface{} `json:"airlockConfig"`
 	AirlockConfigPath string                 `json:"airlockConfigPath"`
+	RelayOwnerPubkey  string                 `json:"relayOwnerPubkey"`
 }
 
 func setupMarkerPath() string {
@@ -117,6 +120,159 @@ func ensureNestedMap(parent map[string]interface{}, key string) map[string]inter
 	nested := map[string]interface{}{}
 	parent[key] = nested
 	return nested
+}
+
+func stringSetting(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func boolSetting(value interface{}) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes", "on":
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeBootstrapAccessMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "only_me":
+		return "only-me"
+	case "invite_only":
+		return "invite-only"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
+	if relayConfig == nil {
+		return nil
+	}
+
+	allowedUsers := ensureNestedMap(relayConfig, "allowed_users")
+	mode := normalizeBootstrapAccessMode(stringSetting(allowedUsers["mode"]))
+	if mode == "" {
+		mode = "invite-only"
+	}
+
+	switch mode {
+	case "invite-only":
+		allowedUsers["mode"] = "invite-only"
+		allowedUsers["read"] = "all_users"
+		allowedUsers["write"] = "allowed_users"
+		allowedUsers["auto_add_repo_collaborators"] = boolSetting(allowedUsers["auto_add_repo_collaborators"])
+	case "only-me":
+		allowedUsers["mode"] = "only-me"
+		allowedUsers["read"] = "only-me"
+		allowedUsers["write"] = "only-me"
+		allowedUsers["auto_add_repo_collaborators"] = false
+	default:
+		return fmt.Errorf("bootstrap access mode must be invite-only or only-me")
+	}
+
+	allowedUsers["last_updated"] = time.Now().Unix()
+	return nil
+}
+
+func deriveRelayPublicKeyFromPrivateKey(privateKey string) (string, error) {
+	_, publicKey, err := signing.DeserializePrivateKey(strings.TrimSpace(privateKey))
+	if err != nil {
+		return "", fmt.Errorf("invalid relay private key: %w", err)
+	}
+
+	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize relay public key: %w", err)
+	}
+
+	return *serializedPublicKey, nil
+}
+
+func normalizeRelayOwnerPubkey(value string, defaultPubkey string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return defaultPubkey, nil
+	}
+
+	publicKey, err := signing.DeserializePublicKey(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid relay owner public key: %w", err)
+	}
+
+	serializedPublicKey, err := signing.SerializePublicKey(publicKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize relay owner public key: %w", err)
+	}
+
+	return *serializedPublicKey, nil
+}
+
+func relayDataPath(relayConfig map[string]interface{}) string {
+	serverCfg, _ := relayConfig["server"].(map[string]interface{})
+	dataPath := stringSetting(serverCfg["data_path"])
+	if dataPath == "" {
+		return "./data"
+	}
+	return dataPath
+}
+
+func persistBootstrapRelayOwner(relayConfig map[string]interface{}, relayOwnerPubkey string) error {
+	if strings.TrimSpace(relayOwnerPubkey) == "" {
+		return nil
+	}
+
+	statsDBPath := filepath.Join(relayDataPath(relayConfig), "statistics", "statistics.db")
+	statsStore, err := statistics_gorm_sqlite.InitStore(statsDBPath)
+	if err != nil {
+		return err
+	}
+	defer statsStore.Close()
+
+	return statsStore.SetRelayOwner(relayOwnerPubkey, "bootstrap_setup")
+}
+
+func prepareBootstrapSetupPayload(payload *setupPayload) error {
+	if payload.RelayConfig == nil {
+		payload.RelayConfig = map[string]interface{}{}
+	}
+	if payload.AirlockConfig == nil {
+		payload.AirlockConfig = map[string]interface{}{}
+	}
+
+	if err := syncBootstrapAccessSettings(payload.RelayConfig); err != nil {
+		return err
+	}
+
+	relayCfg, _ := payload.RelayConfig["relay"].(map[string]interface{})
+	privateKey := stringSetting(relayCfg["private_key"])
+	if privateKey == "" {
+		return fmt.Errorf("relay.private_key is required")
+	}
+
+	derivedRelayPubkey, err := deriveRelayPublicKeyFromPrivateKey(privateKey)
+	if err != nil {
+		return err
+	}
+	if stringSetting(relayCfg["public_key"]) == "" {
+		relayCfg["public_key"] = derivedRelayPubkey
+	}
+
+	relayOwnerPubkey, err := normalizeRelayOwnerPubkey(payload.RelayOwnerPubkey, derivedRelayPubkey)
+	if err != nil {
+		return err
+	}
+	payload.RelayOwnerPubkey = relayOwnerPubkey
+
+	return syncAirlockDHTPubkeyIntoRelayConfig(payload.RelayConfig, payload.AirlockConfig)
 }
 
 func syncAirlockDHTPubkeyIntoRelayConfig(relayConfig map[string]interface{}, airlockConfig map[string]interface{}) error {
@@ -254,6 +410,30 @@ func renderBootstrapSetupPage(token string) string {
 			width: auto;
 			margin: 0;
 			accent-color: var(--accent);
+		}
+		.mode-grid {
+			display: grid;
+			gap: 10px;
+			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		}
+		.mode-option {
+			display: grid;
+			gap: 6px;
+			padding: 12px;
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			background: rgba(15, 23, 34, 0.7);
+			cursor: pointer;
+		}
+		.mode-option input {
+			width: auto;
+			margin: 0;
+			accent-color: var(--accent);
+		}
+		.mode-option strong {
+			display: flex;
+			align-items: center;
+			gap: 8px;
 		}
 		h2,
 		h3 {
@@ -430,6 +610,30 @@ func renderBootstrapSetupPage(token string) string {
 					<input id="relay_private_key" class="key-input" placeholder="hex or nsec key used to identify this relay">
 					<div class="tip">Airlock will reuse this key automatically unless you set a separate Airlock key in Advanced.</div>
 				</div>
+				<div class="field full subcard">
+					<h3>Relay access</h3>
+					<div class="mode-grid">
+						<label class="mode-option">
+							<strong><input name="access_mode" type="radio" value="invite-only" checked> Invite only</strong>
+							<span class="hint">Anyone can read, invited users can write.</span>
+						</label>
+						<label class="mode-option">
+							<strong><input name="access_mode" type="radio" value="only-me"> Only me</strong>
+							<span class="hint">Only the relay owner can read or write.</span>
+						</label>
+					</div>
+					<div class="field">
+						<label for="relay_owner_pubkey">Relay owner public key</label>
+						<input id="relay_owner_pubkey" class="key-input" placeholder="leave blank to use the relay private key's public key">
+					</div>
+					<div class="field check-field" id="repo_collaborators_field">
+						<label class="check-row" for="auto_add_repo_collaborators">
+							<input id="auto_add_repo_collaborators" type="checkbox">
+							<span>Auto-add repository collaborators to write access</span>
+						</label>
+						<div class="hint">Write and maintainer collaborators are added when repository metadata is published. Removals stay manual.</div>
+					</div>
+				</div>
 			</div>
 			<div class="actions">
 				<button class="secondary" type="button" onclick="generateRelayKey()">Generate Relay Key</button>
@@ -600,6 +804,43 @@ func renderBootstrapSetupPage(token string) string {
 			}
 		}
 
+		function selectedAccessMode() {
+			return document.querySelector('input[name="access_mode"]:checked')?.value || "invite-only";
+		}
+
+		function setAccessMode(mode) {
+			const normalized = mode === "only-me" ? "only-me" : "invite-only";
+			const input = document.querySelector('input[name="access_mode"][value="' + normalized + '"]');
+			if (input) {
+				input.checked = true;
+			}
+			updateAccessControls();
+		}
+
+		function syncAccessSettings(relay) {
+			relay.allowed_users = relay.allowed_users || {};
+			const mode = selectedAccessMode();
+			relay.allowed_users.mode = mode;
+			if (mode === "only-me") {
+				relay.allowed_users.read = "only-me";
+				relay.allowed_users.write = "only-me";
+				relay.allowed_users.auto_add_repo_collaborators = false;
+			} else {
+				relay.allowed_users.read = "all_users";
+				relay.allowed_users.write = "allowed_users";
+				relay.allowed_users.auto_add_repo_collaborators = Boolean(el("auto_add_repo_collaborators").checked);
+			}
+		}
+
+		function updateAccessControls() {
+			const inviteOnly = selectedAccessMode() === "invite-only";
+			el("auto_add_repo_collaborators").disabled = !inviteOnly;
+			el("repo_collaborators_field").style.opacity = inviteOnly ? "1" : "0.58";
+			if (!inviteOnly) {
+				el("auto_add_repo_collaborators").checked = false;
+			}
+		}
+
 		function buildPayload() {
 			const relay = JSON.parse(JSON.stringify(defaults.relayConfig || {}));
 			const airlock = JSON.parse(JSON.stringify(defaults.airlockConfig || {}));
@@ -634,11 +875,13 @@ func renderBootstrapSetupPage(token string) string {
 
 			deepMerge(relay, parseOverride("relay_overrides"));
 			deepMerge(airlock, parseOverride("airlock_overrides"));
+			syncAccessSettings(relay);
 
 			const payload = {
 				relayConfig: relay,
 				airlockConfig: airlock,
-				airlockConfigPath: el("airlock_config_path").value.trim() || defaults.airlockConfigPath || ""
+				airlockConfigPath: el("airlock_config_path").value.trim() || defaults.airlockConfigPath || "",
+				relayOwnerPubkey: el("relay_owner_pubkey").value.trim()
 			};
 
 			el("payload_preview").value = JSON.stringify(payload, null, 2);
@@ -668,6 +911,7 @@ func renderBootstrapSetupPage(token string) string {
 
 			const relay = defaults.relayConfig?.relay || {};
 			const server = defaults.relayConfig?.server || {};
+			const allowedUsers = defaults.relayConfig?.allowed_users || {};
 			const airlock = defaults.airlockConfig || {};
 
 			generatedRelaySecret = sanitizeSeededValue(relay.secret_key, EXAMPLE_RELAY_SECRET_KEY) || randomHex(32);
@@ -682,6 +926,9 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_dht_seed").value = sanitizeSeededValue(relay.dht_seed || relay.dht_key, EXAMPLE_RELAY_DHT_SEED);
 			el("relay_secret_key").value = generatedRelaySecret;
 			el("relay_upnp").checked = typeof server.upnp === "boolean" ? server.upnp : true;
+			el("relay_owner_pubkey").value = sanitizeSeededValue(defaults.relayOwnerPubkey || relay.public_key, EXAMPLE_RELAY_PUBLIC_KEY);
+			el("auto_add_repo_collaborators").checked = Boolean(allowedUsers.auto_add_repo_collaborators);
+			setAccessMode(["invite-only", "only-me"].includes(allowedUsers.mode) ? allowedUsers.mode : "invite-only");
 
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";
 			el("airlock_port").value = String(airlock.port || 11006);
@@ -701,6 +948,7 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_private_key").value = randomHex(32);
 			el("relay_public_key").value = "";
 			el("relay_dht_seed").value = "";
+			el("relay_owner_pubkey").value = "";
 			buildPayload();
 			setStatus("Generated a relay private key. Public and DHT keys will be derived automatically.");
 		}
@@ -763,6 +1011,7 @@ func renderBootstrapSetupPage(token string) string {
 		["input", "change"].forEach((eventName) => {
 			document.addEventListener(eventName, () => {
 				try {
+					updateAccessControls();
 					buildPayload();
 				} catch {
 					// Ignore partial form state while the user is typing.
@@ -838,25 +1087,17 @@ func runBootstrapSetup(ctx context.Context, host string, port int) error {
 		if err := c.BodyParser(&payload); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
 		}
-		if payload.RelayConfig == nil {
-			payload.RelayConfig = map[string]interface{}{}
-		}
-		if payload.AirlockConfig == nil {
-			payload.AirlockConfig = map[string]interface{}{}
-		}
-		relayCfg, _ := payload.RelayConfig["relay"].(map[string]interface{})
-		priv := strings.TrimSpace(fmt.Sprint(relayCfg["private_key"]))
-		if priv == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": "relay.private_key is required"})
-		}
-		if err := syncAirlockDHTPubkeyIntoRelayConfig(payload.RelayConfig, payload.AirlockConfig); err != nil {
+		if err := prepareBootstrapSetupPayload(&payload); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"ok": false, "error": err.Error()})
 		}
+		allowedUsers, _ := payload.RelayConfig["allowed_users"].(map[string]interface{})
 
 		return c.JSON(fiber.Map{
 			"ok":                  true,
 			"relay_config_keys":   len(payload.RelayConfig),
 			"airlock_config_keys": len(payload.AirlockConfig),
+			"access_mode":         allowedUsers["mode"],
+			"relay_owner_pubkey":  payload.RelayOwnerPubkey,
 		})
 	})
 
@@ -865,13 +1106,7 @@ func runBootstrapSetup(ctx context.Context, host string, port int) error {
 		if err := c.BodyParser(&payload); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid payload"})
 		}
-		if payload.RelayConfig == nil {
-			payload.RelayConfig = map[string]interface{}{}
-		}
-		if payload.AirlockConfig == nil {
-			payload.AirlockConfig = map[string]interface{}{}
-		}
-		if err := syncAirlockDHTPubkeyIntoRelayConfig(payload.RelayConfig, payload.AirlockConfig); err != nil {
+		if err := prepareBootstrapSetupPayload(&payload); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -889,6 +1124,10 @@ func runBootstrapSetup(ctx context.Context, host string, port int) error {
 			if err := writeYAMLAtomic(path, payload.AirlockConfig); err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 			}
+		}
+
+		if err := persistBootstrapRelayOwner(payload.RelayConfig, payload.RelayOwnerPubkey); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		if err := writeSetupMarker(); err != nil {

@@ -11,12 +11,19 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
+	nostr_auth "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr/auth"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 )
+
+type dhtAuthState struct {
+	pubkey        string
+	authenticated bool
+}
 
 // AddNostrRelayHandler registers the /nostr protocol on the hyperswarm listener.
 // This creates a single bidirectional stream per client that speaks full Nostr
@@ -49,6 +56,7 @@ func buildNostrStreamHandler(store stores.Store) hsListener.StreamHandler {
 		}
 
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
+		authState := &dhtAuthState{}
 		scanner := bufio.NewScanner(stream)
 		// Allow messages up to 2MB (matches go-nostr's 33MB but reasonable for DHT)
 		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
@@ -163,7 +171,7 @@ func buildNostrStreamHandler(store stores.Store) hsListener.StreamHandler {
 
 			case *nostr.ReqEnvelope:
 				logging.Infof("/nostr: REQ sub=%s filters=%d", env.SubscriptionID, len(env.Filters))
-				handleReq(env, writeFn, json)
+				handleReq(env, writeFn, json, authState)
 
 			case *nostr.CountEnvelope:
 				handleCount(env, writeFn, json)
@@ -173,7 +181,12 @@ func buildNostrStreamHandler(store stores.Store) hsListener.StreamHandler {
 
 			case *nostr.AuthEnvelope:
 				logging.Infof("/nostr: AUTH received, event_id=%s", env.Event.ID[:16])
-				writeFn("OK", env.Event.ID, true, "")
+				result, message, ok := nostr_auth.AuthenticateEvent(&env.Event, challenge, store, ws.GetAccessControl())
+				if ok {
+					authState.pubkey = result.PubKey
+					authState.authenticated = true
+				}
+				writeFn("OK", env.Event.ID, ok, message)
 
 			default:
 				logging.Infof("/nostr: unhandled envelope type %T", envelope)
@@ -198,6 +211,14 @@ func handleEvent(env *nostr.EventEnvelope, writeFn lib_nostr.KindWriter, store s
 		} else if isBlocked {
 			logging.Infof("/nostr: rejected event from blocked pubkey: %s", env.Event.PubKey)
 			writeFn("OK", env.Event.ID, false, "Event rejected: Pubkey is blocked")
+			return
+		}
+	}
+
+	if accessControl := ws.GetAccessControl(); accessControl != nil {
+		if err := accessControl.CanWrite(env.Event.PubKey); err != nil {
+			logging.Infof("/nostr: write access denied for pubkey: %s", env.Event.PubKey)
+			writeFn("OK", env.Event.ID, false, "Event rejected: Write access denied")
 			return
 		}
 	}
@@ -234,15 +255,13 @@ func handleEvent(env *nostr.EventEnvelope, writeFn lib_nostr.KindWriter, store s
 }
 
 // handleReq dispatches a REQ message to the filter handler.
-func handleReq(env *nostr.ReqEnvelope, writeFn lib_nostr.KindWriter, json jsoniter.API) {
+func handleReq(env *nostr.ReqEnvelope, writeFn lib_nostr.KindWriter, json jsoniter.API, authState *dhtAuthState) {
 	handler := lib_nostr.GetHandler("filter")
 	if handler == nil {
 		writeFn("NOTICE", "Filter handler not available")
 		return
 	}
 
-	// Wrap the request in the same structure the WS filter handler expects.
-	// DHT connections don't have per-connection auth state, so we pass empty auth.
 	read := func() ([]byte, error) {
 		wrapper := struct {
 			Request         *nostr.ReqEnvelope `json:"request"`
@@ -250,8 +269,8 @@ func handleReq(env *nostr.ReqEnvelope, writeFn lib_nostr.KindWriter, json jsonit
 			IsAuthenticated bool               `json:"is_authenticated"`
 		}{
 			Request:         env,
-			AuthPubkey:      "",
-			IsAuthenticated: false,
+			AuthPubkey:      authState.pubkey,
+			IsAuthenticated: authState.authenticated,
 		}
 		return json.Marshal(wrapper)
 	}

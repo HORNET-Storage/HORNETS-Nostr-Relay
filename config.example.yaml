@@ -1,4 +1,5 @@
 allowed_users:
+    auto_add_repo_collaborators: false
     batch_update_on_startup: false
     last_updated: 0
     mode: public
@@ -276,7 +277,7 @@ relay:
 server:
     bind_address: 0.0.0.0
     port: 11000
-    upnp: false
+    upnp: true
     data_path: ./data
     demo: false
     hornets: true

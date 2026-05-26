@@ -50,6 +50,8 @@ func (ac *AccessControl) CanWrite(npub string) error {
 }
 
 func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
+	readOrWrite = normalizeAccessSetting(readOrWrite)
+
 	// Everyone is allowed if all_users is set
 	if readOrWrite == "all_users" {
 		return nil
@@ -93,6 +95,10 @@ func (ac *AccessControl) isAllowedUncached(readOrWrite string, hex string) error
 	if ac.isOwner(hex) {
 		logging.Debugf("[ACCESS CONTROL] User %s is the relay owner, granting access", hex)
 		return nil
+	}
+
+	if readOrWrite == "only-me" {
+		return fmt.Errorf("user does not have permission")
 	}
 
 	// Get the allowed user from the database
@@ -212,9 +218,9 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 	}
 
 	// Validate mode
-	mode := strings.ToLower(settings.Mode)
-	read := strings.ToLower(settings.Read)
-	write := strings.ToLower(settings.Write)
+	mode := normalizeAccessSetting(settings.Mode)
+	read := normalizeAccessSetting(settings.Read)
+	write := normalizeAccessSetting(settings.Write)
 
 	logging.Debugf("Write setting %s", write)
 	// This ensures the correct options are selected for each mode and sets defaults when incorrect values are set
@@ -262,6 +268,18 @@ func (ac *AccessControl) ValidateSettings(settings *types.AllowedUsersSettings) 
 	settings.Write = write
 
 	return nil
+}
+
+func normalizeAccessSetting(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "only_me":
+		return "only-me"
+	case "invite_only":
+		return "invite-only"
+	default:
+		return normalized
+	}
 }
 
 // GetSettings returns the current access control settings

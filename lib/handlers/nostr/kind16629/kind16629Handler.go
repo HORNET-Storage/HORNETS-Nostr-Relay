@@ -8,9 +8,11 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -148,6 +150,8 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			logging.Infof("[Kind16629] Deleted %d old events for r tag: %s", deletedCount, rTag)
 		}
 
+		maybeAutoAddRepoCollaboratorsAsync(store, &env.Event, ownerPubkey)
+
 		// Successfully processed event
 		write("OK", env.Event.ID, true, "Event stored successfully")
 	}
@@ -163,6 +167,113 @@ func getTagValue(tags nostr.Tags, key string) string {
 		}
 	}
 	return ""
+}
+
+func maybeAutoAddRepoCollaboratorsAsync(store stores.Store, event *nostr.Event, ownerPubkey string) {
+	settings, err := config.GetAllowedUsersSettings()
+	if err != nil {
+		logging.Infof("[Kind16629] Skipping repo collaborator auto-add: failed to load allowed_users settings: %v", err)
+		return
+	}
+
+	if !settings.AutoAddRepoCollaborators || normalizeAccessValue(settings.Mode) != "invite-only" || normalizeAccessValue(settings.Write) != "allowed_users" {
+		return
+	}
+
+	go autoAddRepoCollaboratorsForEvent(store, event, ownerPubkey)
+}
+
+func autoAddRepoCollaboratorsForEvent(store stores.Store, event *nostr.Event, ownerPubkey string) {
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		logging.Infof("[Kind16629] Skipping repo collaborator auto-add: statistics store not available")
+		return
+	}
+
+	owner, err := statsStore.GetRelayOwner()
+	if err != nil || owner == nil {
+		logging.Infof("[Kind16629] Skipping repo collaborator auto-add: relay owner not configured: %v", err)
+		return
+	}
+
+	relayOwner := strings.ToLower(owner.Npub)
+	if relayOwner == "" || strings.ToLower(ownerPubkey) != relayOwner || strings.ToLower(event.PubKey) != relayOwner {
+		return
+	}
+
+	collaborators := collectWriteCollaborators(event.Tags, relayOwner)
+	if len(collaborators) == 0 {
+		return
+	}
+
+	autoAddRepoCollaborators(store, collaborators, event.ID)
+}
+
+func normalizeAccessValue(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "only_me":
+		return "only-me"
+	case "invite_only":
+		return "invite-only"
+	default:
+		return normalized
+	}
+}
+
+func collectWriteCollaborators(tags nostr.Tags, relayOwner string) []string {
+	seen := make(map[string]struct{})
+	for _, tag := range tags {
+		if len(tag) < 3 || tag[0] != "p" {
+			continue
+		}
+
+		role := tag[2]
+		if role != "write" && role != "maintainer" {
+			continue
+		}
+
+		pubkey := strings.ToLower(tag[1])
+		if pubkey == relayOwner || !isValidHexPubkey(pubkey) {
+			continue
+		}
+
+		seen[pubkey] = struct{}{}
+	}
+
+	collaborators := make([]string, 0, len(seen))
+	for pubkey := range seen {
+		collaborators = append(collaborators, pubkey)
+	}
+	return collaborators
+}
+
+func autoAddRepoCollaborators(store stores.Store, collaborators []string, eventID string) {
+	statsStore := store.GetStatsStore()
+	if statsStore == nil {
+		return
+	}
+
+	addedCount := 0
+	for _, collaborator := range collaborators {
+		if existing, err := statsStore.GetAllowedUser(collaborator); err == nil && existing != nil {
+			continue
+		}
+
+		if err := statsStore.AddAllowedUser(collaborator, "", "repo-collaborator-auto-add"); err != nil {
+			logging.Infof("[Kind16629] Failed to auto-add repo collaborator %s from event %s: %v", collaborator, eventID, err)
+			continue
+		}
+
+		addedCount++
+	}
+
+	if addedCount > 0 {
+		if accessControl := websocket.GetAccessControl(); accessControl != nil {
+			accessControl.InvalidateCache()
+		}
+		logging.Infof("[Kind16629] Auto-added %d repo collaborator(s) to relay write access from event %s", addedCount, eventID)
+	}
 }
 
 // parseOwnership determines if the repo is org-owned and extracts the owner pubkey.

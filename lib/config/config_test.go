@@ -31,6 +31,7 @@ func TestNormalizeAllowedUsersConfigValuesKeepsFlatValues(t *testing.T) {
 
 	viper.Set("allowed_users.read", "allowed_users")
 	viper.Set("allowed_users.write", "only_me")
+	viper.Set("allowed_users.mode", "invite_only")
 	viper.Set("allowed_users.read_access.scope", "all_users")
 	viper.Set("allowed_users.write_access.scope", "paid_users")
 
@@ -40,8 +41,12 @@ func TestNormalizeAllowedUsersConfigValuesKeepsFlatValues(t *testing.T) {
 		t.Fatalf("expected flat allowed_users.read to be preserved, got %q", got)
 	}
 
-	if got := viper.GetString("allowed_users.write"); got != "only_me" {
-		t.Fatalf("expected flat allowed_users.write to be preserved, got %q", got)
+	if got := viper.GetString("allowed_users.write"); got != "only-me" {
+		t.Fatalf("expected flat allowed_users.write to be normalized to only-me, got %q", got)
+	}
+
+	if got := viper.GetString("allowed_users.mode"); got != "invite-only" {
+		t.Fatalf("expected flat allowed_users.mode to be normalized to invite-only, got %q", got)
 	}
 }
 

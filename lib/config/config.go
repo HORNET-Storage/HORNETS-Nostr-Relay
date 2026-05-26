@@ -138,6 +138,33 @@ func normalizeAllowedUsersConfigValues() {
 			viper.Set("allowed_users.write", legacyWrite)
 		}
 	}
+
+	normalizeAllowedUsersConfigKey("allowed_users.mode")
+	normalizeAllowedUsersConfigKey("allowed_users.read")
+	normalizeAllowedUsersConfigKey("allowed_users.write")
+}
+
+func normalizeAllowedUsersConfigKey(key string) {
+	value := strings.TrimSpace(viper.GetString(key))
+	if value == "" {
+		return
+	}
+
+	normalized := normalizeAllowedUsersConfigValue(value)
+	if normalized != value {
+		viper.Set(key, normalized)
+	}
+}
+
+func normalizeAllowedUsersConfigValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "only_me":
+		return "only-me"
+	case "invite_only":
+		return "invite-only"
+	default:
+		return value
+	}
 }
 
 func normalizeRelayDHTConfigValues() {
@@ -975,6 +1002,7 @@ func setDefaults() {
 	viper.SetDefault("allowed_users.mode", "public")
 	viper.SetDefault("allowed_users.read", "all_users")
 	viper.SetDefault("allowed_users.write", "all_users")
+	viper.SetDefault("allowed_users.auto_add_repo_collaborators", false)
 	viper.SetDefault("allowed_users.last_updated", 0)
 	viper.SetDefault("allowed_users.batch_update_on_startup", false) // Disable batch update by default for performance
 
@@ -1208,11 +1236,12 @@ func GetAllSettingsAsMap() (map[string]interface{}, error) {
 
 	// Allowed users settings
 	settings["allowed_users"] = map[string]interface{}{
-		"mode":         cfg.AllowedUsersSettings.Mode,
-		"read":         cfg.AllowedUsersSettings.Read,
-		"write":        cfg.AllowedUsersSettings.Write,
-		"tiers":        cfg.AllowedUsersSettings.Tiers,
-		"last_updated": cfg.AllowedUsersSettings.LastUpdated,
+		"mode":                        cfg.AllowedUsersSettings.Mode,
+		"read":                        cfg.AllowedUsersSettings.Read,
+		"write":                       cfg.AllowedUsersSettings.Write,
+		"auto_add_repo_collaborators": cfg.AllowedUsersSettings.AutoAddRepoCollaborators,
+		"tiers":                       cfg.AllowedUsersSettings.Tiers,
+		"last_updated":                cfg.AllowedUsersSettings.LastUpdated,
 	}
 
 	// Push notifications settings

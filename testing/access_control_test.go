@@ -167,3 +167,53 @@ func TestAccessControl_AcceptsValidHexPubkey(t *testing.T) {
 		t.Errorf("Valid hex key was rejected as invalid format")
 	}
 }
+
+func TestAccessControl_OnlyMeAllowsOwnerOnly(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	owner, _ := helpers.GenerateKeyPair()
+	allowedUser, _ := helpers.GenerateKeyPair()
+
+	statsStore := store.GetStatsStore()
+	if err := statsStore.SetRelayOwner(owner.PublicKey, "test"); err != nil {
+		t.Fatalf("failed to set relay owner: %v", err)
+	}
+	if err := statsStore.AddAllowedUser(allowedUser.PublicKey, "", "test"); err != nil {
+		t.Fatalf("failed to add allowed user: %v", err)
+	}
+
+	settings := &types.AllowedUsersSettings{
+		Mode:  "only-me",
+		Read:  "only-me",
+		Write: "only-me",
+	}
+	ac := access.NewAccessControl(statsStore, settings)
+
+	if err := ac.CanWrite(owner.PublicKey); err != nil {
+		t.Fatalf("expected relay owner to write in only-me mode, got: %v", err)
+	}
+	if err := ac.CanWrite(allowedUser.PublicKey); err == nil {
+		t.Fatal("expected allowed_users row to be ignored for only-me write access")
+	}
+	if err := ac.CanRead(allowedUser.PublicKey); err == nil {
+		t.Fatal("expected allowed_users row to be ignored for only-me read access")
+	}
+}
+
+func TestAccessControl_NormalizesLegacyOnlyMePermission(t *testing.T) {
+	settings := &types.AllowedUsersSettings{
+		Mode:  "only_me",
+		Read:  "only_me",
+		Write: "only_me",
+	}
+	ac := access.NewAccessControl(nil, settings)
+
+	if err := ac.ValidateSettings(settings); err != nil {
+		t.Fatalf("expected legacy only_me settings to validate, got: %v", err)
+	}
+
+	if settings.Mode != "only-me" || settings.Read != "only-me" || settings.Write != "only-me" {
+		t.Fatalf("expected only_me to normalize to only-me, got mode=%q read=%q write=%q", settings.Mode, settings.Read, settings.Write)
+	}
+}
