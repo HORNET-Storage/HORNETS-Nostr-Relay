@@ -9,13 +9,16 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 const (
 	// accessCacheTTL is how long access check results are cached.
-	accessCacheTTL = 30 * time.Second
+	accessCacheTTL                = 30 * time.Second
+	repositoryPermissionEventKind = 16629
 )
 
 // cachedResult stores an access check result with expiry.
@@ -47,6 +50,29 @@ func (ac *AccessControl) CanRead(npub string) error {
 
 func (ac *AccessControl) CanWrite(npub string) error {
 	return ac.IsAllowed(ac.settings.Write, npub)
+}
+
+func (ac *AccessControl) CanWriteEvent(event *nostr.Event, store stores.Store) error {
+	if event == nil {
+		return fmt.Errorf("event is required")
+	}
+
+	writeErr := ac.CanWrite(event.PubKey)
+	if writeErr == nil {
+		return nil
+	}
+
+	if !ac.repoAccessOverrideEnabled() || store == nil {
+		return writeErr
+	}
+
+	if err := ac.canWriteRepositoryEvent(event, store); err != nil {
+		logging.Debugf("[ACCESS CONTROL] Repository access override denied for pubkey %s on kind %d: %v", event.PubKey, event.Kind, err)
+		return writeErr
+	}
+
+	logging.Debugf("[ACCESS CONTROL] Repository access override granted for pubkey %s on kind %d", event.PubKey, event.Kind)
+	return nil
 }
 
 func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
@@ -85,6 +111,93 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 	})
 
 	return result
+}
+
+func (ac *AccessControl) repoAccessOverrideEnabled() bool {
+	if ac.settings == nil {
+		return false
+	}
+
+	return normalizeAccessSetting(ac.settings.Mode) == "invite-only" &&
+		normalizeAccessSetting(ac.settings.Write) == "allowed_users" &&
+		len(ac.settings.RepoAccessOverrideKinds) > 0
+}
+
+func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store stores.Store) error {
+	if !containsKind(ac.settings.RepoAccessOverrideKinds, event.Kind) {
+		return fmt.Errorf("event kind %d is not eligible for repository access override", event.Kind)
+	}
+
+	pubkey := strings.ToLower(event.PubKey)
+	if !isValidHexPubkey(pubkey) {
+		return fmt.Errorf("invalid public key format: expected 64-character hex string")
+	}
+
+	repoID := firstTagValue(event.Tags, "r")
+	if repoID == "" {
+		return fmt.Errorf("missing repository identifier tag")
+	}
+
+	permissionEvents, err := store.QueryEvents(nostr.Filter{
+		Kinds: []int{repositoryPermissionEventKind},
+		Tags:  nostr.TagMap{"r": []string{repoID}},
+		Limit: 1,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to query repository permission event: %w", err)
+	}
+	if len(permissionEvents) == 0 {
+		return fmt.Errorf("repository permission event not found")
+	}
+
+	if !repoPermissionAllowsPubkey(permissionEvents[0], pubkey) {
+		return fmt.Errorf("pubkey does not have repository access")
+	}
+
+	return nil
+}
+
+func firstTagValue(tags nostr.Tags, key string) string {
+	for _, tag := range tags {
+		if len(tag) >= 2 && tag[0] == key {
+			return tag[1]
+		}
+	}
+	return ""
+}
+
+func containsKind(kinds []int, kind int) bool {
+	for _, allowedKind := range kinds {
+		if allowedKind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func repoPermissionAllowsPubkey(permissionEvent *nostr.Event, pubkey string) bool {
+	if permissionEvent == nil {
+		return false
+	}
+
+	if strings.ToLower(permissionEvent.PubKey) == pubkey {
+		return true
+	}
+
+	for _, tag := range permissionEvent.Tags {
+		if len(tag) < 3 || tag[0] != "p" || strings.ToLower(tag[1]) != pubkey {
+			continue
+		}
+
+		for _, roleValue := range tag[2:] {
+			switch strings.ToLower(strings.TrimSpace(roleValue)) {
+			case "maintainer", "write", "triage":
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // isAllowedUncached performs the actual DB-backed access check (no cache).

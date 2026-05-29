@@ -153,10 +153,10 @@ type SubscriptionTier struct {
 
 // AllowedUsersSettings represents the unified access control configuration
 type AllowedUsersSettings struct {
-	Mode                     string             `json:"mode" mapstructure:"mode"`   // only-me, invite-only, public, subscription
-	Read                     string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only-me
-	Write                    string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only-me
-	AutoAddRepoCollaborators bool               `json:"auto_add_repo_collaborators" mapstructure:"auto_add_repo_collaborators"`
-	Tiers                    []SubscriptionTier `json:"tiers" mapstructure:"tiers"`
-	LastUpdated              int64              `json:"last_updated" mapstructure:"last_updated"`
+	Mode                    string             `json:"mode" mapstructure:"mode"`   // only-me, invite-only, public, subscription
+	Read                    string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only-me
+	Write                   string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only-me
+	RepoAccessOverrideKinds []int              `json:"repo_access_override_kinds" mapstructure:"repo_access_override_kinds"`
+	Tiers                   []SubscriptionTier `json:"tiers" mapstructure:"tiers"`
+	LastUpdated             int64              `json:"last_updated" mapstructure:"last_updated"`
 }

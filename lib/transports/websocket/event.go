@@ -39,7 +39,7 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 
 	// Check write access permissions using H.O.R.N.E.T Allowed Users system
 	if accessControl := GetAccessControl(); accessControl != nil {
-		err := accessControl.CanWrite(env.Event.PubKey)
+		err := accessControl.CanWriteEvent(&env.Event, store)
 		if err != nil {
 			logging.Infof("Write access denied for pubkey: %s", env.Event.PubKey)
 			write("OK", env.Event.ID, false, "Event rejected: Write access denied")

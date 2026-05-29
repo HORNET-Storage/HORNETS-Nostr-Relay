@@ -957,9 +957,9 @@ func setDefaults() {
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
 		72, 73, 74, 75, 76, 77, // Repository event kinds
 		443, 444, 445, // MIP kinds (MLS group messaging)
-		1059,                   // NIP-59 Gift Wrap (encrypted DMs)
-		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
-		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
+		1059,                         // NIP-59 Gift Wrap (encrypted DMs)
+		1063, 1111, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
+		6927, 7007, 9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds
 		10051,        // MIP-00 KeyPackage
 		10411,        // Relay info kind (NO 10011 or 10022 handlers)
@@ -968,10 +968,10 @@ func setDefaults() {
 		19841, 19842, 19843, // Subscription kinds
 		22242,               // Auth kind
 		30000, 30008, 30009, // Parameterized replaceable kinds
-		30023, 30078, 30079, // Long-form content kinds
+		30023, 30078, 30079, 30301, 30302, // Long-form content kinds
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051", "kind72", "kind73", "kind74", "kind75", "kind76", "kind77", "kind16629", "kind16630"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1111", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051", "kind72", "kind73", "kind74", "kind75", "kind76", "kind77", "kind6927", "kind7007", "kind16629", "kind16630", "kind30078", "kind30301", "kind30302"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -1002,7 +1002,7 @@ func setDefaults() {
 	viper.SetDefault("allowed_users.mode", "public")
 	viper.SetDefault("allowed_users.read", "all_users")
 	viper.SetDefault("allowed_users.write", "all_users")
-	viper.SetDefault("allowed_users.auto_add_repo_collaborators", false)
+	viper.SetDefault("allowed_users.repo_access_override_kinds", []int{72, 73, 74, 75, 76, 77, 1111, 6927, 7007, 16629, 16630, 30078, 30301, 30302})
 	viper.SetDefault("allowed_users.last_updated", 0)
 	viper.SetDefault("allowed_users.batch_update_on_startup", false) // Disable batch update by default for performance
 
@@ -1236,12 +1236,12 @@ func GetAllSettingsAsMap() (map[string]interface{}, error) {
 
 	// Allowed users settings
 	settings["allowed_users"] = map[string]interface{}{
-		"mode":                        cfg.AllowedUsersSettings.Mode,
-		"read":                        cfg.AllowedUsersSettings.Read,
-		"write":                       cfg.AllowedUsersSettings.Write,
-		"auto_add_repo_collaborators": cfg.AllowedUsersSettings.AutoAddRepoCollaborators,
-		"tiers":                       cfg.AllowedUsersSettings.Tiers,
-		"last_updated":                cfg.AllowedUsersSettings.LastUpdated,
+		"mode":                       cfg.AllowedUsersSettings.Mode,
+		"read":                       cfg.AllowedUsersSettings.Read,
+		"write":                      cfg.AllowedUsersSettings.Write,
+		"repo_access_override_kinds": cfg.AllowedUsersSettings.RepoAccessOverrideKinds,
+		"tiers":                      cfg.AllowedUsersSettings.Tiers,
+		"last_updated":               cfg.AllowedUsersSettings.LastUpdated,
 	}
 
 	// Push notifications settings

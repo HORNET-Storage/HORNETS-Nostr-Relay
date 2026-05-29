@@ -216,7 +216,7 @@ func handleEvent(env *nostr.EventEnvelope, writeFn lib_nostr.KindWriter, store s
 	}
 
 	if accessControl := ws.GetAccessControl(); accessControl != nil {
-		if err := accessControl.CanWrite(env.Event.PubKey); err != nil {
+		if err := accessControl.CanWriteEvent(&env.Event, store); err != nil {
 			logging.Infof("/nostr: write access denied for pubkey: %s", env.Event.PubKey)
 			writeFn("OK", env.Event.ID, false, "Event rejected: Write access denied")
 			return

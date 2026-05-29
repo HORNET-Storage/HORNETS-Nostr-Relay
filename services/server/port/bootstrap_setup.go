@@ -129,19 +129,6 @@ func stringSetting(value interface{}) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func boolSetting(value interface{}) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "true", "1", "yes", "on":
-			return true
-		}
-	}
-	return false
-}
-
 func normalizeBootstrapAccessMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "only_me":
@@ -169,12 +156,10 @@ func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
 		allowedUsers["mode"] = "invite-only"
 		allowedUsers["read"] = "all_users"
 		allowedUsers["write"] = "allowed_users"
-		allowedUsers["auto_add_repo_collaborators"] = boolSetting(allowedUsers["auto_add_repo_collaborators"])
 	case "only-me":
 		allowedUsers["mode"] = "only-me"
 		allowedUsers["read"] = "only-me"
 		allowedUsers["write"] = "only-me"
-		allowedUsers["auto_add_repo_collaborators"] = false
 	default:
 		return fmt.Errorf("bootstrap access mode must be invite-only or only-me")
 	}
@@ -626,13 +611,6 @@ func renderBootstrapSetupPage(token string) string {
 						<label for="relay_owner_pubkey">Relay owner public key</label>
 						<input id="relay_owner_pubkey" class="key-input" placeholder="leave blank to use the relay private key's public key">
 					</div>
-					<div class="field check-field" id="repo_collaborators_field">
-						<label class="check-row" for="auto_add_repo_collaborators">
-							<input id="auto_add_repo_collaborators" type="checkbox">
-							<span>Auto-add repository collaborators to write access</span>
-						</label>
-						<div class="hint">Write and maintainer collaborators are added when repository metadata is published. Removals stay manual.</div>
-					</div>
 				</div>
 			</div>
 			<div class="actions">
@@ -824,21 +802,13 @@ func renderBootstrapSetupPage(token string) string {
 			if (mode === "only-me") {
 				relay.allowed_users.read = "only-me";
 				relay.allowed_users.write = "only-me";
-				relay.allowed_users.auto_add_repo_collaborators = false;
 			} else {
 				relay.allowed_users.read = "all_users";
 				relay.allowed_users.write = "allowed_users";
-				relay.allowed_users.auto_add_repo_collaborators = Boolean(el("auto_add_repo_collaborators").checked);
 			}
 		}
 
 		function updateAccessControls() {
-			const inviteOnly = selectedAccessMode() === "invite-only";
-			el("auto_add_repo_collaborators").disabled = !inviteOnly;
-			el("repo_collaborators_field").style.opacity = inviteOnly ? "1" : "0.58";
-			if (!inviteOnly) {
-				el("auto_add_repo_collaborators").checked = false;
-			}
 		}
 
 		function buildPayload() {
@@ -927,7 +897,6 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_secret_key").value = generatedRelaySecret;
 			el("relay_upnp").checked = typeof server.upnp === "boolean" ? server.upnp : true;
 			el("relay_owner_pubkey").value = sanitizeSeededValue(defaults.relayOwnerPubkey || relay.public_key, EXAMPLE_RELAY_PUBLIC_KEY);
-			el("auto_add_repo_collaborators").checked = Boolean(allowedUsers.auto_add_repo_collaborators);
 			setAccessMode(["invite-only", "only-me"].includes(allowedUsers.mode) ? allowedUsers.mode : "invite-only");
 
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";

@@ -1,9 +1,23 @@
 allowed_users:
-    auto_add_repo_collaborators: false
     batch_update_on_startup: false
     last_updated: 0
     mode: public
     read: all_users
+    repo_access_override_kinds:
+        - 72
+        - 73
+        - 74
+        - 75
+        - 76
+        - 77
+        - 1111
+        - 6927
+        - 7007
+        - 16629
+        - 16630
+        - 30078
+        - 30301
+        - 30302
     tiers:
         - monthly_limit_bytes: 104857600
           name: Basic
@@ -38,8 +52,11 @@ event_filtering:
         - kind7
         - kind8
         - kind1063
+        - kind1111
         - kind1808
         - kind1984
+        - kind6927
+        - kind7007
         - kind9372
         - kind9373
         - kind9735
@@ -62,6 +79,8 @@ event_filtering:
         - kind30023
         - kind30078
         - kind30079
+        - kind30301
+        - kind30302
         - kind72
         - kind73
         - kind74
@@ -131,9 +150,12 @@ event_filtering:
         - 445
         - 1059
         - 1063
+        - 1111
         - 1808
         - 1809
         - 1984
+        - 6927
+        - 7007
         - 9372
         - 9373
         - 9735
@@ -157,6 +179,8 @@ event_filtering:
         - 30023
         - 30078
         - 30079
+        - 30301
+        - 30302
         - 72
         - 73
         - 74
