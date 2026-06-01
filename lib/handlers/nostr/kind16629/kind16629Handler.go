@@ -57,14 +57,14 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Validate tags
 		message := validateTags(env.Event.Tags, env.Event.PubKey)
 		if len(message) > 0 {
-			write("NOTICE", message)
+			write("OK", env.Event.ID, false, message)
 			return
 		}
 
 		// Extract r tag (repo identifier - immutable, used as unique key)
 		rTag := getTagValue(env.Event.Tags, "r")
 		if rTag == "" {
-			write("NOTICE", "Missing 'r' tag (repository identifier)")
+			write("OK", env.Event.ID, false, "Missing 'r' tag (repository identifier)")
 			return
 		}
 
@@ -86,7 +86,7 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		})
 		if err != nil {
 			logging.Errorf("[Kind16629] Error querying existing events: %v", err)
-			write("NOTICE", "Failed to query existing events")
+			write("OK", env.Event.ID, false, "Failed to query existing events")
 			return
 		}
 
@@ -118,13 +118,13 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		if !verifyPublisherPermission(store, env.Event.PubKey, isOrgRepo, ownerPubkey, orgDtag, isFirstEvent, isMigrationToOrg) {
 			logging.Infof("[Kind16629] Permission denied for pubkey %s on repo %s (isOrg: %v, isFirst: %v, isMigration: %v)",
 				env.Event.PubKey, rTag, isOrgRepo, isFirstEvent, isMigrationToOrg)
-			write("NOTICE", "Permission denied: you are not authorized to update this repository's permissions")
+			write("OK", env.Event.ID, false, "Permission denied: you are not authorized to update this repository's permissions")
 			return
 		}
 
 		// Store the new event first
 		if err := store.StoreEvent(&env.Event); err != nil {
-			write("NOTICE", "Failed to store the event")
+			write("OK", env.Event.ID, false, "Failed to store the event")
 			return
 		}
 
