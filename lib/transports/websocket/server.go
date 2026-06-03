@@ -356,10 +356,16 @@ func GetRelayInfo() NIP11RelayInfo {
 
 	// These values are set in main.go init() for backward compatibility
 	basePort := viper.GetInt("server.port")
+	relayMode := viper.GetString("allowed_users.mode")
+	readAccess := viper.GetString("allowed_users.read")
+	writeAccess := viper.GetString("allowed_users.write")
 	relayInfo := NIP11RelayInfo{
 		Name:          viper.GetString("relay.name"),
 		Description:   viper.GetString("relay.description"),
 		Pubkey:        publicKeyHex, // Keep for internal use, excluded from JSON
+		RelayMode:     relayMode,
+		ReadAccess:    readAccess,
+		WriteAccess:   writeAccess,
 		Contact:       contact,
 		Icon:          viper.GetString("relay.icon"),
 		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
@@ -376,7 +382,10 @@ func GetRelayInfo() NIP11RelayInfo {
 	if dhtPubkey != "" && err == nil {
 		relayInfo.DHTPubkey = dhtPubkey
 		relayInfo.HornetExtension = &HornetExtension{
-			DHTPubkey: dhtPubkey,
+			RelayMode:   relayMode,
+			ReadAccess:  readAccess,
+			WriteAccess: writeAccess,
+			DHTPubkey:   dhtPubkey,
 		}
 		err = SignRelay(&relayInfo, privKey)
 		if err != nil {

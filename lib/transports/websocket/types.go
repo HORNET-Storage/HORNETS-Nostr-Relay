@@ -17,6 +17,9 @@ type NIP11RelayInfo struct {
 	Description     string           `json:"description,omitempty"`
 	Pubkey          string           `json:"pubkey,omitempty"`
 	DHTPubkey       string           `json:"dht_pubkey,omitempty"`
+	RelayMode       string           `json:"relay_mode,omitempty"`
+	ReadAccess      string           `json:"read_access,omitempty"`
+	WriteAccess     string           `json:"write_access,omitempty"`
 	Contact         string           `json:"contact,omitempty"`
 	Icon            string           `json:"icon,omitempty"`
 	SupportedNIPs   []int            `json:"supported_nips,omitempty"`
@@ -53,6 +56,9 @@ type ServiceEndpoint struct {
 }
 
 type HornetExtension struct {
+	RelayMode   string    `json:"relay_mode,omitempty"`
+	ReadAccess  string    `json:"read_access,omitempty"`
+	WriteAccess string    `json:"write_access,omitempty"`
 	DHTPubkey   string    `json:"dht_pubkey"`
 	Signature   string    `json:"signature"`
 	LastUpdated time.Time `json:"last_updated"`

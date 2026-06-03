@@ -40,15 +40,19 @@ func TestCanWriteEventAllowsRepoCollaboratorInInviteOnlyMode(t *testing.T) {
 		Mode:                    "invite-only",
 		Read:                    "all_users",
 		Write:                   "allowed_users",
-		RepoAccessOverrideKinds: []int{73},
+		RepoAccessOverrideKinds: []int{73, 16630},
 	})
 
 	if err := accessControl.CanWriteEvent(&nostr.Event{PubKey: maintainer, Kind: 73, Tags: nostr.Tags{{"r", repoID}}}, store); err != nil {
 		t.Fatalf("expected maintainer to be allowed for repo event: %v", err)
 	}
 
-	if err := accessControl.CanWriteEvent(&nostr.Event{PubKey: triage, Kind: 73, Tags: nostr.Tags{{"r", repoID}}}, store); err != nil {
-		t.Fatalf("expected triage collaborator to be allowed for repo event: %v", err)
+	if err := accessControl.CanWriteEvent(&nostr.Event{PubKey: triage, Kind: 16630, Tags: nostr.Tags{{"r", repoID}}}, store); err != nil {
+		t.Fatalf("expected triage collaborator to be allowed for repo metadata event: %v", err)
+	}
+
+	if err := accessControl.CanWriteEvent(&nostr.Event{PubKey: triage, Kind: 73, Tags: nostr.Tags{{"r", repoID}}}, store); err == nil {
+		t.Fatal("expected triage collaborator to be denied for DAG-writing repo event")
 	}
 
 	if err := accessControl.CanWriteEvent(&nostr.Event{PubKey: maintainer, Kind: 1, Tags: nostr.Tags{{"r", repoID}}}, store); err == nil {
@@ -61,6 +65,37 @@ func TestCanWriteEventAllowsRepoCollaboratorInInviteOnlyMode(t *testing.T) {
 
 	if err := accessControl.CanWriteEvent(&nostr.Event{PubKey: stranger, Kind: 73, Tags: nostr.Tags{{"r", repoID}}}, store); err == nil {
 		t.Fatal("expected pubkey without repo permission to be denied")
+	}
+}
+
+func TestCanWriteRequiresWriteCapableAllowedUser(t *testing.T) {
+	store := newAccessTestStore(t)
+	defer store.Cleanup()
+
+	readOnlyUser := newAccessTestPubkey(t)
+	writer := newAccessTestPubkey(t)
+
+	if err := store.GetStatsStore().AddAllowedUser(readOnlyUser, false, "", "test"); err != nil {
+		t.Fatalf("AddAllowedUser(read-only): %v", err)
+	}
+	if err := store.GetStatsStore().AddAllowedUser(writer, true, "", "test"); err != nil {
+		t.Fatalf("AddAllowedUser(writer): %v", err)
+	}
+
+	accessControl := access.NewAccessControl(store.GetStatsStore(), &types.AllowedUsersSettings{
+		Mode:  "invite-only",
+		Read:  "allowed_users",
+		Write: "allowed_users",
+	})
+
+	if err := accessControl.CanRead(readOnlyUser); err != nil {
+		t.Fatalf("expected read-only allowed user to keep read access: %v", err)
+	}
+	if err := accessControl.CanWrite(readOnlyUser); err == nil {
+		t.Fatal("expected read-only allowed user to be denied write access")
+	}
+	if err := accessControl.CanWrite(writer); err != nil {
+		t.Fatalf("expected write-capable allowed user to keep write access: %v", err)
 	}
 }
 

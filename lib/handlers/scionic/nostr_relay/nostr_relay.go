@@ -174,7 +174,7 @@ func buildNostrStreamHandler(store stores.Store) hsListener.StreamHandler {
 				handleReq(env, writeFn, json, authState)
 
 			case *nostr.CountEnvelope:
-				handleCount(env, writeFn, json)
+				handleCount(env, writeFn, json, authState)
 
 			case *nostr.CloseEnvelope:
 				logging.Infof("/nostr: CLOSE %s", string(*env))
@@ -279,7 +279,7 @@ func handleReq(env *nostr.ReqEnvelope, writeFn lib_nostr.KindWriter, json jsonit
 }
 
 // handleCount dispatches a COUNT message to the count handler.
-func handleCount(env *nostr.CountEnvelope, writeFn lib_nostr.KindWriter, json jsoniter.API) {
+func handleCount(env *nostr.CountEnvelope, writeFn lib_nostr.KindWriter, json jsoniter.API, authState *dhtAuthState) {
 	handler := lib_nostr.GetHandler("count")
 	if handler == nil {
 		writeFn("NOTICE", "Count handler not available")
@@ -287,7 +287,16 @@ func handleCount(env *nostr.CountEnvelope, writeFn lib_nostr.KindWriter, json js
 	}
 
 	read := func() ([]byte, error) {
-		return json.Marshal(env)
+		wrapper := struct {
+			Request         *nostr.CountEnvelope `json:"request"`
+			AuthPubkey      string               `json:"auth_pubkey"`
+			IsAuthenticated bool                 `json:"is_authenticated"`
+		}{
+			Request:         env,
+			AuthPubkey:      authState.pubkey,
+			IsAuthenticated: authState.authenticated,
+		}
+		return json.Marshal(wrapper)
 	}
 
 	handler(read, writeFn)

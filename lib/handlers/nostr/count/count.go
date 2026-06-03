@@ -2,7 +2,9 @@ package count
 
 import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/lib/sessions"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
 
@@ -21,10 +23,37 @@ func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 		}
 
 		var request nostr.CountEnvelope
-		if err := json.Unmarshal(data, &request); err != nil {
+		connPubkey := ""
+
+		var wrapper struct {
+			Request         *nostr.CountEnvelope `json:"request"`
+			AuthPubkey      string               `json:"auth_pubkey"`
+			IsAuthenticated bool                 `json:"is_authenticated"`
+		}
+		if err := json.Unmarshal(data, &wrapper); err == nil && wrapper.Request != nil {
+			request = *wrapper.Request
+			if wrapper.IsAuthenticated {
+				connPubkey = wrapper.AuthPubkey
+			}
+		} else if err := json.Unmarshal(data, &request); err != nil {
 			logging.Infof("Error unmarshaling count request:%s", err)
 			write("NOTICE", "Error unmarshaling count request.")
 			return
+		}
+
+		if connPubkey == "" {
+			sessions.Sessions.Range(func(key, value interface{}) bool {
+				pubkey, ok := key.(string)
+				if !ok {
+					return true
+				}
+				session, ok := value.(*sessions.Session)
+				if !ok || !session.Authenticated {
+					return true
+				}
+				connPubkey = pubkey
+				return false
+			})
 		}
 
 		// Check if the request is for counting restricted content
@@ -34,14 +63,25 @@ func BuildCountsHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 			return
 		}
 
+		accessControl := websocket.GetAccessControl()
 		var totalCount int
 		for _, filter := range request.Filters {
-			count, err := store.QueryEvents(filter) //CountEvents(filter) // Assume QueryEvents now returns both events and counts or adjust accordingly
+			events, err := store.QueryEvents(filter)
 			if err != nil {
 				logging.Infof("Error counting events for filter: %v", err)
 				continue
 			}
-			totalCount += len(count)
+
+			if accessControl == nil {
+				totalCount += len(events)
+				continue
+			}
+
+			for _, event := range events {
+				if err := accessControl.CanReadEvent(event, connPubkey, store); err == nil {
+					totalCount++
+				}
+			}
 		}
 
 		logging.Infof("Total count: %d", totalCount)

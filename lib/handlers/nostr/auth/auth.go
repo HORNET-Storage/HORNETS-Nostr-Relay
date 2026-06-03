@@ -101,12 +101,7 @@ func AuthenticateEvent(event *nostr.Event, challenge string, store stores.Store,
 		}
 	}
 
-	if accessControl != nil {
-		if err := accessControl.CanRead(event.PubKey); err != nil {
-			logging.Infof("Read access denied for pubkey: %s - %v", event.PubKey, err)
-			return nil, accessDeniedMessage(accessControl.GetSettings()), false
-		}
-	}
+	_ = accessControl
 
 	if err := createUserSession(event.PubKey, event.Sig); err != nil {
 		logging.Infof("Failed to create session for %s: %v", event.PubKey, err)

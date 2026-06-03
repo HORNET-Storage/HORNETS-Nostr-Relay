@@ -7,11 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -19,6 +21,10 @@ const (
 	// accessCacheTTL is how long access check results are cached.
 	accessCacheTTL                = 30 * time.Second
 	repositoryPermissionEventKind = 16629
+	repositoryPushEventKind       = 73
+	repositoryPullRequestKind     = 74
+	repositoryVisibilityPrivate   = "private"
+	repositoryVisibilityPublic    = "public"
 )
 
 // cachedResult stores an access check result with expiry.
@@ -45,11 +51,11 @@ func NewAccessControl(statsStore statistics.StatisticsStore, settings *types.All
 }
 
 func (ac *AccessControl) CanRead(npub string) error {
-	return ac.IsAllowed(ac.settings.Read, npub)
+	return ac.IsAllowed(ac.settings.Read, npub, false)
 }
 
 func (ac *AccessControl) CanWrite(npub string) error {
-	return ac.IsAllowed(ac.settings.Write, npub)
+	return ac.IsAllowed(ac.settings.Write, npub, true)
 }
 
 func (ac *AccessControl) CanWriteEvent(event *nostr.Event, store stores.Store) error {
@@ -75,7 +81,73 @@ func (ac *AccessControl) CanWriteEvent(event *nostr.Event, store stores.Store) e
 	return nil
 }
 
-func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
+func (ac *AccessControl) CanReadEvent(event *nostr.Event, requesterPubkey string, store stores.Store) error {
+	if event == nil {
+		return fmt.Errorf("event is required")
+	}
+
+	globalReadErr := ac.CanRead(requesterPubkey)
+	if globalReadErr == nil {
+		return nil
+	}
+
+	if store == nil || !ac.repositoryAccessKindsConfigured() || !ac.isRepositoryEventEligible(event) {
+		return globalReadErr
+	}
+
+	permissionEvent, err := ac.getRepositoryPermissionEvent(event, store)
+	if err != nil {
+		return globalReadErr
+	}
+
+	if repositoryPermissionVisibility(permissionEvent) != repositoryVisibilityPrivate {
+		return nil
+	}
+
+	requesterPubkey = strings.ToLower(strings.TrimSpace(requesterPubkey))
+	if requesterPubkey != "" && repoPermissionAllowsRead(permissionEvent, requesterPubkey) {
+		return nil
+	}
+
+	return globalReadErr
+}
+
+func (ac *AccessControl) CanReadDag(root string, requesterPubkey string, requesterSignature string, store stores.Store) error {
+	globalReadErr := ac.CanRead(requesterPubkey)
+	if globalReadErr == nil {
+		return nil
+	}
+
+	if store == nil || !ac.repositoryAccessKindsConfigured() {
+		return globalReadErr
+	}
+
+	permissionEvent, err := ac.findRepositoryPermissionEventByRoot(root, store)
+	if err != nil {
+		return globalReadErr
+	}
+
+	if repositoryPermissionVisibility(permissionEvent) != repositoryVisibilityPrivate {
+		return nil
+	}
+
+	requesterPubkey = strings.ToLower(strings.TrimSpace(requesterPubkey))
+	if requesterPubkey == "" || requesterSignature == "" {
+		return globalReadErr
+	}
+
+	if err := verifyRootRequestSignature(root, requesterPubkey, requesterSignature); err != nil {
+		return globalReadErr
+	}
+
+	if repoPermissionAllowsRead(permissionEvent, requesterPubkey) {
+		return nil
+	}
+
+	return globalReadErr
+}
+
+func (ac *AccessControl) IsAllowed(readOrWrite string, npub string, requireWriteCapability bool) error {
 	readOrWrite = normalizeAccessSetting(readOrWrite)
 
 	// Everyone is allowed if all_users is set
@@ -91,7 +163,11 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 	hex := strings.ToLower(npub)
 
 	// Check cache first
-	cacheKey := readOrWrite + ":" + hex
+	cacheMode := "read"
+	if requireWriteCapability {
+		cacheMode = "write"
+	}
+	cacheKey := readOrWrite + ":" + cacheMode + ":" + hex
 	if cached, ok := ac.accessCache.Load(cacheKey); ok {
 		entry := cached.(*cachedResult)
 		if time.Now().Before(entry.expiresAt) {
@@ -102,7 +178,7 @@ func (ac *AccessControl) IsAllowed(readOrWrite string, npub string) error {
 	}
 
 	// Perform the actual access check
-	result := ac.isAllowedUncached(readOrWrite, hex)
+	result := ac.isAllowedUncached(readOrWrite, hex, requireWriteCapability)
 
 	// Cache the result
 	ac.accessCache.Store(cacheKey, &cachedResult{
@@ -121,6 +197,79 @@ func (ac *AccessControl) repoAccessOverrideEnabled() bool {
 	return normalizeAccessSetting(ac.settings.Mode) == "invite-only" &&
 		normalizeAccessSetting(ac.settings.Write) == "allowed_users" &&
 		len(ac.settings.RepoAccessOverrideKinds) > 0
+}
+
+func (ac *AccessControl) repositoryAccessKindsConfigured() bool {
+	return ac.settings != nil && len(ac.settings.RepoAccessOverrideKinds) > 0
+}
+
+func (ac *AccessControl) isRepositoryEventEligible(event *nostr.Event) bool {
+	if event == nil || !ac.repositoryAccessKindsConfigured() {
+		return false
+	}
+
+	if firstTagValue(event.Tags, "r") == "" {
+		return false
+	}
+
+	return containsKind(ac.settings.RepoAccessOverrideKinds, event.Kind)
+}
+
+func (ac *AccessControl) getRepositoryPermissionEvent(event *nostr.Event, store stores.Store) (*nostr.Event, error) {
+	if event == nil {
+		return nil, fmt.Errorf("event is required")
+	}
+
+	repoID := firstTagValue(event.Tags, "r")
+	if repoID == "" {
+		return nil, fmt.Errorf("missing repository identifier tag")
+	}
+
+	if event.Kind == repositoryPermissionEventKind {
+		return event, nil
+	}
+
+	return ac.findRepositoryPermissionEvent(repoID, store)
+}
+
+func (ac *AccessControl) findRepositoryPermissionEvent(repoID string, store stores.Store) (*nostr.Event, error) {
+	permissionEvents, err := store.QueryEvents(nostr.Filter{
+		Kinds: []int{repositoryPermissionEventKind},
+		Tags:  nostr.TagMap{"r": []string{repoID}},
+		Limit: 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query repository permission event: %w", err)
+	}
+	if len(permissionEvents) == 0 {
+		return nil, fmt.Errorf("repository permission event not found")
+	}
+
+	return permissionEvents[0], nil
+}
+
+func (ac *AccessControl) findRepositoryPermissionEventByRoot(root string, store stores.Store) (*nostr.Event, error) {
+	lookupFilters := []nostr.Filter{
+		{Kinds: []int{repositoryPushEventKind}, Tags: nostr.TagMap{"bundle": []string{root}}, Limit: 1},
+		{Kinds: []int{repositoryPushEventKind}, Tags: nostr.TagMap{"archive": []string{root}}, Limit: 1},
+		{Kinds: []int{repositoryPullRequestKind}, Tags: nostr.TagMap{"dag_root": []string{root}}, Limit: 1},
+	}
+
+	for _, filter := range lookupFilters {
+		events, err := store.QueryEvents(filter)
+		if err != nil || len(events) == 0 {
+			continue
+		}
+
+		repoID := firstTagValue(events[0].Tags, "r")
+		if repoID == "" {
+			continue
+		}
+
+		return ac.findRepositoryPermissionEvent(repoID, store)
+	}
+
+	return nil, fmt.Errorf("repository permission event not found for dag root")
 }
 
 func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store stores.Store) error {
@@ -150,8 +299,15 @@ func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store store
 		return fmt.Errorf("repository permission event not found")
 	}
 
-	if !repoPermissionAllowsPubkey(permissionEvents[0], pubkey) {
-		return fmt.Errorf("pubkey does not have repository access")
+	if repositoryEventRequiresDagWrite(event) {
+		if !repoPermissionAllowsDagWrite(permissionEvents[0], pubkey) {
+			return fmt.Errorf("pubkey does not have repository DAG write access")
+		}
+		return nil
+	}
+
+	if !repoPermissionAllowsEventWrite(permissionEvents[0], pubkey) {
+		return fmt.Errorf("pubkey does not have repository event write access")
 	}
 
 	return nil
@@ -175,7 +331,39 @@ func containsKind(kinds []int, kind int) bool {
 	return false
 }
 
-func repoPermissionAllowsPubkey(permissionEvent *nostr.Event, pubkey string) bool {
+func repoPermissionAllowsRead(permissionEvent *nostr.Event, pubkey string) bool {
+	if permissionEvent == nil {
+		return false
+	}
+
+	if strings.ToLower(permissionEvent.PubKey) == pubkey {
+		return true
+	}
+
+	for _, tag := range permissionEvent.Tags {
+		if len(tag) < 2 || tag[0] != "p" || strings.ToLower(tag[1]) != pubkey {
+			continue
+		}
+		return true
+	}
+
+	return false
+}
+
+func repositoryPermissionVisibility(permissionEvent *nostr.Event) string {
+	if permissionEvent == nil {
+		return repositoryVisibilityPublic
+	}
+
+	visibility := strings.ToLower(strings.TrimSpace(firstTagValue(permissionEvent.Tags, "visibility")))
+	if visibility == repositoryVisibilityPrivate {
+		return repositoryVisibilityPrivate
+	}
+
+	return repositoryVisibilityPublic
+}
+
+func repoPermissionAllowsEventWrite(permissionEvent *nostr.Event, pubkey string) bool {
 	if permissionEvent == nil {
 		return false
 	}
@@ -191,7 +379,7 @@ func repoPermissionAllowsPubkey(permissionEvent *nostr.Event, pubkey string) boo
 
 		for _, roleValue := range tag[2:] {
 			switch strings.ToLower(strings.TrimSpace(roleValue)) {
-			case "maintainer", "write", "triage":
+			case "maintainer", "write", "triage", "encrypted-write":
 				return true
 			}
 		}
@@ -200,8 +388,76 @@ func repoPermissionAllowsPubkey(permissionEvent *nostr.Event, pubkey string) boo
 	return false
 }
 
+func repoPermissionAllowsDagWrite(permissionEvent *nostr.Event, pubkey string) bool {
+	if permissionEvent == nil {
+		return false
+	}
+
+	if strings.ToLower(permissionEvent.PubKey) == pubkey {
+		return true
+	}
+
+	for _, tag := range permissionEvent.Tags {
+		if len(tag) < 3 || tag[0] != "p" || strings.ToLower(tag[1]) != pubkey {
+			continue
+		}
+
+		for _, roleValue := range tag[2:] {
+			switch strings.ToLower(strings.TrimSpace(roleValue)) {
+			case "maintainer", "write":
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func repositoryEventRequiresDagWrite(event *nostr.Event) bool {
+	if event == nil {
+		return false
+	}
+
+	switch event.Kind {
+	case repositoryPushEventKind, repositoryPullRequestKind:
+		return true
+	}
+
+	for _, tag := range event.Tags {
+		if len(tag) < 2 {
+			continue
+		}
+
+		switch tag[0] {
+		case "bundle", "archive", "dag_root":
+			return true
+		}
+	}
+
+	return false
+}
+
+func verifyRootRequestSignature(root string, requesterPubkey string, requesterSignature string) error {
+	publicKey, err := signing.DeserializePublicKey(requesterPubkey)
+	if err != nil {
+		return err
+	}
+
+	signatureBytes, err := hex.DecodeString(requesterSignature)
+	if err != nil {
+		return err
+	}
+
+	parsedSignature, err := schnorr.ParseSignature(signatureBytes)
+	if err != nil {
+		return err
+	}
+
+	return signing.VerifySerializedCIDSignature(parsedSignature, root, publicKey)
+}
+
 // isAllowedUncached performs the actual DB-backed access check (no cache).
-func (ac *AccessControl) isAllowedUncached(readOrWrite string, hex string) error {
+func (ac *AccessControl) isAllowedUncached(readOrWrite string, hex string, requireWriteCapability bool) error {
 	logging.Debugf("Access check - Permission: %s, Mode: %s", readOrWrite, ac.settings.Mode)
 
 	// The owner is always allowed
@@ -225,6 +481,11 @@ func (ac *AccessControl) isAllowedUncached(readOrWrite string, hex string) error
 	if user == nil {
 		logging.Debugf("[ACCESS CONTROL] User %s not found in allowed_users table", hex)
 		return fmt.Errorf("user does not have permission to read")
+	}
+
+	if requireWriteCapability && user.ReadOnly {
+		logging.Debugf("[ACCESS CONTROL] User %s is allowed for read but not write", hex)
+		return fmt.Errorf("user does not have permission to write")
 	}
 
 	logging.Debugf("[ACCESS CONTROL] User %s found with tier: %s", hex, user.Tier)
@@ -282,7 +543,11 @@ func (ac *AccessControl) isAllowedUncached(readOrWrite string, hex string) error
 }
 
 func (ac *AccessControl) AddAllowedUser(npub string, read bool, write bool, tier string, createdBy string) error {
-	return ac.statsStore.AddAllowedUser(npub, tier, createdBy)
+	canWrite := write
+	if !read && !write {
+		canWrite = false
+	}
+	return ac.statsStore.AddAllowedUser(npub, canWrite, tier, createdBy)
 }
 
 func (ac *AccessControl) RemoveAllowedUser(npub string) error {

@@ -157,18 +157,6 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// Check read access permissions using the global access control system
 		accessControl := websocket.GetAccessControl()
-		if accessControl != nil {
-
-			// Check if user has read access
-			err := accessControl.CanRead(connPubkey)
-			if err != nil {
-				logging.Infof("[ACCESS CONTROL] Read access denied for pubkey: %s", connPubkey)
-				write("NOTICE", "Read access denied: User not in allowed list")
-				return
-			}
-
-			logging.Debugf("[ACCESS CONTROL] Read access granted for user: %s", connPubkey)
-		}
 
 		// Parse search extensions if any filter has a search
 		var searchQueries []search.SearchQuery
@@ -385,6 +373,13 @@ func BuildFilterHandler(store stores.Store) func(read lib_nostr.KindReader, writ
 
 		// Send each unique event to the client
 		for _, event := range uniqueEvents {
+			if accessControl != nil {
+				if err := accessControl.CanReadEvent(event, connPubkey, store); err != nil {
+					logging.Debugf("[ACCESS CONTROL] Skipping event %s for pubkey %s: %v", event.ID, connPubkey, err)
+					continue
+				}
+			}
+
 			// Special handling for kind 10010 events - only visible to the author
 			if event.Kind == 10010 {
 				// Extract the pubkey the event is about (the author)

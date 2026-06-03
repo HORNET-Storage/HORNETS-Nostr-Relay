@@ -140,6 +140,19 @@ func normalizeBootstrapAccessMode(value string) string {
 	}
 }
 
+func normalizeBootstrapReadScope(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "allowed_users", "invite-only":
+		return "allowed_users"
+	case "all_users", "public":
+		return "all_users"
+	case "only_me":
+		return "only-me"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
 func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
 	if relayConfig == nil {
 		return nil
@@ -153,8 +166,15 @@ func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
 
 	switch mode {
 	case "invite-only":
+		readScope := normalizeBootstrapReadScope(stringSetting(allowedUsers["read"]))
+		if readScope == "" {
+			readScope = "allowed_users"
+		}
+		if readScope != "all_users" && readScope != "allowed_users" {
+			return fmt.Errorf("invite-only read access must be public or invite-only")
+		}
 		allowedUsers["mode"] = "invite-only"
-		allowedUsers["read"] = "all_users"
+		allowedUsers["read"] = readScope
 		allowedUsers["write"] = "allowed_users"
 	case "only-me":
 		allowedUsers["mode"] = "only-me"
@@ -594,13 +614,14 @@ func renderBootstrapSetupPage(token string) string {
 					<label for="relay_private_key">Relay private key</label>
 					<input id="relay_private_key" class="key-input" placeholder="hex or nsec key used to identify this relay">
 					<div class="tip">Airlock will reuse this key automatically unless you set a separate Airlock key in Advanced.</div>
+					<div id="relay_private_key_lock_hint" class="tip" hidden>Nestr supplied the signed-in private key for this relay. It is locked here to prevent invite-only access mismatches.</div>
 				</div>
 				<div class="field full subcard">
 					<h3>Relay access</h3>
 					<div class="mode-grid">
 						<label class="mode-option">
 							<strong><input name="access_mode" type="radio" value="invite-only" checked> Invite only</strong>
-							<span class="hint">Anyone can read, invited users can write.</span>
+							<span class="hint">Invited users can write. Read access is configurable below.</span>
 						</label>
 						<label class="mode-option">
 							<strong><input name="access_mode" type="radio" value="only-me"> Only me</strong>
@@ -608,13 +629,22 @@ func renderBootstrapSetupPage(token string) string {
 						</label>
 					</div>
 					<div class="field">
+						<label for="read_access_mode">Read access</label>
+						<select id="read_access_mode">
+							<option value="all_users">Public read</option>
+							<option value="allowed_users">Invite-only read</option>
+						</select>
+						<div id="read_access_mode_hint" class="tip">Choose whether anyone can read from the relay or only invited users can read.</div>
+					</div>
+					<div class="field">
 						<label for="relay_owner_pubkey">Relay owner public key</label>
 						<input id="relay_owner_pubkey" class="key-input" placeholder="leave blank to use the relay private key's public key">
+						<div id="relay_owner_pubkey_lock_hint" class="tip" hidden>The relay owner is locked to the signed-in Nestr account.</div>
 					</div>
 				</div>
 			</div>
 			<div class="actions">
-				<button class="secondary" type="button" onclick="generateRelayKey()">Generate Relay Key</button>
+				<button id="generate_relay_key" class="secondary" type="button" onclick="generateRelayKey()">Generate Relay Key</button>
 				<button class="ghost" type="button" onclick="skipSetup()">Skip Setup</button>
 				<button class="primary" type="button" onclick="applySetup()">Apply Setup</button>
 			</div>
@@ -733,6 +763,9 @@ func renderBootstrapSetupPage(token string) string {
 		const EXAMPLE_AIRLOCK_PRIVATE_KEY = "nsec1yas03jagdjsr8su00g92jurf7am3dldvu9tckyz796z8efpa594qp2nelz";
 		let defaults = { relayConfig: {}, airlockConfig: {}, airlockConfigPath: "" };
 		let generatedRelaySecret = "";
+		let lockedRelayPrivateKey = "";
+		let lockedRelayPrivateKeyDisplay = "";
+		let lockedRelayOwnerPubkey = "";
 
 		function randomHex(bytes) {
 			const values = new Uint8Array(bytes);
@@ -753,6 +786,52 @@ func renderBootstrapSetupPage(token string) string {
 			const status = el("status");
 			status.textContent = message;
 			status.className = ok ? "status ok" : "status bad";
+		}
+
+		function setReadOnlyValue(id, value, locked) {
+			const input = el(id);
+			if (!input) {
+				return;
+			}
+
+			input.value = value;
+			input.readOnly = locked;
+			input.setAttribute("aria-readonly", locked ? "true" : "false");
+		}
+
+		function setRelayOwnerPubkeyValue(displayValue, hexValue, locked) {
+			const input = el("relay_owner_pubkey");
+			if (!input) {
+				return;
+			}
+
+			input.dataset.hexValue = String(hexValue || "").trim();
+			setReadOnlyValue("relay_owner_pubkey", displayValue, locked);
+		}
+
+		function applyRelayIdentityLock(privateKey, privateKeyDisplay, publicKey, publicKeyDisplay) {
+			lockedRelayPrivateKey = String(privateKey || "").trim();
+			lockedRelayPrivateKeyDisplay = String(privateKeyDisplay || lockedRelayPrivateKey).trim();
+			lockedRelayOwnerPubkey = String(publicKey || "").trim();
+			const ownerDisplayValue = String(publicKeyDisplay || lockedRelayOwnerPubkey).trim();
+
+			if (!lockedRelayPrivateKey || !lockedRelayOwnerPubkey) {
+				return;
+			}
+
+			setReadOnlyValue("relay_private_key", lockedRelayPrivateKeyDisplay || lockedRelayPrivateKey, true);
+			setRelayOwnerPubkeyValue(ownerDisplayValue, lockedRelayOwnerPubkey, true);
+			el("relay_public_key").value = "";
+			el("relay_dht_seed").value = "";
+			el("airlock_private_key").value = "";
+			el("relay_private_key_lock_hint").hidden = false;
+			el("relay_owner_pubkey_lock_hint").hidden = false;
+			const generateRelayKeyButton = el("generate_relay_key");
+			if (generateRelayKeyButton) {
+				generateRelayKeyButton.disabled = true;
+			}
+			buildPayload();
+			setStatus("Using the signed-in Nestr key for relay bootstrap.");
 		}
 
 		function deepMerge(target, src) {
@@ -798,17 +877,29 @@ func renderBootstrapSetupPage(token string) string {
 		function syncAccessSettings(relay) {
 			relay.allowed_users = relay.allowed_users || {};
 			const mode = selectedAccessMode();
+			const readScope = el("read_access_mode").value || "all_users";
 			relay.allowed_users.mode = mode;
 			if (mode === "only-me") {
 				relay.allowed_users.read = "only-me";
 				relay.allowed_users.write = "only-me";
 			} else {
-				relay.allowed_users.read = "all_users";
+				relay.allowed_users.read = readScope === "allowed_users" ? "allowed_users" : "all_users";
 				relay.allowed_users.write = "allowed_users";
 			}
 		}
 
 		function updateAccessControls() {
+			const readAccessInput = el("read_access_mode");
+			const readAccessHint = el("read_access_mode_hint");
+			const inviteOnly = selectedAccessMode() === "invite-only";
+
+			readAccessInput.disabled = !inviteOnly;
+			if (!inviteOnly) {
+				readAccessInput.value = "all_users";
+				readAccessHint.textContent = "Only-me mode always keeps reads private to the relay owner.";
+			} else {
+				readAccessHint.textContent = "Choose whether anyone can read from the relay or only invited users can read.";
+			}
 		}
 
 		function buildPayload() {
@@ -819,7 +910,7 @@ func renderBootstrapSetupPage(token string) string {
 			relay.server = relay.server || {};
 			airlock.sidecar = airlock.sidecar || {};
 
-			const relayPrivateKey = el("relay_private_key").value.trim();
+			const relayPrivateKey = lockedRelayPrivateKey || el("relay_private_key").value.trim();
 			const generatedSecret = el("relay_secret_key").value.trim() || generatedRelaySecret || relay.relay.secret_key || "";
 
 			relay.relay.name = el("relay_name").value.trim();
@@ -851,7 +942,7 @@ func renderBootstrapSetupPage(token string) string {
 				relayConfig: relay,
 				airlockConfig: airlock,
 				airlockConfigPath: el("airlock_config_path").value.trim() || defaults.airlockConfigPath || "",
-				relayOwnerPubkey: el("relay_owner_pubkey").value.trim()
+				relayOwnerPubkey: el("relay_owner_pubkey").dataset.hexValue || el("relay_owner_pubkey").value.trim()
 			};
 
 			el("payload_preview").value = JSON.stringify(payload, null, 2);
@@ -896,8 +987,13 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_dht_seed").value = sanitizeSeededValue(relay.dht_seed || relay.dht_key, EXAMPLE_RELAY_DHT_SEED);
 			el("relay_secret_key").value = generatedRelaySecret;
 			el("relay_upnp").checked = typeof server.upnp === "boolean" ? server.upnp : true;
-			el("relay_owner_pubkey").value = sanitizeSeededValue(defaults.relayOwnerPubkey || relay.public_key, EXAMPLE_RELAY_PUBLIC_KEY);
+			setRelayOwnerPubkeyValue(
+				sanitizeSeededValue(defaults.relayOwnerPubkey || relay.public_key, EXAMPLE_RELAY_PUBLIC_KEY),
+				"",
+				false
+			);
 			setAccessMode(["invite-only", "only-me"].includes(allowedUsers.mode) ? allowedUsers.mode : "invite-only");
+			el("read_access_mode").value = allowedUsers.read === "all_users" ? "all_users" : "allowed_users";
 
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";
 			el("airlock_port").value = String(airlock.port || 11006);
@@ -911,13 +1007,21 @@ func renderBootstrapSetupPage(token string) string {
 
 			buildPayload();
 			setStatus("Defaults loaded. Add your relay identity and private key, then apply setup.");
+
+			if (lockedRelayPrivateKey && lockedRelayOwnerPubkey) {
+				applyRelayIdentityLock(lockedRelayPrivateKey, lockedRelayPrivateKeyDisplay, lockedRelayOwnerPubkey);
+			}
 		}
 
 		function generateRelayKey() {
+			if (lockedRelayPrivateKey) {
+				setStatus("Relay private key is locked to the signed-in Nestr account.");
+				return;
+			}
 			el("relay_private_key").value = randomHex(32);
 			el("relay_public_key").value = "";
 			el("relay_dht_seed").value = "";
-			el("relay_owner_pubkey").value = "";
+			setRelayOwnerPubkeyValue("", "", false);
 			buildPayload();
 			setStatus("Generated a relay private key. Public and DHT keys will be derived automatically.");
 		}
@@ -985,6 +1089,18 @@ func renderBootstrapSetupPage(token string) string {
 				} catch {
 					// Ignore partial form state while the user is typing.
 				}
+			});
+
+			window.addEventListener("message", (event) => {
+				if (window.self === window.top) {
+					return;
+				}
+
+				if (event.data?.type !== "hornets-relay-setup-prefill") {
+					return;
+				}
+
+				applyRelayIdentityLock(event.data.privateKey, event.data.privateKeyDisplay, event.data.publicKey, event.data.publicKeyDisplay);
 			});
 		});
 

@@ -454,6 +454,7 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 	var nTagValue string
 	var cloneTagValue string
 	var relayTagValue string
+	var visibilityTagValue string
 	hasPermissionTag := false
 
 	for _, tag := range tags {
@@ -483,11 +484,14 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 		if tag[0] == "relay" && len(tag) >= 2 {
 			relayTagValue = tag[1]
 		}
+		if tag[0] == "visibility" && len(tag) >= 2 {
+			visibilityTagValue = strings.ToLower(strings.TrimSpace(tag[1]))
+		}
 
 		// Ensure at least one valid permission tag is present
-		if tag[0] == "p" && len(tag) == 3 {
+		if tag[0] == "p" && len(tag) >= 3 {
 			permissionLevel := tag[2]
-			if permissionLevel == "maintainer" || permissionLevel == "write" || permissionLevel == "triage" {
+			if permissionLevel == "maintainer" || permissionLevel == "write" || permissionLevel == "triage" || permissionLevel == "read" || permissionLevel == "encrypted-write" {
 				hasPermissionTag = true
 			} else {
 				return "Invalid permission level: " + permissionLevel
@@ -537,6 +541,10 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 	}
 	if errMsg := validateRelayTag(relayTagValue); errMsg != "" {
 		return errMsg
+	}
+
+	if visibilityTagValue != "" && visibilityTagValue != "public" && visibilityTagValue != "private" {
+		return "Invalid 'visibility' tag: expected 'public' or 'private'."
 	}
 
 	if !hasPermissionTag {

@@ -34,6 +34,9 @@ type ServicesResponse struct {
 	Icon          string `json:"icon,omitempty"`
 	Software      string `json:"software,omitempty"`
 	Version       string `json:"version,omitempty"`
+	RelayMode     string `json:"relay_mode,omitempty"`
+	ReadAccess    string `json:"read_access,omitempty"`
+	WriteAccess   string `json:"write_access,omitempty"`
 	SupportedNIPs []int  `json:"supported_nips,omitempty"`
 }
 
@@ -59,6 +62,9 @@ func BuildServicesStreamHandler() hsListener.StreamHandler {
 			Icon:          viper.GetString("relay.icon"),
 			Software:      viper.GetString("relay.software"),
 			Version:       viper.GetString("relay.version"),
+			RelayMode:     viper.GetString("allowed_users.mode"),
+			ReadAccess:    viper.GetString("allowed_users.read"),
+			WriteAccess:   viper.GetString("allowed_users.write"),
 			SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
 		}
 

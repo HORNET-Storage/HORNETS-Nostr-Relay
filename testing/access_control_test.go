@@ -179,7 +179,7 @@ func TestAccessControl_OnlyMeAllowsOwnerOnly(t *testing.T) {
 	if err := statsStore.SetRelayOwner(owner.PublicKey, "test"); err != nil {
 		t.Fatalf("failed to set relay owner: %v", err)
 	}
-	if err := statsStore.AddAllowedUser(allowedUser.PublicKey, "", "test"); err != nil {
+	if err := statsStore.AddAllowedUser(allowedUser.PublicKey, true, "", "test"); err != nil {
 		t.Fatalf("failed to add allowed user: %v", err)
 	}
 

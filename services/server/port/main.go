@@ -32,6 +32,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 
@@ -675,7 +676,21 @@ func main() {
 
 	// Stream Handlers
 	download.AddDownloadHandler(listener, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
-		return true
+		accessControl := websocket.GetAccessControl()
+		if accessControl == nil {
+			return true
+		}
+
+		requesterPubkey := ""
+		requesterSignature := ""
+		if pubKey != nil {
+			requesterPubkey = *pubKey
+		}
+		if signature != nil {
+			requesterSignature = *signature
+		}
+
+		return accessControl.CanReadDag(rootLeaf.Hash, requesterPubkey, requesterSignature, store) == nil
 	})
 
 	upload.AddUploadHandler(listener, store, nil, nil)
