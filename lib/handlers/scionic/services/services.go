@@ -54,7 +54,7 @@ func BuildServicesStreamHandler() hsListener.StreamHandler {
 
 		resp := ServicesResponse{
 			Pubkey:        viper.GetString("relay.public_key"),
-			DHTPubkey:     viper.GetString("DHTPublicKey"),
+			DHTPubkey:     viper.GetString("relay.dht_public_key"),
 			BasePort:      viper.GetInt("server.port"),
 			Name:          viper.GetString("relay.name"),
 			Description:   viper.GetString("relay.description"),

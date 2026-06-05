@@ -3,6 +3,7 @@ package access
 import (
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -91,7 +92,7 @@ func (ac *AccessControl) CanReadEvent(event *nostr.Event, requesterPubkey string
 		return nil
 	}
 
-	if store == nil || !ac.repositoryAccessKindsConfigured() || !ac.isRepositoryEventEligible(event) {
+	if store == nil || !ac.repoReadOverrideEnabled() || !ac.isRepositoryEventEligible(event) {
 		return globalReadErr
 	}
 
@@ -118,7 +119,7 @@ func (ac *AccessControl) CanReadDag(root string, requesterPubkey string, request
 		return nil
 	}
 
-	if store == nil || !ac.repositoryAccessKindsConfigured() {
+	if store == nil || !ac.repoReadOverrideEnabled() {
 		return globalReadErr
 	}
 
@@ -199,6 +200,16 @@ func (ac *AccessControl) repoAccessOverrideEnabled() bool {
 		len(ac.settings.RepoAccessOverrideKinds) > 0
 }
 
+func (ac *AccessControl) repoReadOverrideEnabled() bool {
+	if ac.settings == nil {
+		return false
+	}
+
+	return normalizeAccessSetting(ac.settings.Mode) == "invite-only" &&
+		normalizeAccessSetting(ac.settings.Read) == "allowed_users" &&
+		len(ac.settings.RepoAccessOverrideKinds) > 0
+}
+
 func (ac *AccessControl) repositoryAccessKindsConfigured() bool {
 	return ac.settings != nil && len(ac.settings.RepoAccessOverrideKinds) > 0
 }
@@ -236,7 +247,6 @@ func (ac *AccessControl) findRepositoryPermissionEvent(repoID string, store stor
 	permissionEvents, err := store.QueryEvents(nostr.Filter{
 		Kinds: []int{repositoryPermissionEventKind},
 		Tags:  nostr.TagMap{"r": []string{repoID}},
-		Limit: 1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to query repository permission event: %w", err)
@@ -245,7 +255,44 @@ func (ac *AccessControl) findRepositoryPermissionEvent(repoID string, store stor
 		return nil, fmt.Errorf("repository permission event not found")
 	}
 
-	return permissionEvents[0], nil
+	return latestRepositoryPermissionEvent(permissionEvents), nil
+}
+
+func latestRepositoryPermissionEvent(events []*nostr.Event) *nostr.Event {
+	if len(events) == 0 {
+		return nil
+	}
+
+	sort.SliceStable(events, func(i, j int) bool {
+		left := events[i]
+		right := events[j]
+
+		leftCreated := int64(0)
+		rightCreated := int64(0)
+		if left != nil {
+			leftCreated = left.CreatedAt.Time().Unix()
+		}
+		if right != nil {
+			rightCreated = right.CreatedAt.Time().Unix()
+		}
+
+		if leftCreated != rightCreated {
+			return leftCreated > rightCreated
+		}
+
+		leftID := ""
+		rightID := ""
+		if left != nil {
+			leftID = left.ID
+		}
+		if right != nil {
+			rightID = right.ID
+		}
+
+		return leftID > rightID
+	})
+
+	return events[0]
 }
 
 func (ac *AccessControl) findRepositoryPermissionEventByRoot(root string, store stores.Store) (*nostr.Event, error) {

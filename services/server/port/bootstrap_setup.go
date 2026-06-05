@@ -140,19 +140,6 @@ func normalizeBootstrapAccessMode(value string) string {
 	}
 }
 
-func normalizeBootstrapReadScope(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "allowed_users", "invite-only":
-		return "allowed_users"
-	case "all_users", "public":
-		return "all_users"
-	case "only_me":
-		return "only-me"
-	default:
-		return strings.ToLower(strings.TrimSpace(value))
-	}
-}
-
 func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
 	if relayConfig == nil {
 		return nil
@@ -166,15 +153,8 @@ func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
 
 	switch mode {
 	case "invite-only":
-		readScope := normalizeBootstrapReadScope(stringSetting(allowedUsers["read"]))
-		if readScope == "" {
-			readScope = "allowed_users"
-		}
-		if readScope != "all_users" && readScope != "allowed_users" {
-			return fmt.Errorf("invite-only read access must be public or invite-only")
-		}
 		allowedUsers["mode"] = "invite-only"
-		allowedUsers["read"] = readScope
+		allowedUsers["read"] = "allowed_users"
 		allowedUsers["write"] = "allowed_users"
 	case "only-me":
 		allowedUsers["mode"] = "only-me"
@@ -621,7 +601,7 @@ func renderBootstrapSetupPage(token string) string {
 					<div class="mode-grid">
 						<label class="mode-option">
 							<strong><input name="access_mode" type="radio" value="invite-only" checked> Invite only</strong>
-							<span class="hint">Invited users can write. Read access is configurable below.</span>
+							<span class="hint">Invited users can write to the relay. Repository visibility controls who can read each repo.</span>
 						</label>
 						<label class="mode-option">
 							<strong><input name="access_mode" type="radio" value="only-me"> Only me</strong>
@@ -629,12 +609,8 @@ func renderBootstrapSetupPage(token string) string {
 						</label>
 					</div>
 					<div class="field">
-						<label for="read_access_mode">Read access</label>
-						<select id="read_access_mode">
-							<option value="all_users">Public read</option>
-							<option value="allowed_users">Invite-only read</option>
-						</select>
-						<div id="read_access_mode_hint" class="tip">Choose whether anyone can read from the relay or only invited users can read.</div>
+						<label>Repository access</label>
+						<div id="read_access_mode_hint" class="tip">When creating or importing a repo, you can choose if read access is public or invite-only. Write access is gated to contributors. This is configured on the repo setup page.</div>
 					</div>
 					<div class="field">
 						<label for="relay_owner_pubkey">Relay owner public key</label>
@@ -877,28 +853,23 @@ func renderBootstrapSetupPage(token string) string {
 		function syncAccessSettings(relay) {
 			relay.allowed_users = relay.allowed_users || {};
 			const mode = selectedAccessMode();
-			const readScope = el("read_access_mode").value || "all_users";
 			relay.allowed_users.mode = mode;
 			if (mode === "only-me") {
 				relay.allowed_users.read = "only-me";
 				relay.allowed_users.write = "only-me";
 			} else {
-				relay.allowed_users.read = readScope === "allowed_users" ? "allowed_users" : "all_users";
+				relay.allowed_users.read = "allowed_users";
 				relay.allowed_users.write = "allowed_users";
 			}
 		}
 
 		function updateAccessControls() {
-			const readAccessInput = el("read_access_mode");
 			const readAccessHint = el("read_access_mode_hint");
 			const inviteOnly = selectedAccessMode() === "invite-only";
-
-			readAccessInput.disabled = !inviteOnly;
 			if (!inviteOnly) {
-				readAccessInput.value = "all_users";
-				readAccessHint.textContent = "Only-me mode always keeps reads private to the relay owner.";
+				readAccessHint.textContent = "Only-me mode keeps all relay and repository access private to the relay owner.";
 			} else {
-				readAccessHint.textContent = "Choose whether anyone can read from the relay or only invited users can read.";
+				readAccessHint.textContent = "When creating or importing a repo, you can choose if read access is public or invite-only. Write access is gated to contributors. This is configured on the repo setup page.";
 			}
 		}
 
@@ -993,7 +964,6 @@ func renderBootstrapSetupPage(token string) string {
 				false
 			);
 			setAccessMode(["invite-only", "only-me"].includes(allowedUsers.mode) ? allowedUsers.mode : "invite-only");
-			el("read_access_mode").value = allowedUsers.read === "all_users" ? "all_users" : "allowed_users";
 
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";
 			el("airlock_port").value = String(airlock.port || 11006);
