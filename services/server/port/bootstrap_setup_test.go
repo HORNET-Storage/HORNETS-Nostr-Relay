@@ -31,7 +31,7 @@ func TestSyncBootstrapAccessSettingsInviteOnlyForcesInviteOnlyReadAndWrite(t *te
 	}
 }
 
-func TestSyncBootstrapAccessSettingsOnlyMeForcesPrivateReadAndWrite(t *testing.T) {
+func TestSyncBootstrapAccessSettingsIgnoresOnlyMeAndForcesInviteOnly(t *testing.T) {
 	relayConfig := map[string]interface{}{
 		"allowed_users": map[string]interface{}{
 			"mode":  "only-me",
@@ -45,10 +45,13 @@ func TestSyncBootstrapAccessSettingsOnlyMeForcesPrivateReadAndWrite(t *testing.T
 	}
 
 	allowedUsers := relayConfig["allowed_users"].(map[string]interface{})
-	if got := allowedUsers["read"]; got != "only-me" {
-		t.Fatalf("expected read only-me, got %#v", got)
+	if got := allowedUsers["mode"]; got != "invite-only" {
+		t.Fatalf("expected mode invite-only, got %#v", got)
 	}
-	if got := allowedUsers["write"]; got != "only-me" {
-		t.Fatalf("expected write only-me, got %#v", got)
+	if got := allowedUsers["read"]; got != "allowed_users" {
+		t.Fatalf("expected read allowed_users, got %#v", got)
+	}
+	if got := allowedUsers["write"]; got != "allowed_users" {
+		t.Fatalf("expected write allowed_users, got %#v", got)
 	}
 }

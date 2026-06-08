@@ -129,40 +129,15 @@ func stringSetting(value interface{}) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func normalizeBootstrapAccessMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "only_me":
-		return "only-me"
-	case "invite_only":
-		return "invite-only"
-	default:
-		return strings.ToLower(strings.TrimSpace(value))
-	}
-}
-
 func syncBootstrapAccessSettings(relayConfig map[string]interface{}) error {
 	if relayConfig == nil {
 		return nil
 	}
 
 	allowedUsers := ensureNestedMap(relayConfig, "allowed_users")
-	mode := normalizeBootstrapAccessMode(stringSetting(allowedUsers["mode"]))
-	if mode == "" {
-		mode = "invite-only"
-	}
-
-	switch mode {
-	case "invite-only":
-		allowedUsers["mode"] = "invite-only"
-		allowedUsers["read"] = "allowed_users"
-		allowedUsers["write"] = "allowed_users"
-	case "only-me":
-		allowedUsers["mode"] = "only-me"
-		allowedUsers["read"] = "only-me"
-		allowedUsers["write"] = "only-me"
-	default:
-		return fmt.Errorf("bootstrap access mode must be invite-only or only-me")
-	}
+	allowedUsers["mode"] = "invite-only"
+	allowedUsers["read"] = "allowed_users"
+	allowedUsers["write"] = "allowed_users"
 
 	allowedUsers["last_updated"] = time.Now().Unix()
 	return nil
@@ -396,30 +371,6 @@ func renderBootstrapSetupPage(token string) string {
 			margin: 0;
 			accent-color: var(--accent);
 		}
-		.mode-grid {
-			display: grid;
-			gap: 10px;
-			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		}
-		.mode-option {
-			display: grid;
-			gap: 6px;
-			padding: 12px;
-			border: 1px solid var(--border);
-			border-radius: 14px;
-			background: rgba(15, 23, 34, 0.7);
-			cursor: pointer;
-		}
-		.mode-option input {
-			width: auto;
-			margin: 0;
-			accent-color: var(--accent);
-		}
-		.mode-option strong {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-		}
 		h2,
 		h3 {
 			margin: 0 0 10px;
@@ -598,16 +549,6 @@ func renderBootstrapSetupPage(token string) string {
 				</div>
 				<div class="field full subcard">
 					<h3>Relay access</h3>
-					<div class="mode-grid">
-						<label class="mode-option">
-							<strong><input name="access_mode" type="radio" value="invite-only" checked> Invite only</strong>
-							<span class="hint">Invited users can write to the relay. Repository visibility controls who can read each repo.</span>
-						</label>
-						<label class="mode-option">
-							<strong><input name="access_mode" type="radio" value="only-me"> Only me</strong>
-							<span class="hint">Only the relay owner can read or write.</span>
-						</label>
-					</div>
 					<div class="field">
 						<label>Repository access</label>
 						<div id="read_access_mode_hint" class="tip">When creating or importing a repo, you can choose if read access is public or invite-only. Write access is gated to contributors. This is configured on the repo setup page.</div>
@@ -837,40 +778,11 @@ func renderBootstrapSetupPage(token string) string {
 			}
 		}
 
-		function selectedAccessMode() {
-			return document.querySelector('input[name="access_mode"]:checked')?.value || "invite-only";
-		}
-
-		function setAccessMode(mode) {
-			const normalized = mode === "only-me" ? "only-me" : "invite-only";
-			const input = document.querySelector('input[name="access_mode"][value="' + normalized + '"]');
-			if (input) {
-				input.checked = true;
-			}
-			updateAccessControls();
-		}
-
 		function syncAccessSettings(relay) {
 			relay.allowed_users = relay.allowed_users || {};
-			const mode = selectedAccessMode();
-			relay.allowed_users.mode = mode;
-			if (mode === "only-me") {
-				relay.allowed_users.read = "only-me";
-				relay.allowed_users.write = "only-me";
-			} else {
-				relay.allowed_users.read = "allowed_users";
-				relay.allowed_users.write = "allowed_users";
-			}
-		}
-
-		function updateAccessControls() {
-			const readAccessHint = el("read_access_mode_hint");
-			const inviteOnly = selectedAccessMode() === "invite-only";
-			if (!inviteOnly) {
-				readAccessHint.textContent = "Only-me mode keeps all relay and repository access private to the relay owner.";
-			} else {
-				readAccessHint.textContent = "When creating or importing a repo, you can choose if read access is public or invite-only. Write access is gated to contributors. This is configured on the repo setup page.";
-			}
+			relay.allowed_users.mode = "invite-only";
+			relay.allowed_users.read = "allowed_users";
+			relay.allowed_users.write = "allowed_users";
 		}
 
 		function buildPayload() {
@@ -963,8 +875,6 @@ func renderBootstrapSetupPage(token string) string {
 				"",
 				false
 			);
-			setAccessMode(["invite-only", "only-me"].includes(allowedUsers.mode) ? allowedUsers.mode : "invite-only");
-
 			el("airlock_bind_address").value = airlock.bind_address || "0.0.0.0";
 			el("airlock_port").value = String(airlock.port || 11006);
 			el("airlock_relay").value = airlock.relay || "127.0.0.1:11000";
@@ -1033,6 +943,9 @@ func renderBootstrapSetupPage(token string) string {
 				const { res, data } = await request("/setup/apply", "POST", payload);
 				setStatus(JSON.stringify({ status: res.status, result: data }, null, 2), res.ok);
 				if (res.ok) {
+					if (window.self !== window.top) {
+						window.parent.postMessage({ type: "hornets-relay-setup-applied" }, "*");
+					}
 					setTimeout(() => {
 						setStatus("Setup applied. Relay is transitioning to normal startup...", true);
 					}, 500);
@@ -1054,7 +967,6 @@ func renderBootstrapSetupPage(token string) string {
 		["input", "change"].forEach((eventName) => {
 			document.addEventListener(eventName, () => {
 				try {
-					updateAccessControls();
 					buildPayload();
 				} catch {
 					// Ignore partial form state while the user is typing.
