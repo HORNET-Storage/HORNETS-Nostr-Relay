@@ -561,8 +561,6 @@ func renderBootstrapSetupPage(token string) string {
 				</div>
 			</div>
 			<div class="actions">
-				<button id="generate_relay_key" class="secondary" type="button" onclick="generateRelayKey()">Generate Relay Key</button>
-				<button class="ghost" type="button" onclick="skipSetup()">Skip Setup</button>
 				<button class="primary" type="button" onclick="applySetup()">Apply Setup</button>
 			</div>
 			<div id="status" class="status">Waiting for input...</div>
@@ -598,9 +596,6 @@ func renderBootstrapSetupPage(token string) string {
 							<label for="relay_dht_seed">DHT seed</label>
 							<input id="relay_dht_seed" class="key-input" placeholder="leave blank to derive automatically">
 						</div>
-					</div>
-					<div class="actions">
-						<button class="ghost" type="button" onclick="generateSecret()">Generate Shared Secret</button>
 					</div>
 				</section>
 
@@ -646,9 +641,6 @@ func renderBootstrapSetupPage(token string) string {
 							<label for="airlock_sidecar_executable">Sidecar executable path</label>
 							<input id="airlock_sidecar_executable" placeholder="leave blank to keep the configured installer path">
 						</div>
-					</div>
-					<div class="actions">
-						<button class="ghost" type="button" onclick="generateAirlockKey()">Generate Airlock Key</button>
 					</div>
 				</section>
 			</div>
@@ -743,10 +735,6 @@ func renderBootstrapSetupPage(token string) string {
 			el("airlock_private_key").value = "";
 			el("relay_private_key_lock_hint").hidden = false;
 			el("relay_owner_pubkey_lock_hint").hidden = false;
-			const generateRelayKeyButton = el("generate_relay_key");
-			if (generateRelayKeyButton) {
-				generateRelayKeyButton.disabled = true;
-			}
 			buildPayload();
 			setStatus("Using the signed-in Nestr key for relay bootstrap.");
 		}
@@ -893,32 +881,6 @@ func renderBootstrapSetupPage(token string) string {
 			}
 		}
 
-		function generateRelayKey() {
-			if (lockedRelayPrivateKey) {
-				setStatus("Relay private key is locked to the signed-in Nestr account.");
-				return;
-			}
-			el("relay_private_key").value = randomHex(32);
-			el("relay_public_key").value = "";
-			el("relay_dht_seed").value = "";
-			setRelayOwnerPubkeyValue("", "", false);
-			buildPayload();
-			setStatus("Generated a relay private key. Public and DHT keys will be derived automatically.");
-		}
-
-		function generateSecret() {
-			generatedRelaySecret = randomHex(32);
-			el("relay_secret_key").value = generatedRelaySecret;
-			buildPayload();
-			setStatus("Generated a new relay shared secret.");
-		}
-
-		function generateAirlockKey() {
-			el("airlock_private_key").value = randomHex(32);
-			buildPayload();
-			setStatus("Generated an Airlock private key. Leave it blank to reuse the relay key instead.");
-		}
-
 		async function validateSetup() {
 			try {
 				const payload = buildPayload();
@@ -953,15 +915,6 @@ func renderBootstrapSetupPage(token string) string {
 			} catch (error) {
 				setStatus(String(error), false);
 			}
-		}
-
-		function skipSetup() {
-			setStatus("Setup skipped for now. It will appear again next time if the relay still needs setup.", true);
-			if (window.self !== window.top) {
-				window.parent.postMessage({ type: "hornets-relay-setup-skip" }, "*");
-				return;
-			}
-			window.close();
 		}
 
 		["input", "change"].forEach((eventName) => {
