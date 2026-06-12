@@ -40,7 +40,7 @@ func init() {
 	RegisterResolver("16629", &RepoPermissionResolver{})
 }
 
-// RepoPermissionResolver resolves the owner of a Nestr git repository.
+// RepoPermissionResolver resolves the owner of a Nosis git repository.
 type RepoPermissionResolver struct{}
 
 func (r *RepoPermissionResolver) ResolveOwner(store stores.Store, resourceID string) (string, error) {

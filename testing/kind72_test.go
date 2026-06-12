@@ -33,11 +33,11 @@ func setupCascadeTestRelay(t *testing.T) *helpers.TestRelay {
 
 // buildRepoPermissionEvent creates a kind 16629 repo permission event.
 func buildRepoPermissionEvent(kp *helpers.TestKeyPair, repoGUID, repoName string, pTags ...nostr.Tag) (*nostr.Event, error) {
-	cloneURL := fmt.Sprintf("nestr://localhost?id=%s&repo_author=%s&repo_name=%s",
+	cloneURL := fmt.Sprintf("nosis://localhost?id=%s&repo_author=%s&repo_name=%s",
 		url.QueryEscape(repoGUID), url.QueryEscape(kp.PublicKey), url.QueryEscape(repoName))
 
 	tags := nostr.Tags{
-		{"alt", "Nestr git repository metadata"},
+		{"alt", "Nosis git repository metadata"},
 		{"r", repoGUID},
 		{"n", repoName},
 		{"clone", cloneURL},

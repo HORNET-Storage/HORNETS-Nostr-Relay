@@ -593,7 +593,7 @@ func CheckSchemaVersion(db *badger.DB) error {
 		if version != currentSchemaVersion {
 			return fmt.Errorf(
 				"database schema version %d is not supported (expected %d).\n"+
-					"Please run:  nestr-tools db migrate --path <database-path>",
+					"Please run:  nosis-tools db migrate --path <database-path>",
 				version, currentSchemaVersion)
 		}
 		return nil
@@ -603,7 +603,7 @@ func CheckSchemaVersion(db *badger.DB) error {
 		return fmt.Errorf(
 			"this database uses the old BadgerHold event format.\n" +
 				"The relay now requires schema v2 (raw BadgerDB events).\n" +
-				"Please run:  nestr-tools db migrate --path <database-path>\n" +
+				"Please run:  nosis-tools db migrate --path <database-path>\n" +
 				"to convert your data before starting the relay")
 	}
 

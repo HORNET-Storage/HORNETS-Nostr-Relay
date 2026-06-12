@@ -34,7 +34,7 @@ func publishExpectReject(ctx context.Context, conn *nostr.Relay, event *nostr.Ev
 // repoAuthor should be the event pubkey for personal repos (clone tag cross-validates this).
 // For org repos with an a-tag, pass the org address as both repoAuthor and aTag.
 func buildPermissionTags(rTag, repoName, repoAuthor, aTag string, pTags ...nostr.Tag) nostr.Tags {
-	cloneURL := fmt.Sprintf("nestr://localhost?id=%s&repo_author=%s&repo_name=%s",
+	cloneURL := fmt.Sprintf("nosis://localhost?id=%s&repo_author=%s&repo_name=%s",
 		url.QueryEscape(rTag), url.QueryEscape(repoAuthor), url.QueryEscape(repoName))
 
 	tags := nostr.Tags{
@@ -249,19 +249,19 @@ func TestKind16629_ValidateATag(t *testing.T) {
 		},
 		{
 			name:        "Invalid a tag - wrong kind",
-			aTag:        "12345:" + owner.PublicKey + ":nestr-organization-test123",
+			aTag:        "12345:" + owner.PublicKey + ":nosis-organization-test123",
 			includeATag: true,
 			expectError: true,
 		},
 		{
 			name:        "Invalid a tag - bad pubkey",
-			aTag:        "39504:badpubkey:nestr-organization-test123",
+			aTag:        "39504:badpubkey:nosis-organization-test123",
 			includeATag: true,
 			expectError: true,
 		},
 		{
 			name:        "Invalid a tag - short pubkey",
-			aTag:        "39504:abc123:nestr-organization-test123",
+			aTag:        "39504:abc123:nosis-organization-test123",
 			includeATag: true,
 			expectError: true,
 		},
@@ -422,13 +422,13 @@ func TestKind16629_ValidateRelayTag_DHTPublicKey(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "Valid nestr DHT public key",
-			relayTag:    "nestr://" + dhtKey,
+			name:        "Valid nosis DHT public key",
+			relayTag:    "nosis://" + dhtKey,
 			expectError: false,
 		},
 		{
-			name:        "Invalid nestr DHT public key",
-			relayTag:    "nestr://abc123",
+			name:        "Invalid nosis DHT public key",
+			relayTag:    "nosis://abc123",
 			expectError: true,
 		},
 	}

@@ -95,7 +95,7 @@ func validateRelayListTags(tags nostr.Tags) error {
 		}
 
 		// Check for valid markers if present
-		// Accept both standard NIP-65 markers (read/write) and nestr markers (text/media/code/etc)
+		// Accept both standard NIP-65 markers (read/write) and nosis markers (text/media/code/etc)
 		if len(tag) > 2 {
 			marker := tag[2]
 			// Standard NIP-65 markers

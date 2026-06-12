@@ -545,7 +545,7 @@ func renderBootstrapSetupPage(token string) string {
 					<label for="relay_private_key">Relay private key</label>
 					<input id="relay_private_key" class="key-input" placeholder="hex or nsec key used to identify this relay">
 					<div class="tip">Airlock will reuse this key automatically unless you set a separate Airlock key in Advanced.</div>
-					<div id="relay_private_key_lock_hint" class="tip" hidden>Nestr supplied the signed-in private key for this relay. It is locked here to prevent invite-only access mismatches.</div>
+					<div id="relay_private_key_lock_hint" class="tip" hidden>Nosis supplied the signed-in private key for this relay. It is locked here to prevent invite-only access mismatches.</div>
 				</div>
 				<div class="field full subcard">
 					<h3>Relay access</h3>
@@ -556,7 +556,7 @@ func renderBootstrapSetupPage(token string) string {
 					<div class="field">
 						<label for="relay_owner_pubkey">Relay owner public key</label>
 						<input id="relay_owner_pubkey" class="key-input" placeholder="leave blank to use the relay private key's public key">
-						<div id="relay_owner_pubkey_lock_hint" class="tip" hidden>The relay owner is locked to the signed-in Nestr account.</div>
+						<div id="relay_owner_pubkey_lock_hint" class="tip" hidden>The relay owner is locked to the signed-in Nosis account.</div>
 					</div>
 				</div>
 			</div>
@@ -736,7 +736,7 @@ func renderBootstrapSetupPage(token string) string {
 			el("relay_private_key_lock_hint").hidden = false;
 			el("relay_owner_pubkey_lock_hint").hidden = false;
 			buildPayload();
-			setStatus("Using the signed-in Nestr key for relay bootstrap.");
+			setStatus("Using the signed-in Nosis key for relay bootstrap.");
 		}
 
 		function deepMerge(target, src) {

@@ -21,7 +21,7 @@ The following documentation details both the standard flow and the robust paymen
 
 ### Step 1: Accessing the Relay List in the App
 
-The user begins by navigating to the Relay List within their app, such as NostrBox or Nestr. This list displays the relays to which the user is already connected and serves as a management interface for interacting with these relays.
+The user begins by navigating to the Relay List within their app, such as NostrBox or Nosis. This list displays the relays to which the user is already connected and serves as a management interface for interacting with these relays.
 
 ### Step 2: Entering a New Relay
 
@@ -208,7 +208,7 @@ When a user has unlimited storage:
 
 ### Step 1: Accessing the Relay List in the App
 
-The user begins by navigating to the Relay List within their app, such as NostrBox or Nestr. This list displays the relays to which the user is already connected and serves as a management interface for interacting with these relays.
+The user begins by navigating to the Relay List within their app, such as NostrBox or Nosis. This list displays the relays to which the user is already connected and serves as a management interface for interacting with these relays.
 
 ### Step 2: Entering a New Relay
 

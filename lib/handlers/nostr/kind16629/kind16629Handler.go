@@ -555,16 +555,16 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 }
 
 // validateCloneTag validates the clone tag format and consistency with other tags.
-// Expected format: nestr://<host>[:<port>][/path]?id=<GUID>&repo_author=<author>&repo_name=<name>
+// Expected format: nosis://<host>[:<port>][/path]?id=<GUID>&repo_author=<author>&repo_name=<name>
 func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
 	parsed, err := url.Parse(cloneURL)
 	if err != nil {
 		return fmt.Sprintf("Invalid 'clone' tag: failed to parse URL: %s", err)
 	}
 
-	// Must use nestr:// scheme
-	if parsed.Scheme != "nestr" {
-		return fmt.Sprintf("Invalid 'clone' tag: expected 'nestr://' scheme, got '%s://'", parsed.Scheme)
+	// Must use nosis:// scheme
+	if parsed.Scheme != "nosis" {
+		return fmt.Sprintf("Invalid 'clone' tag: expected 'nosis://' scheme, got '%s://'", parsed.Scheme)
 	}
 
 	// Must have a host
@@ -616,7 +616,7 @@ func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
 }
 
 // validateRelayTag validates the relay tag format.
-// Expected format: ws://<host>:<port>[/path], wss://<host>[/path], nestr://<dht-key>, or a raw 64-char DHT public key.
+// Expected format: ws://<host>:<port>[/path], wss://<host>[/path], nosis://<dht-key>, or a raw 64-char DHT public key.
 func validateRelayTag(relayURL string) string {
 	if isValidDHTPublicKey(relayURL) {
 		return ""
@@ -627,21 +627,21 @@ func validateRelayTag(relayURL string) string {
 		return fmt.Sprintf("Invalid 'relay' tag: failed to parse URL: %s", err)
 	}
 
-	if parsed.Scheme != "ws" && parsed.Scheme != "wss" && parsed.Scheme != "nestr" {
-		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://', 'wss://', or 'nestr://' scheme, got '%s://'", parsed.Scheme)
+	if parsed.Scheme != "ws" && parsed.Scheme != "wss" && parsed.Scheme != "nosis" {
+		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://', 'wss://', or 'nosis://' scheme, got '%s://'", parsed.Scheme)
 	}
 
 	if parsed.Host == "" {
 		return "Invalid 'relay' tag: missing host"
 	}
 
-	if parsed.Scheme == "nestr" {
+	if parsed.Scheme == "nosis" {
 		host := parsed.Hostname()
 		if !isValidDHTPublicKey(host) {
-			return "Invalid 'relay' tag: nestr relay address must contain a 64-character DHT public key"
+			return "Invalid 'relay' tag: nosis relay address must contain a 64-character DHT public key"
 		}
 		if parsed.Port() != "" || parsed.Path != "" {
-			return "Invalid 'relay' tag: nestr relay address must be 'nestr://<dht-public-key>'"
+			return "Invalid 'relay' tag: nosis relay address must be 'nosis://<dht-public-key>'"
 		}
 	}
 

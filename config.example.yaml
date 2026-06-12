@@ -267,7 +267,7 @@ push_notifications:
         worker_count: 10
 relay:
     contact: support@hornetstorage.com
-    description: HORNETS relay, the home of GitNestr
+    description: HORNETS relay, the home of Nosis
     dht_seed: ""
     dht_public_key: ""
     dht_private_key: ""
@@ -316,7 +316,7 @@ server:
             dht_pubkey: ""
 # Hyperswarm sidecar configuration
 # A single sidecar process is shared by all HORNET applications on the machine.
-# The relay starts it in persistent mode; other tools (gitnestr, airlock) connect to it.
+# The relay starts it in persistent mode; other tools (nosis, airlock) connect to it.
 sidecar:
     # RPC address of the sidecar process
     address: "127.0.0.1:9100"
