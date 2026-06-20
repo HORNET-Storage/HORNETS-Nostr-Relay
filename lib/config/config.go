@@ -926,7 +926,7 @@ func setDefaults() {
 	viper.SetDefault("relay.name", "HORNETS")
 	viper.SetDefault("relay.description", "HORNETS relay, the home of Nosis")
 	viper.SetDefault("relay.contact", "support@hornetstorage.com")
-	viper.SetDefault("relay.icon", "http://localhost:11002/logo-dark-192.png")
+	viper.SetDefault("relay.icon", "http://localhost:11002/logo.png")
 	viper.SetDefault("relay.software", "HORNETS")
 	viper.SetDefault("relay.version", "0.0.1")
 	viper.SetDefault("relay.service_tag", "hornet-storage-service")
