@@ -27,6 +27,12 @@ func handleReqMessage(c *websocket.Conn, env *nostr.ReqEnvelope, state *connecti
 
 		setListener(env.SubscriptionID, c, env.Filters, cancelFunc)
 
+		// If the connection authenticated before this REQ, sync that state
+		// to the listener data so live notifications reach this subscriber.
+		if state.authenticated {
+			AuthenticateConnection(c)
+		}
+
 		read := func() ([]byte, error) {
 			// Create a wrapper structure that includes both the request and authentication info
 			wrapper := struct {

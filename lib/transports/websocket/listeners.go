@@ -119,7 +119,9 @@ func setListener(id string, ws *websocket.Conn, filters nostr.Filters, cancel co
 	})
 
 	conData.subscriptions.Store(id, &Subscription{filters: filters, cancel: cancel})
-	conData.authenticated = false
+	// Preserve the connection's existing auth state — don't reset it.
+	// New entries default to authenticated=false (Go zero value);
+	// AuthenticateConnection() sets it to true after successful auth.
 	listeners.Store(ws, conData)
 }
 

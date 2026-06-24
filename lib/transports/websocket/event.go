@@ -89,12 +89,16 @@ func handleEventWithHandler(c *websocket.Conn, env *nostr.EventEnvelope, handler
 		}
 	}
 
+	// Store the event first, then notify. This ensures subscribers who
+	// re-query after receiving the notification will always find the event.
+	handler(read, write)
+
+	// Notify live WebSocket subscribers (async — pushed to a buffered channel
+	// and processed by a dedicated goroutine, so this is non-blocking).
 	notifyListeners(&env.Event)
 
 	// Process event for push notifications
 	if pushService := push.GetGlobalPushService(); pushService != nil {
 		pushService.ProcessEvent(&env.Event)
 	}
-
-	handler(read, write)
 }

@@ -964,14 +964,15 @@ func setDefaults() {
 		10051,        // MIP-00 KeyPackage
 		10411,        // Relay info kind (NO 10011 or 10022 handlers)
 		11011,        // Relay list kind
-		16629, 16630, // Ephemeral kinds
+		31415, 16630, // Parameterized replaceable kinds (repository permissions), branch metadata
 		19841, 19842, 19843, // Subscription kinds
 		22242,               // Auth kind
 		30000, 30008, 30009, // Parameterized replaceable kinds
 		30023, 30078, 30079, 30301, 30302, // Long-form content kinds
+		30303, // Repository blacklist (parameterized replaceable)
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1111", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051", "kind72", "kind73", "kind74", "kind75", "kind76", "kind77", "kind6927", "kind7007", "kind16629", "kind16630", "kind30078", "kind30301", "kind30302"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1111", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051", "kind72", "kind73", "kind74", "kind75", "kind76", "kind77", "kind6927", "kind7007", "kind31415", "kind16630", "kind30078", "kind30301", "kind30302", "kind30303"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -1002,7 +1003,7 @@ func setDefaults() {
 	viper.SetDefault("allowed_users.mode", "public")
 	viper.SetDefault("allowed_users.read", "all_users")
 	viper.SetDefault("allowed_users.write", "all_users")
-	viper.SetDefault("allowed_users.repo_access_override_kinds", []int{72, 73, 74, 75, 76, 77, 1111, 6927, 7007, 16629, 16630, 30078, 30301, 30302})
+	viper.SetDefault("allowed_users.repo_access_override_kinds", []int{72, 73, 74, 75, 76, 77, 1111, 6927, 7007, 31415, 16630, 30078, 30301, 30302, 30303})
 	viper.SetDefault("allowed_users.last_updated", 0)
 	viper.SetDefault("allowed_users.batch_update_on_startup", false) // Disable batch update by default for performance
 
@@ -1091,8 +1092,9 @@ func setDefaults() {
 		// Custom kinds
 		"9372":  "888", // Custom application
 		"9373":  "888", // Custom application
-		"16629": "888", // Custom HORNETS
-		"16630": "888", // Custom HORNETS
+		"31415": "888", // Custom HORNETS (repository permissions, parameterized replaceable)
+		"16630": "888", // Custom HORNETS (branch metadata)
+		"30303": "888", // Custom HORNETS (repository blacklist)
 
 		// Additional kinds
 		"10010": "51",  // Additional list type

@@ -22,16 +22,16 @@ import (
 func setupCascadeTestRelay(t *testing.T) *helpers.TestRelay {
 	t.Helper()
 	cfg := helpers.DefaultTestConfig()
-	// Include kinds needed: 5 (NIP-09), 72 (cascade), 16629 (repo), 73 (push),
+	// Include kinds needed: 5 (NIP-09), 72 (cascade), 31415 (repo), 73 (push),
 	// 74 (PR), 75 (approval), 76 (tag), 16630 (branch), 7007 (star),
 	// 39504-39506 (org)
-	cfg.AllowedKinds = []int{5, 72, 73, 74, 75, 76, 7007, 16629, 16630, 39504, 39505, 39506}
+	cfg.AllowedKinds = []int{5, 72, 73, 74, 75, 76, 7007, 31415, 16630, 39504, 39505, 39506}
 	relay, err := helpers.NewTestRelay(cfg)
 	require.NoError(t, err, "Failed to create test relay")
 	return relay
 }
 
-// buildRepoPermissionEvent creates a kind 16629 repo permission event.
+// buildRepoPermissionEvent creates a kind 31415 repo permission event.
 func buildRepoPermissionEvent(kp *helpers.TestKeyPair, repoGUID, repoName string, pTags ...nostr.Tag) (*nostr.Event, error) {
 	cloneURL := fmt.Sprintf("nosis://localhost?id=%s&repo_author=%s&repo_name=%s",
 		url.QueryEscape(repoGUID), url.QueryEscape(kp.PublicKey), url.QueryEscape(repoName))
@@ -48,7 +48,7 @@ func buildRepoPermissionEvent(kp *helpers.TestKeyPair, repoGUID, repoName string
 		tags = append(tags, p)
 	}
 
-	return helpers.CreateGenericEvent(kp, 16629, "", tags)
+	return helpers.CreateGenericEvent(kp, 31415, "", tags)
 }
 
 // buildPushEvent creates a kind 73 push event referencing the repo and DAG roots.
@@ -114,8 +114,8 @@ func buildStarEvent(kp *helpers.TestKeyPair, repoGUID, repoOwnerPubkey string) (
 	tags := nostr.Tags{
 		{"r", repoGUID},
 		{"p", repoOwnerPubkey},
-		{"a", fmt.Sprintf("16629:%s", repoGUID)},
-		{"k", "16629"},
+		{"a", fmt.Sprintf("31415:%s", repoGUID)},
+		{"k", "31415"},
 	}
 	return helpers.CreateGenericEvent(kp, 7007, "+", tags)
 }
@@ -194,7 +194,7 @@ func TestCascadeDelete_BasicRepoDelete(t *testing.T) {
 	assert.GreaterOrEqual(t, len(events), 8, "Expected at least 8 events before cascade delete")
 
 	// ---- Cascade delete ----
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "16629", "Deleting test repo")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "31415", "Deleting test repo")
 	err = conn.Publish(ctx, *cascadeEvent)
 	require.NoError(t, err, "Cascade delete should succeed")
 
@@ -243,7 +243,7 @@ func TestCascadeDelete_PermissionDenied(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Attacker tries cascade delete
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(attacker, repoGUID, "16629", "Malicious delete")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(attacker, repoGUID, "31415", "Malicious delete")
 
 	// Use short timeout — we expect rejection
 	pubCtx, pubCancel := context.WithTimeout(ctx, 2*time.Second)
@@ -293,7 +293,7 @@ func TestCascadeDelete_ContributorCannotDelete(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Contributor tries to cascade delete
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(contributor, repoGUID, "16629", "Contributor delete attempt")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(contributor, repoGUID, "31415", "Contributor delete attempt")
 	pubCtx, pubCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer pubCancel()
 	conn.Publish(pubCtx, *cascadeEvent)
@@ -327,7 +327,7 @@ func TestCascadeDelete_MissingRTag(t *testing.T) {
 
 	// Kind 72 without r tag
 	event, _ := helpers.CreateGenericEvent(kp, 72, "bad request", nostr.Tags{
-		{"k", "16629"},
+		{"k", "31415"},
 	})
 
 	pubCtx, pubCancel := context.WithTimeout(ctx, 2*time.Second)
@@ -416,7 +416,7 @@ func TestCascadeDelete_NonexistentResource(t *testing.T) {
 	kp, _ := helpers.GenerateKeyPair()
 
 	// Cascade delete a GUID that has no permission event
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(kp, uuid.New().String(), "16629", "delete ghost")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(kp, uuid.New().String(), "31415", "delete ghost")
 
 	pubCtx, pubCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer pubCancel()
@@ -482,7 +482,7 @@ func TestCascadeDelete_MultipleContributorsAllDeleted(t *testing.T) {
 	assert.Equal(t, 8, len(events), "Expected 8 events before cascade delete")
 
 	// Owner cascade deletes
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "16629", "Cleaning up")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "31415", "Cleaning up")
 	require.NoError(t, conn.Publish(ctx, *cascadeEvent))
 
 	time.Sleep(300 * time.Millisecond)
@@ -520,7 +520,7 @@ func TestCascadeDelete_TombstoneQueryable(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Cascade delete
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "16629", "Testing tombstone")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "31415", "Testing tombstone")
 	require.NoError(t, conn.Publish(ctx, *cascadeEvent))
 
 	time.Sleep(200 * time.Millisecond)
@@ -569,7 +569,7 @@ func TestCascadeDelete_IsolationBetweenRepos(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Delete repo A only
-	cascadeA, _ := helpers.CreateCascadeDeleteEvent(owner, repoA, "16629", "Delete repo A")
+	cascadeA, _ := helpers.CreateCascadeDeleteEvent(owner, repoA, "31415", "Delete repo A")
 	require.NoError(t, conn.Publish(ctx, *cascadeA))
 
 	time.Sleep(300 * time.Millisecond)
@@ -642,7 +642,7 @@ func TestCascadeDelete_DAGOwnershipRelease(t *testing.T) {
 	assert.Equal(t, 3, len(events), "Expected 3 events before cascade delete")
 
 	// Cascade delete
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "16629", "DAG test delete")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "31415", "DAG test delete")
 	require.NoError(t, conn.Publish(ctx, *cascadeEvent))
 
 	time.Sleep(300 * time.Millisecond)
@@ -705,7 +705,7 @@ func TestCascadeDelete_EmptyRepo(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Cascade delete
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "16629", "Delete empty repo")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "31415", "Delete empty repo")
 	require.NoError(t, conn.Publish(ctx, *cascadeEvent))
 
 	time.Sleep(200 * time.Millisecond)
@@ -758,7 +758,7 @@ func TestCascadeDelete_PRWithDagRoot(t *testing.T) {
 	assert.Equal(t, 3, len(events))
 
 	// Cascade delete
-	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "16629", "Delete PR repo")
+	cascadeEvent, _ := helpers.CreateCascadeDeleteEvent(owner, repoGUID, "31415", "Delete PR repo")
 	require.NoError(t, conn.Publish(ctx, *cascadeEvent))
 
 	time.Sleep(300 * time.Millisecond)

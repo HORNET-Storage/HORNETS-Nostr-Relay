@@ -21,7 +21,7 @@ import (
 const (
 	// accessCacheTTL is how long access check results are cached.
 	accessCacheTTL                = 30 * time.Second
-	repositoryPermissionEventKind = 16629
+	repositoryPermissionEventKind = 31415
 	repositoryPushEventKind       = 73
 	repositoryPullRequestKind     = 74
 	repositoryVisibilityPrivate   = "private"

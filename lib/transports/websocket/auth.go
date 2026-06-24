@@ -40,4 +40,10 @@ func handleAuthMessage(c *websocket.Conn, env *nostr.AuthEnvelope, challenge str
 	state.pubkey = result.PubKey
 	state.authenticated = true
 	state.blockedCheck = time.Now()
+
+	// Sync auth state to listener data so live subscription notifications
+	// are dispatched to this connection. Safe to ignore the error — it just
+	// means no subscriptions exist yet; the next REQ will pick up the
+	// auth state from connectionState.
+	AuthenticateConnection(c)
 }

@@ -27,7 +27,7 @@ func TestCanWriteEventAllowsRepoCollaboratorInInviteOnlyMode(t *testing.T) {
 		ID:        accessTestEventID(1),
 		PubKey:    owner,
 		CreatedAt: nostr.Now(),
-		Kind:      16629,
+		Kind:      31415,
 		Tags: nostr.Tags{
 			{"r", repoID},
 			{"p", maintainer, "maintainer"},
@@ -88,7 +88,7 @@ func TestCanWriteRequiresWriteCapableAllowedUser(t *testing.T) {
 		Mode:                    "invite-only",
 		Read:                    "allowed_users",
 		Write:                   "allowed_users",
-		RepoAccessOverrideKinds: []int{73, 74, 16629, 30078},
+		RepoAccessOverrideKinds: []int{73, 74, 31415, 30078},
 	})
 
 	if err := accessControl.CanRead(readOnlyUser); err != nil {
@@ -114,7 +114,7 @@ func TestCanReadEventUsesLatestRepositoryPermissionEvent(t *testing.T) {
 		ID:        accessTestEventID(10),
 		PubKey:    owner,
 		CreatedAt: nostr.Timestamp(100),
-		Kind:      16629,
+		Kind:      31415,
 		Tags: nostr.Tags{
 			{"r", repoID},
 			{"visibility", "private"},
@@ -128,7 +128,7 @@ func TestCanReadEventUsesLatestRepositoryPermissionEvent(t *testing.T) {
 		ID:        accessTestEventID(11),
 		PubKey:    owner,
 		CreatedAt: nostr.Timestamp(200),
-		Kind:      16629,
+		Kind:      31415,
 		Tags: nostr.Tags{
 			{"r", repoID},
 			{"visibility", "private"},
@@ -143,7 +143,7 @@ func TestCanReadEventUsesLatestRepositoryPermissionEvent(t *testing.T) {
 		Mode:                    "invite-only",
 		Read:                    "allowed_users",
 		Write:                   "allowed_users",
-		RepoAccessOverrideKinds: []int{73, 74, 16629, 30078},
+		RepoAccessOverrideKinds: []int{73, 74, 31415, 30078},
 	})
 
 	repoIssueEvent := &nostr.Event{
@@ -185,7 +185,7 @@ func TestCanReadDagAllowsMaintainerWhenBundleTagResolvesRepo(t *testing.T) {
 		ID:        accessTestEventID(20),
 		PubKey:    ownerPub,
 		CreatedAt: nostr.Timestamp(100),
-		Kind:      16629,
+		Kind:      31415,
 		Tags: nostr.Tags{
 			{"r", repoID},
 			{"visibility", "private"},
@@ -234,7 +234,7 @@ func TestCanReadDagAllowsMaintainerWhenBundleTagResolvesRepo(t *testing.T) {
 		Mode:                    "invite-only",
 		Read:                    "allowed_users",
 		Write:                   "allowed_users",
-		RepoAccessOverrideKinds: []int{73, 74, 16629, 30078},
+		RepoAccessOverrideKinds: []int{73, 74, 31415, 30078},
 	})
 
 	bundleEvents, err := store.QueryEvents(nostr.Filter{
@@ -277,7 +277,7 @@ func TestRepositoryReadOverrideDisabledInOnlyMeMode(t *testing.T) {
 		ID:        accessTestEventID(30),
 		PubKey:    owner,
 		CreatedAt: nostr.Timestamp(100),
-		Kind:      16629,
+		Kind:      31415,
 		Tags: nostr.Tags{
 			{"r", repoID},
 			{"visibility", "public"},
@@ -315,7 +315,7 @@ func TestRepositoryReadOverrideDisabledInOnlyMeMode(t *testing.T) {
 		Mode:                    "only-me",
 		Read:                    "only-me",
 		Write:                   "only-me",
-		RepoAccessOverrideKinds: []int{73, 74, 16629, 30078},
+		RepoAccessOverrideKinds: []int{73, 74, 31415, 30078},
 	})
 
 	if err := accessControl.CanReadEvent(&nostr.Event{Kind: 73, Tags: nostr.Tags{{"r", repoID}}}, readerPub, store); err == nil {

@@ -30,7 +30,7 @@ func isGUID(s string) bool {
 	return uuidRegex.MatchString(strings.ToLower(s))
 }
 
-func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+func BuildKind31415Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -74,18 +74,18 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Determine ownership type and get the owner pubkey
 		isOrgRepo, ownerPubkey, orgDtag := parseOwnership(aTag, rTag, env.Event.PubKey)
 
-		logging.Infof("[Kind16629] Processing event - rTag: %s, aTag: %s, isOrg: %v, owner: %s, publisher: %s",
+		logging.Infof("[Kind31415] Processing event - rTag: %s, aTag: %s, isOrg: %v, owner: %s, publisher: %s",
 			rTag, aTag, isOrgRepo, ownerPubkey, env.Event.PubKey)
 
 		// Query for existing events with the same r tag
 		existingEvents, err := store.QueryEvents(nostr.Filter{
-			Kinds: []int{16629},
+			Kinds: []int{31415},
 			Tags: nostr.TagMap{
 				"r": []string{rTag},
 			},
 		})
 		if err != nil {
-			logging.Errorf("[Kind16629] Error querying existing events: %v", err)
+			logging.Errorf("[Kind31415] Error querying existing events: %v", err)
 			write("OK", env.Event.ID, false, "Failed to query existing events")
 			return
 		}
@@ -108,15 +108,15 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			// Migration: new event has 'a' tag, existing events don't
 			isMigrationToOrg = !existingHasATag
 			if isMigrationToOrg {
-				logging.Infof("[Kind16629] Detected migration scenario: repo %s is being migrated to org", rTag)
+				logging.Infof("[Kind31415] Detected migration scenario: repo %s is being migrated to org", rTag)
 			}
 		}
 
-		logging.Infof("[Kind16629] Found %d existing events for r tag: %s", len(existingEvents), rTag)
+		logging.Infof("[Kind31415] Found %d existing events for r tag: %s", len(existingEvents), rTag)
 
 		// Verify the publisher has permission to create/update this event
 		if !verifyPublisherPermission(store, env.Event.PubKey, isOrgRepo, ownerPubkey, orgDtag, isFirstEvent, isMigrationToOrg) {
-			logging.Infof("[Kind16629] Permission denied for pubkey %s on repo %s (isOrg: %v, isFirst: %v, isMigration: %v)",
+			logging.Infof("[Kind31415] Permission denied for pubkey %s on repo %s (isOrg: %v, isFirst: %v, isMigration: %v)",
 				env.Event.PubKey, rTag, isOrgRepo, isFirstEvent, isMigrationToOrg)
 			write("OK", env.Event.ID, false, "Permission denied: you are not authorized to update this repository's permissions")
 			return
@@ -128,7 +128,7 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
-		logging.Infof("[Kind16629] Successfully stored new event %s", env.Event.ID)
+		logging.Infof("[Kind31415] Successfully stored new event %s", env.Event.ID)
 
 		// After successful storage, delete ALL old events with the same r tag
 		// (there should only be one, but delete all to fix any previous duplicates)
@@ -136,16 +136,16 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		for _, oldEvent := range existingEvents {
 			if oldEvent.ID != env.Event.ID {
 				if err := store.DeleteEvent(oldEvent.ID); err != nil {
-					logging.Errorf("[Kind16629] Warning: failed to delete old event %s: %v", oldEvent.ID, err)
+					logging.Errorf("[Kind31415] Warning: failed to delete old event %s: %v", oldEvent.ID, err)
 				} else {
 					deletedCount++
-					logging.Infof("[Kind16629] Deleted old event %s", oldEvent.ID)
+					logging.Infof("[Kind31415] Deleted old event %s", oldEvent.ID)
 				}
 			}
 		}
 
 		if deletedCount > 0 {
-			logging.Infof("[Kind16629] Deleted %d old events for r tag: %s", deletedCount, rTag)
+			logging.Infof("[Kind31415] Deleted %d old events for r tag: %s", deletedCount, rTag)
 		}
 
 		// Successfully processed event
@@ -239,14 +239,14 @@ func verifyPublisherPermission(store stores.Store, publisherPubkey string, isOrg
 func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey string, orgDtag string) bool {
 	// Org owner is always a member
 	if pubkey == orgOwnerPubkey {
-		logging.Infof("[Kind16629] Pubkey %s is org owner", pubkey)
+		logging.Infof("[Kind31415] Pubkey %s is org owner", pubkey)
 		return true
 	}
 
 	// Build the org address for querying: "39504:orgOwnerPubkey:orgDtag"
 	orgAddress := fmt.Sprintf("%d:%s:%s", OrgEventKind, orgOwnerPubkey, orgDtag)
 
-	logging.Infof("[Kind16629] Checking if %s is a verified member of org %s", pubkey, orgAddress)
+	logging.Infof("[Kind31415] Checking if %s is a verified member of org %s", pubkey, orgAddress)
 
 	// Query for invitations to this user for this organization
 	invitations, err := store.QueryEvents(nostr.Filter{
@@ -258,17 +258,17 @@ func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey strin
 		},
 	})
 	if err != nil {
-		logging.Errorf("[Kind16629] Error querying invitations: %v", err)
+		logging.Errorf("[Kind31415] Error querying invitations: %v", err)
 		return false
 	}
 
-	logging.Infof("[Kind16629] Found %d invitations for pubkey %s", len(invitations), pubkey)
+	logging.Infof("[Kind31415] Found %d invitations for pubkey %s", len(invitations), pubkey)
 
 	// Check each invitation for a valid acceptance
 	for _, invitation := range invitations {
 		// Check if the invitation has been deleted
 		if isEventDeleted(store, invitation.ID, orgOwnerPubkey) {
-			logging.Infof("[Kind16629] Invitation %s has been deleted", invitation.ID)
+			logging.Infof("[Kind31415] Invitation %s has been deleted", invitation.ID)
 			continue
 		}
 
@@ -281,7 +281,7 @@ func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey strin
 			},
 		})
 		if err != nil {
-			logging.Errorf("[Kind16629] Error querying invitation responses: %v", err)
+			logging.Errorf("[Kind31415] Error querying invitation responses: %v", err)
 			continue
 		}
 
@@ -291,18 +291,18 @@ func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey strin
 			if status == "accepted" {
 				// Check if the acceptance has been deleted
 				if isEventDeleted(store, response.ID, pubkey) {
-					logging.Infof("[Kind16629] Acceptance %s has been deleted", response.ID)
+					logging.Infof("[Kind31415] Acceptance %s has been deleted", response.ID)
 					continue
 				}
 
-				logging.Infof("[Kind16629] Found valid acceptance for pubkey %s (invitation: %s, acceptance: %s)",
+				logging.Infof("[Kind31415] Found valid acceptance for pubkey %s (invitation: %s, acceptance: %s)",
 					pubkey, invitation.ID, response.ID)
 				return true
 			}
 		}
 	}
 
-	logging.Infof("[Kind16629] Pubkey %s is NOT a verified org member", pubkey)
+	logging.Infof("[Kind31415] Pubkey %s is NOT a verified org member", pubkey)
 	return false
 }
 
@@ -316,7 +316,7 @@ func isEventDeleted(store stores.Store, eventID string, authorPubkey string) boo
 		},
 	})
 	if err != nil {
-		logging.Errorf("[Kind16629] Error checking deletion status: %v", err)
+		logging.Errorf("[Kind31415] Error checking deletion status: %v", err)
 		return false
 	}
 
@@ -447,7 +447,7 @@ func validateATag(value string) string {
 	return ""
 }
 
-// validateTags checks if the tags array contains the expected structure for a Kind 16629 event.
+// validateTags checks if the tags array contains the expected structure for a Kind 31415 event.
 func validateTags(tags nostr.Tags, eventPubkey string) string {
 	var rTagValue string
 	var aTagValue string
@@ -507,6 +507,21 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 	// Validate r tag format
 	if errMsg := validateRTag(rTagValue); errMsg != "" {
 		return errMsg
+	}
+
+	// Validate required d tag (parameterized replaceable identifier, must match r tag)
+	dTagValue := ""
+	for _, tag := range tags {
+		if len(tag) >= 2 && tag[0] == "d" {
+			dTagValue = tag[1]
+			break
+		}
+	}
+	if dTagValue == "" {
+		return "Missing 'd' tag (parameterized replaceable identifier)."
+	}
+	if dTagValue != rTagValue {
+		return "The 'd' tag value must match the 'r' tag value."
 	}
 
 	// Validate required n tag (repo name for efficient relay queries)
