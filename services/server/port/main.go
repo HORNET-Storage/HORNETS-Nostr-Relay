@@ -693,7 +693,19 @@ func main() {
 		return accessControl.CanReadDag(rootLeaf.Hash, requesterPubkey, requesterSignature, store) == nil
 	})
 
-	upload.AddUploadHandler(listener, store, nil, nil)
+	upload.AddUploadHandler(listener, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+		accessControl := websocket.GetAccessControl()
+		if accessControl == nil {
+			return true
+		}
+
+		requesterPubkey := ""
+		if pubKey != nil {
+			requesterPubkey = *pubKey
+		}
+
+		return accessControl.CanWriteDag(requesterPubkey, store) == nil
+	}, nil)
 	query.AddQueryHandler(listener, store)
 	claim.AddClaimOwnershipHandler(listener, store)
 	services.AddServicesHandler(listener)

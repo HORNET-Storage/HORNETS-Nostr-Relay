@@ -26,6 +26,11 @@ const (
 	repositoryPullRequestKind     = 74
 	repositoryVisibilityPrivate   = "private"
 	repositoryVisibilityPublic    = "public"
+
+	// Interaction permission levels stored as tag values on the repository permission event.
+	interactionPermissionWot              = "wot"
+	interactionPermissionMaintainersTriage = "maintainers_triage"
+	interactionPermissionMaintainers      = "maintainers"
 )
 
 // cachedResult stores an access check result with expiry.
@@ -146,6 +151,81 @@ func (ac *AccessControl) CanReadDag(root string, requesterPubkey string, request
 	}
 
 	return globalReadErr
+}
+
+// CanWriteDag checks whether a pubkey is allowed to upload a DAG.
+// In invite-only mode the uploader must either have global relay write access,
+// be a collaborator on at least one repository, or a public repository must
+// exist that allows WoT PR creation (which requires DAG upload).
+func (ac *AccessControl) CanWriteDag(pubkey string, store stores.Store) error {
+	globalWriteErr := ac.CanWrite(pubkey)
+	if globalWriteErr == nil {
+		return nil
+	}
+
+	if store == nil || !ac.repoAccessOverrideEnabled() {
+		return globalWriteErr
+	}
+
+	pubkey = strings.ToLower(strings.TrimSpace(pubkey))
+	if pubkey == "" || !isValidHexPubkey(pubkey) {
+		return globalWriteErr
+	}
+
+	// Check cache
+	cacheKey := "dag-write:" + pubkey
+	if cached, ok := ac.accessCache.Load(cacheKey); ok {
+		entry := cached.(*cachedResult)
+		if time.Now().Before(entry.expiresAt) {
+			return entry.err
+		}
+		ac.accessCache.Delete(cacheKey)
+	}
+
+	result := ac.canWriteDagUncached(pubkey, store)
+
+	ac.accessCache.Store(cacheKey, &cachedResult{
+		err:       result,
+		expiresAt: time.Now().Add(accessCacheTTL),
+	})
+
+	return result
+}
+
+func (ac *AccessControl) canWriteDagUncached(pubkey string, store stores.Store) error {
+	permissionEvents, err := store.QueryEvents(nostr.Filter{
+		Kinds: []int{repositoryPermissionEventKind},
+	})
+	if err != nil || len(permissionEvents) == 0 {
+		return fmt.Errorf("no repository access for DAG write")
+	}
+
+	for _, event := range permissionEvents {
+		// Repo owner can always upload
+		if strings.ToLower(event.PubKey) == pubkey {
+			return nil
+		}
+		// Any p tag entry means the user is a collaborator
+		for _, tag := range event.Tags {
+			if len(tag) >= 2 && tag[0] == "p" && strings.ToLower(tag[1]) == pubkey {
+				return nil
+			}
+		}
+	}
+
+	// Not a collaborator anywhere — check if any public repo allows WoT PR
+	// creation (which requires uploading a DAG bundle)
+	for _, event := range permissionEvents {
+		if repositoryPermissionVisibility(event) == repositoryVisibilityPrivate {
+			continue
+		}
+		prPerm := strings.ToLower(strings.TrimSpace(firstTagValue(event.Tags, "pr_permissions")))
+		if prPerm == interactionPermissionWot {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("pubkey does not have DAG write access through any repository")
 }
 
 func (ac *AccessControl) IsAllowed(readOrWrite string, npub string, requireWriteCapability bool) error {
@@ -346,18 +426,27 @@ func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store store
 		return fmt.Errorf("repository permission event not found")
 	}
 
+	// Check standard role-based access first
 	if repositoryEventRequiresDagWrite(event) {
-		if !repoPermissionAllowsDagWrite(permissionEvents[0], pubkey) {
-			return fmt.Errorf("pubkey does not have repository DAG write access")
+		if repoPermissionAllowsDagWrite(permissionEvents[0], pubkey) {
+			return nil
 		}
+	} else if repoPermissionAllowsEventWrite(permissionEvents[0], pubkey) {
 		return nil
 	}
 
-	if !repoPermissionAllowsEventWrite(permissionEvents[0], pubkey) {
-		return fmt.Errorf("pubkey does not have repository event write access")
+	// Standard role check failed — try interaction permission fallback
+	interactionTag := interactionPermissionTagForKind(event.Kind)
+	if interactionTag != "" && repoInteractionPermissionAllowsWrite(permissionEvents[0], pubkey, interactionTag) {
+		logging.Debugf("[ACCESS CONTROL] Repository interaction permission override granted for pubkey %s on kind %d via %s", pubkey, event.Kind, interactionTag)
+		return nil
 	}
 
-	return nil
+	// Both checks failed
+	if repositoryEventRequiresDagWrite(event) {
+		return fmt.Errorf("pubkey does not have repository DAG write access")
+	}
+	return fmt.Errorf("pubkey does not have repository event write access")
 }
 
 func firstTagValue(tags nostr.Tags, key string) string {
@@ -501,6 +590,70 @@ func verifyRootRequestSignature(root string, requesterPubkey string, requesterSi
 	}
 
 	return signing.VerifySerializedCIDSignature(parsedSignature, root, publicKey)
+}
+
+// interactionPermissionTagForKind maps a Nostr event kind to its interaction
+// permission tag name on the repository permission event. Returns "" if the
+// kind has no interaction permission tag.
+func interactionPermissionTagForKind(kind int) string {
+	switch kind {
+	case repositoryPullRequestKind: // 74
+		return "pr_permissions"
+	default:
+		return ""
+	}
+}
+
+// getUserRoleFromPermissionEvent returns the role a pubkey holds on a repository
+// permission event: "owner", "maintainer", "triage", "write", "read", or "".
+func getUserRoleFromPermissionEvent(permissionEvent *nostr.Event, pubkey string) string {
+	if permissionEvent == nil {
+		return ""
+	}
+	if strings.ToLower(permissionEvent.PubKey) == pubkey {
+		return "owner"
+	}
+	for _, tag := range permissionEvent.Tags {
+		if len(tag) < 3 || tag[0] != "p" || strings.ToLower(tag[1]) != pubkey {
+			continue
+		}
+		for _, roleValue := range tag[2:] {
+			role := strings.ToLower(strings.TrimSpace(roleValue))
+			switch role {
+			case "maintainer", "triage", "write", "read":
+				return role
+			}
+		}
+	}
+	return ""
+}
+
+// repoInteractionPermissionAllowsWrite checks whether the interaction permission
+// tag on a permission event grants write access to the given pubkey.
+// For "wot" the repo must also be public (private repos ignore WoT).
+func repoInteractionPermissionAllowsWrite(permissionEvent *nostr.Event, pubkey string, interactionTag string) bool {
+	if permissionEvent == nil || interactionTag == "" {
+		return false
+	}
+
+	permissionLevel := strings.ToLower(strings.TrimSpace(firstTagValue(permissionEvent.Tags, interactionTag)))
+	if permissionLevel == "" {
+		return false
+	}
+
+	switch permissionLevel {
+	case interactionPermissionWot:
+		// WoT means everyone, but only for public repos
+		return repositoryPermissionVisibility(permissionEvent) != repositoryVisibilityPrivate
+	case interactionPermissionMaintainersTriage:
+		role := getUserRoleFromPermissionEvent(permissionEvent, pubkey)
+		return role == "owner" || role == "maintainer" || role == "triage"
+	case interactionPermissionMaintainers:
+		role := getUserRoleFromPermissionEvent(permissionEvent, pubkey)
+		return role == "owner" || role == "maintainer"
+	default:
+		return false
+	}
 }
 
 // isAllowedUncached performs the actual DB-backed access check (no cache).
