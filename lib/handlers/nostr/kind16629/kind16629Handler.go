@@ -11,6 +11,7 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/wot"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -30,7 +31,11 @@ func isGUID(s string) bool {
 	return uuidRegex.MatchString(strings.ToLower(s))
 }
 
-func BuildKind31415Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+func BuildKind31415Handler(store stores.Store, wotCache ...*wot.Cache) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+	var cache *wot.Cache
+	if len(wotCache) > 0 {
+		cache = wotCache[0]
+	}
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -122,6 +127,33 @@ func BuildKind31415Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			return
 		}
 
+		// Validate wot_file binding before storing: if the event declares a WOT file,
+		// the DAG must already exist in the store with matching ownership metadata.
+		// (Upload always precedes the permission event in client flow.)
+		if wotHash := getTagValue(env.Event.Tags, "wot_file"); wotHash != "" {
+			rootData, err := store.RetrieveLeaf(wotHash, wotHash, false)
+			if err != nil {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: DAG %s not found in store (upload must precede permission event)", wotHash))
+				return
+			}
+			leaf := rootData.Leaf
+			if leaf.AdditionalData == nil || leaf.AdditionalData["wot_file"] != "true" {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: DAG %s is not a WOT file", wotHash))
+				return
+			}
+			wotOwner := strings.ToLower(strings.TrimSpace(leaf.AdditionalData["wot_owner"]))
+			eventOwner := strings.ToLower(strings.TrimSpace(ownerPubkey))
+			if wotOwner != eventOwner {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: wot_owner (%s) does not match repo owner (%s)", wotOwner, eventOwner))
+				return
+			}
+			if rootData.PublicKey != "" && strings.ToLower(rootData.PublicKey) != eventOwner {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: DAG uploader (%s) does not match repo owner (%s)", rootData.PublicKey, eventOwner))
+				return
+			}
+			logging.Infof("[Kind31415] WOT file binding validated: DAG %s owned by %s", wotHash, eventOwner)
+		}
+
 		// Store the new event first
 		if err := store.StoreEvent(&env.Event); err != nil {
 			write("OK", env.Event.ID, false, "Failed to store the event")
@@ -146,6 +178,38 @@ func BuildKind31415Handler(store stores.Store) func(read lib_nostr.KindReader, w
 
 		if deletedCount > 0 {
 			logging.Infof("[Kind31415] Deleted %d old events for r tag: %s", deletedCount, rTag)
+		}
+
+		// Invalidate stale WOT cache entries and delete orphaned WOT DAGs
+		// when the wot_file tag changes.
+		newWotHash := getTagValue(env.Event.Tags, "wot_file")
+		for _, oldEvent := range existingEvents {
+			if oldEvent.ID == env.Event.ID {
+				continue
+			}
+			oldWotHash := getTagValue(oldEvent.Tags, "wot_file")
+			if oldWotHash != "" && oldWotHash != newWotHash {
+				// Invalidate cache entry
+				if cache != nil {
+					cache.Invalidate(oldWotHash)
+				}
+
+				// Delete orphaned WOT DAG if no other permission event references it
+				otherRefs, qErr := store.QueryEvents(nostr.Filter{
+					Kinds: []int{31415},
+					Tags:  nostr.TagMap{"wot_file": []string{oldWotHash}},
+					Limit: 1,
+				})
+				if qErr == nil && len(otherRefs) == 0 {
+					if dErr := store.DeleteDag(oldWotHash); dErr != nil {
+						logging.Infof("[Kind31415] Failed to delete orphaned WOT DAG %s: %v", oldWotHash, dErr)
+					} else {
+						logging.Infof("[Kind31415] Deleted orphaned WOT DAG %s (replaced by %s)", oldWotHash, newWotHash)
+					}
+				} else if qErr == nil {
+					logging.Infof("[Kind31415] Skipping deletion of WOT DAG %s — still referenced by another event", oldWotHash)
+				}
+			}
 		}
 
 		// Successfully processed event

@@ -12,6 +12,7 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
 	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
@@ -73,7 +74,15 @@ func handleDownload(store stores.Store, stream lib_types.Stream, message *lib_ty
 
 	rootLeaf := rootData.Leaf
 
+	// Log every download request for diagnostics (previously silent — cost the original WOT bug diagnosis)
+	requesterID := "anonymous"
+	if message.PublicKey != "" {
+		requesterID = message.PublicKey
+	}
+	logging.Infof("[DOWNLOAD] Request for root %s from %s", message.Root, requesterID)
+
 	if canDownloadDag != nil && !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
+		logging.Infof("[DOWNLOAD] DENIED root %s for %s", message.Root, requesterID)
 		lib_stream.WriteErrorToStream(stream, "Not allowed to download this", nil)
 		return
 	}

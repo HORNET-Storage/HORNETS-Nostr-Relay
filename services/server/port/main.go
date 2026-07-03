@@ -33,6 +33,7 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
+	"github.com/HORNET-Storage/hornet-storage/lib/wot"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 
@@ -655,6 +656,37 @@ func main() {
 			logging.Errorf("Failed to initialize access control: %v", err)
 		} else {
 			logging.Info("Global access control initialized successfully")
+
+			// Populate blacklist cache from stored kind 30078 events at startup
+			if ac := websocket.GetAccessControl(); ac != nil && ac.Blacklist != nil {
+				ac.Blacklist.PopulateFromStore(store)
+				logging.Info("Blacklist cache populated from stored events")
+			}
+
+			// Set the WOT cache lazy-loader so WOT graphs are automatically
+			// reloaded from the DAG store on cache miss (after restart or LRU eviction).
+			if ac := websocket.GetAccessControl(); ac != nil && ac.WotCache != nil {
+				ac.WotCache.SetLoader(func(dagRootHash string) ([]byte, string, error) {
+					dagData, err := store.BuildDagFromStore(dagRootHash, true)
+					if err != nil {
+						return nil, "", fmt.Errorf("DAG not found in store: %w", err)
+					}
+					rootLeaf := dagData.Dag.Leafs[dagData.Dag.Root]
+					if rootLeaf == nil {
+						return nil, "", fmt.Errorf("root leaf missing from DAG")
+					}
+					ownerPubkey := rootLeaf.AdditionalData["wot_owner"]
+					if ownerPubkey == "" {
+						return nil, "", fmt.Errorf("DAG has no wot_owner tag")
+					}
+					binaryData, err := dagData.Dag.GetContentFromLeaf(rootLeaf)
+					if err != nil {
+						return nil, "", fmt.Errorf("failed to extract content: %w", err)
+					}
+					return binaryData, ownerPubkey, nil
+				})
+				logging.Info("WOT cache lazy-loader configured (auto-reload from store on cache miss)")
+			}
 		}
 
 		// Initialize push notification service
@@ -690,7 +722,7 @@ func main() {
 			requesterSignature = *signature
 		}
 
-		return accessControl.CanReadDag(rootLeaf.Hash, requesterPubkey, requesterSignature, store) == nil
+		return accessControl.CanReadDag(rootLeaf, requesterPubkey, requesterSignature, store) == nil
 	})
 
 	upload.AddUploadHandler(listener, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
@@ -704,8 +736,57 @@ func main() {
 			requesterPubkey = *pubKey
 		}
 
-		return accessControl.CanWriteDag(requesterPubkey, store) == nil
-	}, nil)
+		return accessControl.CanWriteDag(rootLeaf, requesterPubkey, store) == nil
+	}, func(dag *merkle_dag.Dag, pubKey *string) {
+		// Detect WOT DAGs by checking root leaf's AdditionalData for wot_file tag.
+		// If present, load the binary content and cache it for WOT permission checks.
+		rootLeaf := dag.Leafs[dag.Root]
+		if rootLeaf == nil || rootLeaf.AdditionalData == nil {
+			return
+		}
+		if rootLeaf.AdditionalData["wot_file"] != "true" {
+			return
+		}
+
+		ownerPubkey := rootLeaf.AdditionalData["wot_owner"]
+		if ownerPubkey == "" && pubKey != nil {
+			ownerPubkey = *pubKey
+		}
+
+		logging.Infof("WOT DAG detected (root: %s, owner: %s) — loading binary for cache", dag.Root, ownerPubkey)
+
+		// Re-read the DAG with content to get the binary bytes
+		dagData, err := store.BuildDagFromStore(dag.Root, true)
+		if err != nil {
+			logging.Errorf("Failed to load WOT DAG content for caching: %v", err)
+			return
+		}
+
+		// For a single-file WOT upload, the content is in the root leaf or reassembled
+		contentLeaf := dagData.Dag.Leafs[dagData.Dag.Root]
+		if contentLeaf == nil {
+			return
+		}
+		binaryData, err := dagData.Dag.GetContentFromLeaf(contentLeaf)
+		if err != nil || len(binaryData) == 0 {
+			logging.Errorf("Failed to extract WOT binary from DAG: %v", err)
+			return
+		}
+
+		// Try to cache it — if parsing fails, the cache.Store call returns an error
+		// and the DAG is treated as a normal upload (fail-safe).
+		accessControl := websocket.GetAccessControl()
+		if accessControl == nil || accessControl.WotCache == nil {
+			logging.Infof("WOT cache not available, skipping cache for DAG %s", dag.Root)
+			return
+		}
+
+		if err := accessControl.WotCache.Store(dag.Root, ownerPubkey, binaryData); err != nil {
+			logging.Infof("WOT DAG %s did not parse as valid WOT binary (proceeding as normal DAG): %v", dag.Root, err)
+		} else {
+			logging.Infof("WOT DAG %s cached successfully for owner %s", dag.Root, ownerPubkey)
+		}
+	})
 	query.AddQueryHandler(listener, store)
 	claim.AddClaimOwnershipHandler(listener, store)
 	services.AddServicesHandler(listener)
@@ -748,7 +829,13 @@ func main() {
 	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 	nostr.RegisterHandler("kind/30078", kind30078.BuildKind30078Handler(store))
 	nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
-	nostr.RegisterHandler("kind/31415", kind16629.BuildKind31415Handler(store))
+	// Pass WotCache to kind 31415 handler so it can invalidate stale WOT cache entries
+	// when permission events are updated with new wot_file tags.
+	var wotCacheForHandler *wot.Cache
+	if ac := websocket.GetAccessControl(); ac != nil {
+		wotCacheForHandler = ac.WotCache
+	}
+	nostr.RegisterHandler("kind/31415", kind16629.BuildKind31415Handler(store, wotCacheForHandler))
 	nostr.RegisterHandler("kind/16630", kind16630.BuildKind16630Handler(store))
 	nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))
 	nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))

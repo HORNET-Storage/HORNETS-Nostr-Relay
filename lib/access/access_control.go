@@ -4,16 +4,19 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
+	"github.com/HORNET-Storage/hornet-storage/lib/wot"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -22,12 +25,16 @@ const (
 	// accessCacheTTL is how long access check results are cached.
 	accessCacheTTL                = 30 * time.Second
 	repositoryPermissionEventKind = 31415
-	repositoryPushEventKind       = 73
-	repositoryPullRequestKind     = 74
+	repositoryPushEventKind          = 73
+	repositoryPullRequestKind        = 74
+	repositoryPRApprovalKind         = 75
+	repositoryCommentKind            = 1111
+	repositoryAppDataKind            = 30078
 	repositoryVisibilityPrivate   = "private"
 	repositoryVisibilityPublic    = "public"
 
 	// Interaction permission levels stored as tag values on the repository permission event.
+	interactionPermissionEveryone          = "everyone"
 	interactionPermissionWot              = "wot"
 	interactionPermissionMaintainersTriage = "maintainers_triage"
 	interactionPermissionMaintainers      = "maintainers"
@@ -46,6 +53,14 @@ type AccessControl struct {
 
 	// accessCache caches IsAllowed results keyed by "permission:hex"
 	accessCache sync.Map
+
+	// WotCache holds parsed WOT social graphs keyed by DAG root hash.
+	// Used for "wot" interaction permission checks.
+	WotCache *wot.Cache
+
+	// Blacklist holds per-repository blocked pubkeys.
+	// Used to deny writes from blacklisted users before any permission checks.
+	Blacklist *RepoBlacklist
 }
 
 // NewAccessControl creates a new access control instance
@@ -53,6 +68,8 @@ func NewAccessControl(statsStore statistics.StatisticsStore, settings *types.All
 	return &AccessControl{
 		statsStore: statsStore,
 		settings:   settings,
+		WotCache:   wot.NewCache(),
+		Blacklist:  NewRepoBlacklist(),
 	}
 }
 
@@ -118,34 +135,58 @@ func (ac *AccessControl) CanReadEvent(event *nostr.Event, requesterPubkey string
 	return globalReadErr
 }
 
-func (ac *AccessControl) CanReadDag(root string, requesterPubkey string, requesterSignature string, store stores.Store) error {
+// CanReadDag checks whether a requester is allowed to download a DAG.
+// Takes the root leaf so resolveDagRepoContext can inspect AdditionalData
+// and perform the kind 31415 wot_file reverse lookup that fixes the WOT download bug.
+func (ac *AccessControl) CanReadDag(rootLeaf *merkle_dag.DagLeaf, requesterPubkey string, requesterSignature string, store stores.Store) error {
+	if rootLeaf == nil {
+		return fmt.Errorf("root leaf is required")
+	}
+	root := rootLeaf.Hash
+
+	// Step 1: Normalize pubkey and verify identity if credentials provided.
+	// On failure, treat as anonymous rather than trusting an unverified pubkey.
+	requesterPubkey = strings.ToLower(strings.TrimSpace(requesterPubkey))
+	if requesterPubkey != "" && requesterSignature != "" {
+		if err := verifyRootRequestSignature(root, requesterPubkey, requesterSignature); err != nil {
+			logging.Debugf("[ACCESS CONTROL] DAG download identity verification failed for %s: %v — treating as anonymous", requesterPubkey, err)
+			requesterPubkey = ""
+		}
+	}
+
+	// Step 2: Global read access passes → allow
 	globalReadErr := ac.CanRead(requesterPubkey)
 	if globalReadErr == nil {
 		return nil
 	}
 
+	// Step 3: Override disabled → deny
 	if store == nil || !ac.repoReadOverrideEnabled() {
 		return globalReadErr
 	}
 
-	permissionEvent, err := ac.findRepositoryPermissionEventByRoot(root, store)
+	// Step 4: Resolve DAG to repository context (includes kind 31415 wot_file reverse lookup)
+	permissionEvent, _, err := ac.resolveDagRepoContext(root, rootLeaf, store)
 	if err != nil {
 		return globalReadErr
 	}
 
+	// Step 5: Blacklist check
+	repoID := firstTagValue(permissionEvent.Tags, "r")
+	if requesterPubkey != "" && ac.Blacklist != nil && ac.Blacklist.IsBlacklisted(repoID, requesterPubkey) {
+		return fmt.Errorf("pubkey is blacklisted from this repository")
+	}
+
+	// Step 6: Non-private repos → allow (THIS IS THE BUG FIX)
+	// WOT files, public repo bundles/archives, etc. are downloadable by anyone.
 	if repositoryPermissionVisibility(permissionEvent) != repositoryVisibilityPrivate {
 		return nil
 	}
 
-	requesterPubkey = strings.ToLower(strings.TrimSpace(requesterPubkey))
-	if requesterPubkey == "" || requesterSignature == "" {
+	// Step 7: Private repo → require verified identity + explicit read permission
+	if requesterPubkey == "" {
 		return globalReadErr
 	}
-
-	if err := verifyRootRequestSignature(root, requesterPubkey, requesterSignature); err != nil {
-		return globalReadErr
-	}
-
 	if repoPermissionAllowsRead(permissionEvent, requesterPubkey) {
 		return nil
 	}
@@ -153,79 +194,269 @@ func (ac *AccessControl) CanReadDag(root string, requesterPubkey string, request
 	return globalReadErr
 }
 
+// dagClass identifies the type of DAG for write-side permission classification.
+type dagClass string
+
+const (
+	dagClassWotFile  dagClass = "wot_file"
+	dagClassBundle   dagClass = "bundle"
+	dagClassArchive  dagClass = "archive"
+	dagClassPRBundle dagClass = "pr_bundle"
+)
+
 // CanWriteDag checks whether a pubkey is allowed to upload a DAG.
-// In invite-only mode the uploader must either have global relay write access,
-// be a collaborator on at least one repository, or a public repository must
-// exist that allows WoT PR creation (which requires DAG upload).
-func (ac *AccessControl) CanWriteDag(pubkey string, store stores.Store) error {
+// Takes the root leaf for AdditionalData-based classification (r tag, wot_file,
+// pr_bundle) and the verified pubkey (signature already verified by upload handler).
+//
+// When AdditionalData contains an "r" tag (PR bundles, WOT files), precise
+// per-repo permission checking is used. When "r" is absent (push bundles,
+// archives, forked DAGs), falls back to the broad collaborator check.
+// The DAG-embedded r is a pointer/optimization, never an authority — events
+// pointing at DAGs are the authority, and precise per-repo enforcement happens
+// at the event handler layer when the associating event arrives.
+func (ac *AccessControl) CanWriteDag(rootLeaf *merkle_dag.DagLeaf, pubkey string, store stores.Store) error {
+	pubkey = strings.ToLower(strings.TrimSpace(pubkey))
+
+	// Step 1: Global write access → allow (relay owner / allowed users upload anything)
 	globalWriteErr := ac.CanWrite(pubkey)
 	if globalWriteErr == nil {
 		return nil
 	}
 
+	// Step 2: Override disabled → deny
 	if store == nil || !ac.repoAccessOverrideEnabled() {
 		return globalWriteErr
 	}
 
-	pubkey = strings.ToLower(strings.TrimSpace(pubkey))
 	if pubkey == "" || !isValidHexPubkey(pubkey) {
 		return globalWriteErr
 	}
 
-	// Check cache
-	cacheKey := "dag-write:" + pubkey
-	if cached, ok := ac.accessCache.Load(cacheKey); ok {
-		entry := cached.(*cachedResult)
-		if time.Now().Before(entry.expiresAt) {
-			return entry.err
-		}
-		ac.accessCache.Delete(cacheKey)
+	// Step 3: Try precise per-repo check if "r" tag is present in AdditionalData.
+	// PR bundles and WOT files carry r (never re-used/forked). Push bundles and
+	// archives do NOT carry r (they get re-used in forks).
+	rTag := ""
+	if rootLeaf != nil && rootLeaf.AdditionalData != nil {
+		rTag = rootLeaf.AdditionalData["r"]
 	}
 
-	result := ac.canWriteDagUncached(pubkey, store)
+	if rTag != "" {
+		permissionEvent, err := ac.findRepositoryPermissionEvent(rTag, store)
+		if err != nil {
+			return fmt.Errorf("repository permission event not found for repo %s: %w", rTag, err)
+		}
 
-	ac.accessCache.Store(cacheKey, &cachedResult{
-		err:       result,
-		expiresAt: time.Now().Add(accessCacheTTL),
-	})
+		// Blacklist check (precise — we know the repo)
+		if ac.Blacklist != nil && ac.Blacklist.IsBlacklisted(rTag, pubkey) {
+			logging.Debugf("[ACCESS CONTROL] Blacklisted pubkey %s denied DAG upload to repo %s", pubkey, rTag)
+			return fmt.Errorf("pubkey is blacklisted from this repository")
+		}
 
-	return result
+		return ac.canWriteDagWithRepoContext(rootLeaf, pubkey, rTag, permissionEvent)
+	}
+
+	// Step 4: No "r" tag — fall back to broad collaborator check.
+	// This covers push bundles/archives (collaborators only), cross-relay forks
+	// (DAGs transferred as-is), and any flow that can't embed r.
+	logging.Debugf("[ACCESS CONTROL] DAG upload without r tag from %s — using broad collaborator fallback", pubkey)
+
+	// WOT files without r: verify uploader == wot_owner, then broad check
+	if rootLeaf != nil && rootLeaf.AdditionalData != nil && rootLeaf.AdditionalData["wot_file"] == "true" {
+		wotOwner := strings.ToLower(strings.TrimSpace(rootLeaf.AdditionalData["wot_owner"]))
+		if pubkey != wotOwner {
+			return fmt.Errorf("WOT file upload denied: uploader (%s) does not match wot_owner (%s)", pubkey, wotOwner)
+		}
+	}
+
+	// Broad check: is this user an owner or collaborator on any repo on this relay?
+	if ac.isRepoOwnerOrCollaborator(pubkey, store) {
+		return nil
+	}
+
+	return fmt.Errorf("pubkey does not have DAG write access through any repository")
 }
 
-func (ac *AccessControl) canWriteDagUncached(pubkey string, store stores.Store) error {
+// canWriteDagWithRepoContext performs class-based write checks when the precise
+// repo context is known ("r" tag present and permission event resolved).
+func (ac *AccessControl) canWriteDagWithRepoContext(rootLeaf *merkle_dag.DagLeaf, pubkey string, rTag string, permissionEvent *nostr.Event) error {
+	if rootLeaf != nil && rootLeaf.AdditionalData != nil && rootLeaf.AdditionalData["wot_file"] == "true" {
+		// WOT file: three-key rule — uploader == wot_owner == permission event author.
+		// Owner only. This also prevents junk from entering the WOT cache.
+		wotOwner := strings.ToLower(strings.TrimSpace(rootLeaf.AdditionalData["wot_owner"]))
+		peAuthor := strings.ToLower(strings.TrimSpace(permissionEvent.PubKey))
+		if pubkey != wotOwner || pubkey != peAuthor {
+			return fmt.Errorf("WOT file upload denied: uploader (%s), wot_owner (%s), and repo owner (%s) must all match", pubkey, wotOwner, peAuthor)
+		}
+		return nil
+	}
+
+	if rootLeaf != nil && rootLeaf.AdditionalData != nil && rootLeaf.AdditionalData["pr_bundle"] == "true" {
+		// PR bundle: use pr_permissions dropdown chain
+		prPerm := strings.ToLower(strings.TrimSpace(firstTagValue(permissionEvent.Tags, "pr_permissions")))
+		switch prPerm {
+		case interactionPermissionEveryone:
+			if repositoryPermissionVisibility(permissionEvent) != repositoryVisibilityPrivate {
+				return nil
+			}
+		case interactionPermissionWot:
+			if ac.repoWotPermissionAllowsWrite(permissionEvent, pubkey) {
+				return nil
+			}
+		case interactionPermissionMaintainersTriage:
+			role := getUserRoleFromPermissionEvent(permissionEvent, pubkey)
+			if role == "owner" || role == "maintainer" || role == "triage" {
+				return nil
+			}
+		case interactionPermissionMaintainers:
+			role := getUserRoleFromPermissionEvent(permissionEvent, pubkey)
+			if role == "owner" || role == "maintainer" {
+				return nil
+			}
+		}
+		return fmt.Errorf("pubkey %s does not have PR bundle upload permission for repo %s", pubkey, rTag)
+	}
+
+	// Default: any DAG with r — owner/maintainer/write role
+	if repoPermissionAllowsDagWrite(permissionEvent, pubkey) {
+		return nil
+	}
+
+	return fmt.Errorf("pubkey %s does not have DAG write access for repo %s", pubkey, rTag)
+}
+
+// isRepoOwnerOrCollaborator checks if a pubkey is an owner or collaborator on
+// any repo, or if any public repo allows WoT/everyone-based PR creation.
+// Used as a fallback when no "r" tag is present in DAG AdditionalData.
+func (ac *AccessControl) isRepoOwnerOrCollaborator(pubkey string, store stores.Store) bool {
 	permissionEvents, err := store.QueryEvents(nostr.Filter{
 		Kinds: []int{repositoryPermissionEventKind},
 	})
 	if err != nil || len(permissionEvents) == 0 {
-		return fmt.Errorf("no repository access for DAG write")
+		return false
 	}
 
 	for _, event := range permissionEvents {
 		// Repo owner can always upload
 		if strings.ToLower(event.PubKey) == pubkey {
-			return nil
+			return true
 		}
 		// Any p tag entry means the user is a collaborator
 		for _, tag := range event.Tags {
 			if len(tag) >= 2 && tag[0] == "p" && strings.ToLower(tag[1]) == pubkey {
-				return nil
+				return true
 			}
 		}
 	}
 
-	// Not a collaborator anywhere — check if any public repo allows WoT PR
-	// creation (which requires uploading a DAG bundle)
+	// Not a collaborator anywhere — check if any public repo allows PR
+	// creation (which requires DAG upload for the bundle)
 	for _, event := range permissionEvents {
 		if repositoryPermissionVisibility(event) == repositoryVisibilityPrivate {
 			continue
 		}
 		prPerm := strings.ToLower(strings.TrimSpace(firstTagValue(event.Tags, "pr_permissions")))
-		if prPerm == interactionPermissionWot {
-			return nil
+		if prPerm == interactionPermissionEveryone || prPerm == interactionPermissionWot {
+			return true
 		}
 	}
 
-	return fmt.Errorf("pubkey does not have DAG write access through any repository")
+	return false
+}
+
+// resolveDagRepoContext resolves a DAG root to its repository permission event
+// and classification. Replaces findRepositoryPermissionEventByRoot with broader
+// lookups including kind 31415 wot_file tags — the root cause fix for the WOT
+// download bug.
+//
+// Lookup order:
+//  1. AdditionalData "r" pointer (fast path) → findRepositoryPermissionEvent(r).
+//     For wot_file class: binding = event's wot_file tag == root; on failure fall through.
+//  2. Reverse lookups (authoritative): kind 31415 wot_file=root, kind 73 bundle/archive,
+//     kind 74 dag_root. Derive repoID from the found event's r tag.
+//  3. Nothing found → error (unassociated DAG).
+func (ac *AccessControl) resolveDagRepoContext(root string, rootLeaf *merkle_dag.DagLeaf, store stores.Store) (*nostr.Event, dagClass, error) {
+	// Determine class from AdditionalData
+	var class dagClass
+	if rootLeaf != nil && rootLeaf.AdditionalData != nil {
+		if rootLeaf.AdditionalData["wot_file"] == "true" {
+			class = dagClassWotFile
+		} else if rootLeaf.AdditionalData["pr_bundle"] == "true" {
+			class = dagClassPRBundle
+		}
+	}
+
+	// Fast path: AdditionalData "r" pointer
+	if rootLeaf != nil && rootLeaf.AdditionalData != nil {
+		if rTag := rootLeaf.AdditionalData["r"]; rTag != "" {
+			pe, err := ac.findRepositoryPermissionEvent(rTag, store)
+			if err == nil {
+				// For wot_file class: verify binding — the permission event's
+				// wot_file tag must reference this exact DAG root.
+				if class == dagClassWotFile {
+					if firstTagValue(pe.Tags, "wot_file") == root {
+						return pe, class, nil
+					}
+					// Binding failed — fall through to reverse lookups
+					logging.Debugf("[ACCESS CONTROL] WOT DAG %s has r=%s but permission event wot_file tag does not match — falling through to reverse lookup", root, rTag)
+				} else {
+					return pe, class, nil
+				}
+			}
+		}
+	}
+
+	// Reverse lookup 1: kind 31415 with wot_file=root (THE BUG FIX)
+	if events, err := store.QueryEvents(nostr.Filter{
+		Kinds: []int{repositoryPermissionEventKind},
+		Tags:  nostr.TagMap{"wot_file": []string{root}},
+		Limit: 1,
+	}); err == nil && len(events) > 0 {
+		repoID := firstTagValue(events[0].Tags, "r")
+		if repoID != "" {
+			pe, err := ac.findRepositoryPermissionEvent(repoID, store)
+			if err == nil {
+				return pe, dagClassWotFile, nil
+			}
+		}
+	}
+
+	// Reverse lookup 2: kind 73 bundle/archive tags
+	for _, tagName := range []string{"bundle", "archive"} {
+		if events, err := store.QueryEvents(nostr.Filter{
+			Kinds: []int{repositoryPushEventKind},
+			Tags:  nostr.TagMap{tagName: []string{root}},
+			Limit: 1,
+		}); err == nil && len(events) > 0 {
+			repoID := firstTagValue(events[0].Tags, "r")
+			if repoID != "" {
+				pe, err := ac.findRepositoryPermissionEvent(repoID, store)
+				if err == nil {
+					resolvedClass := dagClassBundle
+					if tagName == "archive" {
+						resolvedClass = dagClassArchive
+					}
+					return pe, resolvedClass, nil
+				}
+			}
+		}
+	}
+
+	// Reverse lookup 3: kind 74 dag_root tag
+	if events, err := store.QueryEvents(nostr.Filter{
+		Kinds: []int{repositoryPullRequestKind},
+		Tags:  nostr.TagMap{"dag_root": []string{root}},
+		Limit: 1,
+	}); err == nil && len(events) > 0 {
+		repoID := firstTagValue(events[0].Tags, "r")
+		if repoID != "" {
+			pe, err := ac.findRepositoryPermissionEvent(repoID, store)
+			if err == nil {
+				return pe, dagClassPRBundle, nil
+			}
+		}
+	}
+
+	return nil, "", fmt.Errorf("no repository context found for DAG root %s", root)
 }
 
 func (ac *AccessControl) IsAllowed(readOrWrite string, npub string, requireWriteCapability bool) error {
@@ -375,29 +606,7 @@ func latestRepositoryPermissionEvent(events []*nostr.Event) *nostr.Event {
 	return events[0]
 }
 
-func (ac *AccessControl) findRepositoryPermissionEventByRoot(root string, store stores.Store) (*nostr.Event, error) {
-	lookupFilters := []nostr.Filter{
-		{Kinds: []int{repositoryPushEventKind}, Tags: nostr.TagMap{"bundle": []string{root}}, Limit: 1},
-		{Kinds: []int{repositoryPushEventKind}, Tags: nostr.TagMap{"archive": []string{root}}, Limit: 1},
-		{Kinds: []int{repositoryPullRequestKind}, Tags: nostr.TagMap{"dag_root": []string{root}}, Limit: 1},
-	}
 
-	for _, filter := range lookupFilters {
-		events, err := store.QueryEvents(filter)
-		if err != nil || len(events) == 0 {
-			continue
-		}
-
-		repoID := firstTagValue(events[0].Tags, "r")
-		if repoID == "" {
-			continue
-		}
-
-		return ac.findRepositoryPermissionEvent(repoID, store)
-	}
-
-	return nil, fmt.Errorf("repository permission event not found for dag root")
-}
 
 func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store stores.Store) error {
 	if !containsKind(ac.settings.RepoAccessOverrideKinds, event.Kind) {
@@ -412,6 +621,13 @@ func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store store
 	repoID := firstTagValue(event.Tags, "r")
 	if repoID == "" {
 		return fmt.Errorf("missing repository identifier tag")
+	}
+
+	// Check blacklist before any permission checks — blacklisted users are
+	// denied immediately regardless of their role or interaction permissions.
+	if ac.Blacklist != nil && ac.Blacklist.IsBlacklisted(repoID, pubkey) {
+		logging.Debugf("[ACCESS CONTROL] Blacklisted pubkey %s denied write to repo %s", pubkey, repoID)
+		return fmt.Errorf("pubkey is blacklisted from this repository")
 	}
 
 	permissionEvents, err := store.QueryEvents(nostr.Filter{
@@ -436,13 +652,23 @@ func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store store
 	}
 
 	// Standard role check failed — try interaction permission fallback
-	interactionTag := interactionPermissionTagForKind(event.Kind)
-	if interactionTag != "" && repoInteractionPermissionAllowsWrite(permissionEvents[0], pubkey, interactionTag) {
-		logging.Debugf("[ACCESS CONTROL] Repository interaction permission override granted for pubkey %s on kind %d via %s", pubkey, event.Kind, interactionTag)
-		return nil
+	interactionTag := interactionPermissionTagForEvent(event)
+	if interactionTag != "" {
+		permLevel := strings.ToLower(strings.TrimSpace(firstTagValue(permissionEvents[0].Tags, interactionTag)))
+
+		// WoT check: use the WOT cache for real follow-distance verification
+		if permLevel == interactionPermissionWot {
+			if ac.repoWotPermissionAllowsWrite(permissionEvents[0], pubkey) {
+				logging.Debugf("[ACCESS CONTROL] WoT permission override granted for pubkey %s on kind %d via %s", pubkey, event.Kind, interactionTag)
+				return nil
+			}
+		} else if repoInteractionPermissionAllowsWrite(permissionEvents[0], pubkey, interactionTag) {
+			logging.Debugf("[ACCESS CONTROL] Repository interaction permission override granted for pubkey %s on kind %d via %s", pubkey, event.Kind, interactionTag)
+			return nil
+		}
 	}
 
-	// Both checks failed
+	// All checks failed
 	if repositoryEventRequiresDagWrite(event) {
 		return fmt.Errorf("pubkey does not have repository DAG write access")
 	}
@@ -592,13 +818,54 @@ func verifyRootRequestSignature(root string, requesterPubkey string, requesterSi
 	return signing.VerifySerializedCIDSignature(parsedSignature, root, publicKey)
 }
 
-// interactionPermissionTagForKind maps a Nostr event kind to its interaction
-// permission tag name on the repository permission event. Returns "" if the
-// kind has no interaction permission tag.
-func interactionPermissionTagForKind(kind int) string {
-	switch kind {
+// interactionPermissionTagForEvent maps a Nostr event to its interaction
+// permission tag name on the repository permission event. For kinds that serve
+// multiple purposes (1111 comments, 30078 app data), the event's own tags are
+// inspected to determine which interaction permission applies.
+// Returns "" if the event has no interaction permission tag.
+func interactionPermissionTagForEvent(event *nostr.Event) string {
+	if event == nil {
+		return ""
+	}
+
+	switch event.Kind {
 	case repositoryPullRequestKind: // 74
 		return "pr_permissions"
+
+	case repositoryPRApprovalKind: // 75 — PR reviews/approvals
+		return "pr_comment_permissions"
+
+	case repositoryCommentKind: // 1111 — issue or PR comments
+		// Determine comment type from the I tag path.
+		iTagValue := firstTagValue(event.Tags, "I")
+		if iTagValue == "" {
+			iTagValue = firstTagValue(event.Tags, "i")
+		}
+		if strings.Contains(iTagValue, "/issues/") {
+			return "issue_comment_permissions"
+		}
+		if strings.Contains(iTagValue, "/pull-requests/") {
+			return "pr_comment_permissions"
+		}
+		return "" // Unknown comment target — no interaction override
+
+	case repositoryAppDataKind: // 30078 — irisdb app-specific data
+		// Determine data type from the d tag path.
+		dTagValue := firstTagValue(event.Tags, "d")
+		if strings.Contains(dTagValue, "/blacklist/") {
+			return "" // Blacklist entries are owner/maintainer only — handled separately
+		}
+		if strings.Contains(dTagValue, "/issues/") {
+			return "issue_permissions"
+		}
+		if strings.Contains(dTagValue, "/pull-requests/") || strings.Contains(dTagValue, "/prs/") {
+			return "pr_permissions"
+		}
+		if strings.Contains(dTagValue, "/kanban/") || strings.Contains(dTagValue, "/projects/") {
+			return "kanban_permissions"
+		}
+		return "" // Unknown app data path — no interaction override
+
 	default:
 		return ""
 	}
@@ -642,9 +909,21 @@ func repoInteractionPermissionAllowsWrite(permissionEvent *nostr.Event, pubkey s
 	}
 
 	switch permissionLevel {
-	case interactionPermissionWot:
-		// WoT means everyone, but only for public repos
+	case interactionPermissionEveryone:
+		// "everyone" allows any signed-in user, but only for public repos
 		return repositoryPermissionVisibility(permissionEvent) != repositoryVisibilityPrivate
+	case interactionPermissionWot:
+		// WoT requires the requester to be within N follow-hops of the repo owner's social graph.
+		// Only for public repos — private repos ignore WoT.
+		if repositoryPermissionVisibility(permissionEvent) == repositoryVisibilityPrivate {
+			return false
+		}
+		// The real WoT check is done via repoWotPermissionAllowsWrite which has access to the cache.
+		// This switch case returns true as a fallback — the actual WoT gating happens in
+		// canWriteRepositoryEvent which calls repoWotPermissionAllowsWrite before falling back here.
+		// If we reach this point, it means the caller didn't have a WoT cache available,
+		// so we deny by default for safety.
+		return false
 	case interactionPermissionMaintainersTriage:
 		role := getUserRoleFromPermissionEvent(permissionEvent, pubkey)
 		return role == "owner" || role == "maintainer" || role == "triage"
@@ -654,6 +933,46 @@ func repoInteractionPermissionAllowsWrite(permissionEvent *nostr.Event, pubkey s
 	default:
 		return false
 	}
+}
+
+// repoWotPermissionAllowsWrite checks whether a pubkey is within the configured
+// follow-distance of the repository owner's WOT graph. Reads the wot_file and
+// wot_hops tags from the permission event and delegates to the WOT cache.
+// Only for public repos — private repos always return false.
+func (ac *AccessControl) repoWotPermissionAllowsWrite(permissionEvent *nostr.Event, pubkey string) bool {
+	if permissionEvent == nil || ac.WotCache == nil {
+		return false
+	}
+
+	// WoT is only for public repos
+	if repositoryPermissionVisibility(permissionEvent) == repositoryVisibilityPrivate {
+		return false
+	}
+
+	// Read the DAG root hash of the uploaded WOT file
+	wotFileHash := strings.TrimSpace(firstTagValue(permissionEvent.Tags, "wot_file"))
+	if wotFileHash == "" {
+		logging.Debugf("[ACCESS CONTROL] WoT check failed: no wot_file tag on permission event")
+		return false
+	}
+
+	// Read the configured max hops (default 3, clamped to 1-5)
+	maxHops := wot.DefaultMaxHops
+	if hopsStr := strings.TrimSpace(firstTagValue(permissionEvent.Tags, "wot_hops")); hopsStr != "" {
+		if parsed, err := strconv.Atoi(hopsStr); err == nil {
+			if parsed >= 1 && parsed <= wot.MaxAllowedHops {
+				maxHops = parsed
+			}
+		}
+	}
+
+	if ac.WotCache.IsWithinHops(wotFileHash, pubkey, maxHops) {
+		logging.Debugf("[ACCESS CONTROL] WoT check passed: pubkey %s is within %d hops (root hash: %s)", pubkey, maxHops, wotFileHash)
+		return true
+	}
+
+	logging.Debugf("[ACCESS CONTROL] WoT check failed: pubkey %s is NOT within %d hops (root hash: %s)", pubkey, maxHops, wotFileHash)
+	return false
 }
 
 // isAllowedUncached performs the actual DB-backed access check (no cache).

@@ -153,6 +153,7 @@ func handleStreamingUpload(
 			return
 		}
 		if !canUploadDag(rootLeaf, &message.PublicKey, &message.Signature) {
+			logging.Infof("[UPLOAD] DENIED root %s for pubkey %s", message.Root, message.PublicKey)
 			write(utils.BuildErrorMessage("Not allowed to upload this", nil))
 			return
 		}
