@@ -19,9 +19,9 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/sidecar"

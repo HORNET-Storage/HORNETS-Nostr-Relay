@@ -9,8 +9,8 @@ import (
 	"time"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"

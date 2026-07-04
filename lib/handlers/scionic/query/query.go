@@ -5,9 +5,9 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	lib_stream "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
 )
 
 func AddQueryHandler(listener *hsListener.HyperswarmListener, store stores.Store) {

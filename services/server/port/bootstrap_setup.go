@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	statistics_gorm_sqlite "github.com/HORNET-Storage/hornet-storage/lib/stores/statistics/gorm/sqlite"
 	"github.com/gofiber/fiber/v2"

@@ -12,10 +12,10 @@ import (
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	lib_stream "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 )
 
 func AddDownloadHandler(listener *hsListener.HyperswarmListener, store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 

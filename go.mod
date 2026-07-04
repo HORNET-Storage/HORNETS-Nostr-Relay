@@ -6,12 +6,13 @@ toolchain go1.24.1
 
 require (
 	github.com/HORNET-Storage/Scionic-Merkle-Tree/v2 v2.1.5
-	github.com/HORNET-Storage/go-hornet-storage-lib v1.0.0
+	github.com/HORNET-Storage/hdk-nostr-go v1.1.2
 	github.com/dgraph-io/badger/v4 v4.8.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/gabriel-vasile/mimetype v1.4.6
 	github.com/gofiber/contrib/websocket v1.3.2
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/hornet-storage/hornets-hyperswarm/clients/go v0.0.0
 	github.com/huin/goupnp v1.3.0
 	github.com/json-iterator/go v1.1.12
@@ -59,7 +60,6 @@ require (
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20240528025155-186aa0362fba // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
@@ -185,8 +185,4 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace (
-	github.com/HORNET-Storage/Scionic-Merkle-Tree/v2 => ../scionic-merkletree
-	github.com/HORNET-Storage/go-hornet-storage-lib => ../go-hornet-storage-lib
-	github.com/hornet-storage/hornets-hyperswarm/clients/go => ../hornets-hyperswarm/clients/go
-)
+replace github.com/hornet-storage/hornets-hyperswarm/clients/go => ../hornets-hyperswarm/clients/go

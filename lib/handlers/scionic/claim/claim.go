@@ -5,14 +5,14 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	types "github.com/HORNET-Storage/hornet-storage/lib/types"
 
-	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
+	lib_stream "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
 )
 
 func AddClaimOwnershipHandler(listener *hsListener.HyperswarmListener, store stores.Store) {

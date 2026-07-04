@@ -10,7 +10,7 @@ import (
 	"time"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
@@ -25,19 +25,19 @@ const (
 	// accessCacheTTL is how long access check results are cached.
 	accessCacheTTL                = 30 * time.Second
 	repositoryPermissionEventKind = 31415
-	repositoryPushEventKind          = 73
-	repositoryPullRequestKind        = 74
-	repositoryPRApprovalKind         = 75
-	repositoryCommentKind            = 1111
-	repositoryAppDataKind            = 30078
+	repositoryPushEventKind       = 73
+	repositoryPullRequestKind     = 74
+	repositoryPRApprovalKind      = 75
+	repositoryCommentKind         = 1111
+	repositoryAppDataKind         = 30078
 	repositoryVisibilityPrivate   = "private"
 	repositoryVisibilityPublic    = "public"
 
 	// Interaction permission levels stored as tag values on the repository permission event.
 	interactionPermissionEveryone          = "everyone"
-	interactionPermissionWot              = "wot"
+	interactionPermissionWot               = "wot"
 	interactionPermissionMaintainersTriage = "maintainers_triage"
-	interactionPermissionMaintainers      = "maintainers"
+	interactionPermissionMaintainers       = "maintainers"
 )
 
 // cachedResult stores an access check result with expiry.
@@ -605,8 +605,6 @@ func latestRepositoryPermissionEvent(events []*nostr.Event) *nostr.Event {
 
 	return events[0]
 }
-
-
 
 func (ac *AccessControl) canWriteRepositoryEvent(event *nostr.Event, store stores.Store) error {
 	if !containsKind(ac.settings.RepoAccessOverrideKinds, event.Kind) {

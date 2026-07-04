@@ -11,7 +11,7 @@ import (
 	"github.com/gofiber/contrib/websocket"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	utils "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -19,9 +19,9 @@ import (
 	badgerhold_store "github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
 
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	lib_stream "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
 )
 
 type CanUploadDagFunc func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool

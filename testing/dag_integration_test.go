@@ -6,8 +6,8 @@ import (
 	"time"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr"
 	"github.com/HORNET-Storage/hornet-storage/testing/helpers"
 )
 

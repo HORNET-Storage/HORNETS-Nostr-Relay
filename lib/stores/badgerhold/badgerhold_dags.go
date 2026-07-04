@@ -12,7 +12,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"

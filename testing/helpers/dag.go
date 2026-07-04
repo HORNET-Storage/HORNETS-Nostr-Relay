@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -144,13 +144,13 @@ func CreateLargeTestDAG(fileCount int, fileSizeBytes int) (*TestDAG, error) {
 // CreateNestedTestDAG creates a DAG with nested directory structure
 func CreateNestedTestDAG() (*TestDAG, error) {
 	files := map[string][]byte{
-		"root.txt":              []byte("Root file content"),
-		"docs/readme.md":        []byte("# README\nThis is a readme file."),
-		"docs/guide.md":         []byte("# Guide\nThis is a guide."),
-		"src/main.go":           []byte("package main\n\nfunc main() {}"),
-		"src/utils/helper.go":   []byte("package utils\n\nfunc Help() {}"),
-		"data/config.json":      []byte(`{"key": "value"}`),
-		"data/nested/deep.txt":  []byte("Deep nested content"),
+		"root.txt":             []byte("Root file content"),
+		"docs/readme.md":       []byte("# README\nThis is a readme file."),
+		"docs/guide.md":        []byte("# Guide\nThis is a guide."),
+		"src/main.go":          []byte("package main\n\nfunc main() {}"),
+		"src/utils/helper.go":  []byte("package utils\n\nfunc Help() {}"),
+		"data/config.json":     []byte(`{"key": "value"}`),
+		"data/nested/deep.txt": []byte("Deep nested content"),
 	}
 
 	return CreateTestDAGFromFiles(files)

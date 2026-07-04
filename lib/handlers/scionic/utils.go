@@ -9,8 +9,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	lib_stream "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr"
 )
 
 type DagWriter func(message interface{}) error

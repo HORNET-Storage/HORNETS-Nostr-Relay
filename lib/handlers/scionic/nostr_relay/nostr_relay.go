@@ -16,8 +16,8 @@ import (
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
 	ws "github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
-	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
+	hsListener "github.com/HORNET-Storage/hdk-nostr-go/lib/connmgr/hyperswarm"
 )
 
 type dhtAuthState struct {

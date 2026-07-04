@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
+	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/access"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 	"github.com/HORNET-Storage/hornet-storage/lib/types"

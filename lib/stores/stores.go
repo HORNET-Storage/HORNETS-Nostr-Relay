@@ -5,7 +5,7 @@ import (
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	merkle_tree "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/tree"
-	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	lib_types "github.com/HORNET-Storage/hdk-nostr-go/lib"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/statistics"
