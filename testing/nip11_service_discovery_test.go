@@ -10,6 +10,7 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
 	"github.com/HORNET-Storage/hornet-storage/testing/helpers"
+	"github.com/spf13/viper"
 )
 
 // TestNIP11RelayInfo tests that the relay returns a proper NIP-11 relay information document
@@ -54,6 +55,58 @@ func TestNIP11RelayInfo(t *testing.T) {
 
 	if len(relayInfo.SupportedNIPs) == 0 {
 		t.Error("Expected supported NIPs to be set")
+	}
+}
+
+func TestNIP11RelayInfoAdvertisesAccessPolicy(t *testing.T) {
+	relay := setupTestRelay(t)
+	defer relay.Cleanup()
+
+	viper.Set("allowed_users.mode", "invite-only")
+	viper.Set("allowed_users.read", "allowed_users")
+	viper.Set("allowed_users.write", "allowed_users")
+
+	httpURL := "http://127.0.0.1:" + getPortString(relay.Port)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", httpURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Accept", "application/nostr+json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make NIP-11 request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+
+	var relayInfo websocket.NIP11RelayInfo
+	if err := json.Unmarshal(body, &relayInfo); err != nil {
+		t.Fatalf("Failed to parse NIP-11 response: %v", err)
+	}
+
+	if relayInfo.RelayMode != "invite-only" {
+		t.Fatalf("expected relay_mode invite-only, got %q", relayInfo.RelayMode)
+	}
+
+	if relayInfo.ReadAccess != "allowed_users" {
+		t.Fatalf("expected read_access allowed_users, got %q", relayInfo.ReadAccess)
+	}
+
+	if relayInfo.WriteAccess != "allowed_users" {
+		t.Fatalf("expected write_access allowed_users, got %q", relayInfo.WriteAccess)
+	}
+
+	if relayInfo.HornetExtension != nil {
+		if relayInfo.HornetExtension.ReadAccess != relayInfo.ReadAccess {
+			t.Fatalf("expected hornet extension read_access %q, got %q", relayInfo.ReadAccess, relayInfo.HornetExtension.ReadAccess)
+		}
 	}
 }
 

@@ -30,11 +30,11 @@ func publishExpectReject(ctx context.Context, conn *nostr.Relay, event *nostr.Ev
 	return len(events) == 0 // True if rejection was successful
 }
 
-// buildPermissionTags creates the required tag set for a valid kind 16629 permission event.
+// buildPermissionTags creates the required tag set for a valid kind 31415 permission event.
 // repoAuthor should be the event pubkey for personal repos (clone tag cross-validates this).
 // For org repos with an a-tag, pass the org address as both repoAuthor and aTag.
 func buildPermissionTags(rTag, repoName, repoAuthor, aTag string, pTags ...nostr.Tag) nostr.Tags {
-	cloneURL := fmt.Sprintf("nestr://localhost?id=%s&repo_author=%s&repo_name=%s",
+	cloneURL := fmt.Sprintf("nosis://localhost?id=%s&repo_author=%s&repo_name=%s",
 		url.QueryEscape(rTag), url.QueryEscape(repoAuthor), url.QueryEscape(repoName))
 
 	tags := nostr.Tags{
@@ -56,8 +56,8 @@ func buildPermissionTags(rTag, repoName, repoAuthor, aTag string, pTags ...nostr
 // Test: Tag Validation
 // ============================================================================
 
-func TestKind16629_ValidateRTag_RegularRepo(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_ValidateRTag_RegularRepo(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -122,7 +122,7 @@ func TestKind16629_ValidateRTag_RegularRepo(t *testing.T) {
 					nostr.Tag{"p", collaborator.PublicKey, "write"})
 			}
 
-			event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
+			event, err := helpers.CreateGenericEvent(owner, 31415, "", tags)
 			if err != nil {
 				t.Fatalf("Failed to create event: %v", err)
 			}
@@ -144,8 +144,8 @@ func TestKind16629_ValidateRTag_RegularRepo(t *testing.T) {
 	}
 }
 
-func TestKind16629_ValidateRTag_OrgRepo(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_ValidateRTag_OrgRepo(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -197,7 +197,7 @@ func TestKind16629_ValidateRTag_OrgRepo(t *testing.T) {
 			tags := buildPermissionTags(tc.rTag, "myrepo", orgOwner.PublicKey, "",
 				nostr.Tag{"p", collaborator.PublicKey, "write"})
 
-			event, err := helpers.CreateGenericEvent(orgOwner, 16629, "", tags)
+			event, err := helpers.CreateGenericEvent(orgOwner, 31415, "", tags)
 			if err != nil {
 				t.Fatalf("Failed to create event: %v", err)
 			}
@@ -217,8 +217,8 @@ func TestKind16629_ValidateRTag_OrgRepo(t *testing.T) {
 	}
 }
 
-func TestKind16629_ValidateATag(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_ValidateATag(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -249,19 +249,19 @@ func TestKind16629_ValidateATag(t *testing.T) {
 		},
 		{
 			name:        "Invalid a tag - wrong kind",
-			aTag:        "12345:" + owner.PublicKey + ":nestr-organization-test123",
+			aTag:        "12345:" + owner.PublicKey + ":nosis-organization-test123",
 			includeATag: true,
 			expectError: true,
 		},
 		{
 			name:        "Invalid a tag - bad pubkey",
-			aTag:        "39504:badpubkey:nestr-organization-test123",
+			aTag:        "39504:badpubkey:nosis-organization-test123",
 			includeATag: true,
 			expectError: true,
 		},
 		{
 			name:        "Invalid a tag - short pubkey",
-			aTag:        "39504:abc123:nestr-organization-test123",
+			aTag:        "39504:abc123:nosis-organization-test123",
 			includeATag: true,
 			expectError: true,
 		},
@@ -294,7 +294,7 @@ func TestKind16629_ValidateATag(t *testing.T) {
 				tags = append(tags, nostr.Tag{"a", tc.aTag})
 			}
 
-			event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
+			event, err := helpers.CreateGenericEvent(owner, 31415, "", tags)
 			if err != nil {
 				t.Fatalf("Failed to create event: %v", err)
 			}
@@ -314,8 +314,8 @@ func TestKind16629_ValidateATag(t *testing.T) {
 	}
 }
 
-func TestKind16629_ValidatePermissionTag(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_ValidatePermissionTag(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -374,7 +374,79 @@ func TestKind16629_ValidatePermissionTag(t *testing.T) {
 			tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 				nostr.Tag{"p", collaborator.PublicKey, tc.permissionLevel})
 
-			event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
+			event, err := helpers.CreateGenericEvent(owner, 31415, "", tags)
+			if err != nil {
+				t.Fatalf("Failed to create event: %v", err)
+			}
+
+			if tc.expectError {
+				rejected := publishExpectReject(ctx, conn, event)
+				if !rejected {
+					t.Errorf("Expected event to be rejected, but it was stored")
+				}
+			} else {
+				err = conn.Publish(ctx, *event)
+				if err != nil {
+					t.Errorf("Expected event to be accepted, but got error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestKind31415_ValidateRelayTag_DHTPublicKey(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
+	defer relay.Cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := relay.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect to relay: %v", err)
+	}
+	defer conn.Close()
+
+	owner, _ := helpers.GenerateKeyPair()
+	collaborator, _ := helpers.GenerateKeyPair()
+	dhtKey := "f51a2356dd4aa7678658adaf659a8b43b51a94075b1fed254fc39d64211bf25d"
+
+	tests := []struct {
+		name        string
+		relayTag    string
+		expectError bool
+	}{
+		{
+			name:        "Valid raw DHT public key",
+			relayTag:    dhtKey,
+			expectError: false,
+		},
+		{
+			name:        "Valid nosis DHT public key",
+			relayTag:    "nosis://" + dhtKey,
+			expectError: false,
+		},
+		{
+			name:        "Invalid nosis DHT public key",
+			relayTag:    "nosis://abc123",
+			expectError: true,
+		},
+	}
+
+	for index, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repoName := fmt.Sprintf("myrepo-%d", index)
+			rTag := owner.PublicKey + ":" + repoName
+			tags := buildPermissionTags(rTag, repoName, owner.PublicKey, "",
+				nostr.Tag{"p", collaborator.PublicKey, "write"})
+
+			for i, tag := range tags {
+				if len(tag) >= 2 && tag[0] == "relay" {
+					tags[i][1] = tc.relayTag
+				}
+			}
+
+			event, err := helpers.CreateGenericEvent(owner, 31415, "", tags)
 			if err != nil {
 				t.Fatalf("Failed to create event: %v", err)
 			}
@@ -398,8 +470,8 @@ func TestKind16629_ValidatePermissionTag(t *testing.T) {
 // Test: Regular Repo Permissions
 // ============================================================================
 
-func TestKind16629_RegularRepo_OwnerCanCreate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_RegularRepo_OwnerCanCreate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -418,7 +490,7 @@ func TestKind16629_RegularRepo_OwnerCanCreate(t *testing.T) {
 	tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
 
-	event, err := helpers.CreateGenericEvent(owner, 16629, "", tags)
+	event, err := helpers.CreateGenericEvent(owner, 31415, "", tags)
 	if err != nil {
 		t.Fatalf("Failed to create event: %v", err)
 	}
@@ -440,8 +512,8 @@ func TestKind16629_RegularRepo_OwnerCanCreate(t *testing.T) {
 	}
 }
 
-func TestKind16629_RegularRepo_NonOwnerCannotCreate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_RegularRepo_NonOwnerCannotCreate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -463,7 +535,7 @@ func TestKind16629_RegularRepo_NonOwnerCannotCreate(t *testing.T) {
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
 
 	// Attacker tries to create permission event for owner's repo
-	event, err := helpers.CreateGenericEvent(attacker, 16629, "", tags)
+	event, err := helpers.CreateGenericEvent(attacker, 31415, "", tags)
 	if err != nil {
 		t.Fatalf("Failed to create event: %v", err)
 	}
@@ -475,8 +547,8 @@ func TestKind16629_RegularRepo_NonOwnerCannotCreate(t *testing.T) {
 	}
 }
 
-func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_RegularRepo_OwnerCanUpdate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -497,7 +569,7 @@ func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
 	// Create first permission event
 	tags1 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator1.PublicKey, "write"})
-	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
+	event1, _ := helpers.CreateGenericEvent(owner, 31415, "", tags1)
 	err = conn.Publish(ctx, *event1)
 	if err != nil {
 		t.Fatalf("Failed to create first permission event: %v", err)
@@ -510,7 +582,7 @@ func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
 	tags2 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator1.PublicKey, "maintainer"},
 		nostr.Tag{"p", collaborator2.PublicKey, "write"})
-	event2, _ := helpers.CreateGenericEvent(owner, 16629, "", tags2)
+	event2, _ := helpers.CreateGenericEvent(owner, 31415, "", tags2)
 	err = conn.Publish(ctx, *event2)
 	if err != nil {
 		t.Fatalf("Owner should be able to update permission event: %v", err)
@@ -518,7 +590,7 @@ func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
 
 	// Verify only the new event exists
 	filter := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags: nostr.TagMap{
 			"r": []string{rTag},
 		},
@@ -537,8 +609,8 @@ func TestKind16629_RegularRepo_OwnerCanUpdate(t *testing.T) {
 	}
 }
 
-func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -559,7 +631,7 @@ func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
 	// Owner creates initial permission event
 	tags1 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
-	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
+	event1, _ := helpers.CreateGenericEvent(owner, 31415, "", tags1)
 	err = conn.Publish(ctx, *event1)
 	if err != nil {
 		t.Fatalf("Failed to create initial permission event: %v", err)
@@ -575,7 +647,7 @@ func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
 	// Attacker tries to update (we don't wait for this, it will be rejected with NOTICE)
 	tags2 := buildPermissionTags(rTag, "myrepo", attacker.PublicKey, "",
 		nostr.Tag{"p", attacker.PublicKey, "maintainer"})
-	event2, _ := helpers.CreateGenericEvent(attacker, 16629, "", tags2)
+	event2, _ := helpers.CreateGenericEvent(attacker, 31415, "", tags2)
 
 	// Use a short timeout context for the attacker's publish - we expect it to fail
 	attackCtx, attackCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -587,7 +659,7 @@ func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
 
 	// Verify original event still exists and attacker's event was rejected
 	filter := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags: nostr.TagMap{
 			"r": []string{rTag},
 		},
@@ -607,8 +679,8 @@ func TestKind16629_RegularRepo_NonOwnerCannotUpdate(t *testing.T) {
 // Test: Org Repo Permissions
 // ============================================================================
 
-func TestKind16629_OrgRepo_OwnerCanCreate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_OrgRepo_OwnerCanCreate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -639,7 +711,7 @@ func TestKind16629_OrgRepo_OwnerCanCreate(t *testing.T) {
 	tags := buildPermissionTags(rTag, "myrepo", orgOwner.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
 
-	event, _ := helpers.CreateGenericEvent(orgOwner, 16629, "", tags)
+	event, _ := helpers.CreateGenericEvent(orgOwner, 31415, "", tags)
 	err = conn.Publish(ctx, *event)
 	if err != nil {
 		t.Fatalf("Org owner should be able to create permission event: %v", err)
@@ -653,8 +725,8 @@ func TestKind16629_OrgRepo_OwnerCanCreate(t *testing.T) {
 	}
 }
 
-func TestKind16629_OrgRepo_MemberCanCreateFirst(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_OrgRepo_MemberCanCreateFirst(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -699,7 +771,7 @@ func TestKind16629_OrgRepo_MemberCanCreateFirst(t *testing.T) {
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":newrepo"
 	permTags := buildPermissionTags(rTag, "newrepo", member.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
-	permEvent, _ := helpers.CreateGenericEvent(member, 16629, "", permTags)
+	permEvent, _ := helpers.CreateGenericEvent(member, 31415, "", permTags)
 	err = conn.Publish(ctx, *permEvent)
 	if err != nil {
 		t.Fatalf("Verified org member should be able to create first permission event: %v", err)
@@ -713,8 +785,8 @@ func TestKind16629_OrgRepo_MemberCanCreateFirst(t *testing.T) {
 	}
 }
 
-func TestKind16629_OrgRepo_NonMemberCannotCreate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_OrgRepo_NonMemberCannotCreate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -741,7 +813,7 @@ func TestKind16629_OrgRepo_NonMemberCannotCreate(t *testing.T) {
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
 	tags := buildPermissionTags(rTag, "myrepo", nonMember.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
-	event, _ := helpers.CreateGenericEvent(nonMember, 16629, "", tags)
+	event, _ := helpers.CreateGenericEvent(nonMember, 31415, "", tags)
 
 	// Use publishExpectReject for expected rejection
 	rejected := publishExpectReject(ctx, conn, event)
@@ -750,8 +822,8 @@ func TestKind16629_OrgRepo_NonMemberCannotCreate(t *testing.T) {
 	}
 }
 
-func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -795,7 +867,7 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
 	tags1 := buildPermissionTags(rTag, "myrepo", member.PublicKey, "",
 		nostr.Tag{"p", collaborator1.PublicKey, "write"})
-	event1, _ := helpers.CreateGenericEvent(member, 16629, "", tags1)
+	event1, _ := helpers.CreateGenericEvent(member, 31415, "", tags1)
 	err = conn.Publish(ctx, *event1)
 	if err != nil {
 		t.Fatalf("Member should be able to create first event: %v", err)
@@ -806,7 +878,7 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 	// Member tries to update (should fail - only owner can update)
 	tags2 := buildPermissionTags(rTag, "myrepo", member.PublicKey, "",
 		nostr.Tag{"p", collaborator2.PublicKey, "write"})
-	event2, _ := helpers.CreateGenericEvent(member, 16629, "", tags2)
+	event2, _ := helpers.CreateGenericEvent(member, 31415, "", tags2)
 	rejected := publishExpectReject(ctx, conn, event2)
 	if !rejected {
 		t.Errorf("Member should not be able to update permission event (only org owner can)")
@@ -814,7 +886,7 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 
 	// Verify original event still exists
 	filter := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags: nostr.TagMap{
 			"r": []string{rTag},
 		},
@@ -834,7 +906,7 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 	tags3 := buildPermissionTags(rTag, "myrepo", orgOwner.PublicKey, "",
 		nostr.Tag{"p", collaborator1.PublicKey, "maintainer"},
 		nostr.Tag{"p", collaborator2.PublicKey, "write"})
-	event3, _ := helpers.CreateGenericEvent(orgOwner, 16629, "", tags3)
+	event3, _ := helpers.CreateGenericEvent(orgOwner, 31415, "", tags3)
 	err = conn.Publish(ctx, *event3)
 	if err != nil {
 		t.Fatalf("Org owner should be able to update permission event: %v", err)
@@ -855,8 +927,8 @@ func TestKind16629_OrgRepo_OnlyOwnerCanUpdate(t *testing.T) {
 // Test: Invitation/Membership Verification
 // ============================================================================
 
-func TestKind16629_OrgRepo_DeletedInvitationInvalidatesMembership(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_OrgRepo_DeletedInvitationInvalidatesMembership(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -907,7 +979,7 @@ func TestKind16629_OrgRepo_DeletedInvitationInvalidatesMembership(t *testing.T) 
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":newrepo"
 	permTags := buildPermissionTags(rTag, "newrepo", member.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
-	permEvent, _ := helpers.CreateGenericEvent(member, 16629, "", permTags)
+	permEvent, _ := helpers.CreateGenericEvent(member, 31415, "", permTags)
 
 	// Use publishExpectReject for expected rejection
 	rejected := publishExpectReject(ctx, conn, permEvent)
@@ -916,8 +988,8 @@ func TestKind16629_OrgRepo_DeletedInvitationInvalidatesMembership(t *testing.T) 
 	}
 }
 
-func TestKind16629_OrgRepo_PendingInvitationNotValid(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_OrgRepo_PendingInvitationNotValid(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -953,7 +1025,7 @@ func TestKind16629_OrgRepo_PendingInvitationNotValid(t *testing.T) {
 	rTag := "39504_" + orgOwner.PublicKey + "_" + orgDtag + ":myrepo"
 	permTags := buildPermissionTags(rTag, "myrepo", invitedUser.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
-	permEvent, _ := helpers.CreateGenericEvent(invitedUser, 16629, "", permTags)
+	permEvent, _ := helpers.CreateGenericEvent(invitedUser, 31415, "", permTags)
 
 	// Use publishExpectReject for expected rejection
 	rejected := publishExpectReject(ctx, conn, permEvent)
@@ -966,8 +1038,8 @@ func TestKind16629_OrgRepo_PendingInvitationNotValid(t *testing.T) {
 // Test: Event Replacement
 // ============================================================================
 
-func TestKind16629_ReplacementDeletesOldEvent(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_ReplacementDeletesOldEvent(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -988,7 +1060,7 @@ func TestKind16629_ReplacementDeletesOldEvent(t *testing.T) {
 	// Create first event
 	tags1 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator1.PublicKey, "write"})
-	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
+	event1, _ := helpers.CreateGenericEvent(owner, 31415, "", tags1)
 	conn.Publish(ctx, *event1)
 
 	time.Sleep(100 * time.Millisecond)
@@ -996,12 +1068,12 @@ func TestKind16629_ReplacementDeletesOldEvent(t *testing.T) {
 	// Create second event (replacement)
 	tags2 := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator2.PublicKey, "maintainer"})
-	event2, _ := helpers.CreateGenericEvent(owner, 16629, "", tags2)
+	event2, _ := helpers.CreateGenericEvent(owner, 31415, "", tags2)
 	conn.Publish(ctx, *event2)
 
 	// Query by r tag - should only get one event
 	filter := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags: nostr.TagMap{
 			"r": []string{rTag},
 		},
@@ -1021,8 +1093,8 @@ func TestKind16629_ReplacementDeletesOldEvent(t *testing.T) {
 	}
 }
 
-func TestKind16629_MultipleReplacementsOnlyKeepsLatest(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_MultipleReplacementsOnlyKeepsLatest(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1044,7 +1116,7 @@ func TestKind16629_MultipleReplacementsOnlyKeepsLatest(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		tags := buildPermissionTags(rTag, "myrepo", owner.PublicKey, "",
 			nostr.Tag{"p", collaborator.PublicKey, "write"})
-		event, _ := helpers.CreateGenericEvent(owner, 16629, "", tags)
+		event, _ := helpers.CreateGenericEvent(owner, 31415, "", tags)
 		conn.Publish(ctx, *event)
 		lastEventID = event.ID
 		time.Sleep(50 * time.Millisecond)
@@ -1052,7 +1124,7 @@ func TestKind16629_MultipleReplacementsOnlyKeepsLatest(t *testing.T) {
 
 	// Query by r tag - should only get one event
 	filter := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags: nostr.TagMap{
 			"r": []string{rTag},
 		},
@@ -1072,8 +1144,8 @@ func TestKind16629_MultipleReplacementsOnlyKeepsLatest(t *testing.T) {
 // Test: Different Repos Same Owner
 // ============================================================================
 
-func TestKind16629_DifferentReposSameOwner(t *testing.T) {
-	relay := setupKind16629TestRelay(t)
+func TestKind31415_DifferentReposSameOwner(t *testing.T) {
+	relay := setupKind31415TestRelay(t)
 	defer relay.Cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1094,25 +1166,25 @@ func TestKind16629_DifferentReposSameOwner(t *testing.T) {
 	// Create permission for repo1
 	tags1 := buildPermissionTags(rTag1, "repo1", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "write"})
-	event1, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1)
+	event1, _ := helpers.CreateGenericEvent(owner, 31415, "", tags1)
 	conn.Publish(ctx, *event1)
 
 	// Create permission for repo2
 	tags2 := buildPermissionTags(rTag2, "repo2", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "maintainer"})
-	event2, _ := helpers.CreateGenericEvent(owner, 16629, "", tags2)
+	event2, _ := helpers.CreateGenericEvent(owner, 31415, "", tags2)
 	conn.Publish(ctx, *event2)
 
 	// Query for repo1
 	filter1 := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags:  nostr.TagMap{"r": []string{rTag1}},
 	}
 	events1, _ := conn.QuerySync(ctx, filter1)
 
 	// Query for repo2
 	filter2 := nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags:  nostr.TagMap{"r": []string{rTag2}},
 	}
 	events2, _ := conn.QuerySync(ctx, filter2)
@@ -1129,7 +1201,7 @@ func TestKind16629_DifferentReposSameOwner(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	tags1Updated := buildPermissionTags(rTag1, "repo1", owner.PublicKey, "",
 		nostr.Tag{"p", collaborator.PublicKey, "triage"})
-	event1Updated, _ := helpers.CreateGenericEvent(owner, 16629, "", tags1Updated)
+	event1Updated, _ := helpers.CreateGenericEvent(owner, 31415, "", tags1Updated)
 	conn.Publish(ctx, *event1Updated)
 
 	events1, _ = conn.QuerySync(ctx, filter1)
@@ -1148,12 +1220,12 @@ func TestKind16629_DifferentReposSameOwner(t *testing.T) {
 // Helper Functions
 // ============================================================================
 
-// setupKind16629TestRelay creates a test relay for kind16629 tests
-func setupKind16629TestRelay(t *testing.T) *helpers.TestRelay {
+// setupKind31415TestRelay creates a test relay for kind31415 tests
+func setupKind31415TestRelay(t *testing.T) *helpers.TestRelay {
 	t.Helper()
 	cfg := helpers.DefaultTestConfig()
 	// Include all kinds we need for these tests
-	cfg.AllowedKinds = []int{0, 1, 3, 5, 16629, 39504, 39505, 39506}
+	cfg.AllowedKinds = []int{0, 1, 3, 5, 31415, 39504, 39505, 39506}
 	relay, err := helpers.NewTestRelay(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create test relay: %v", err)

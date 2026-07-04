@@ -33,19 +33,19 @@ func GetResolver(kind string) ResourcePermissionResolver {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in resolver: Kind 16629 (Repository Permission Event)
+// Built-in resolver: Kind 31415 (Repository Permission Event)
 // ---------------------------------------------------------------------------
 
 func init() {
-	RegisterResolver("16629", &RepoPermissionResolver{})
+	RegisterResolver("31415", &RepoPermissionResolver{})
 }
 
-// RepoPermissionResolver resolves the owner of a Nestr git repository.
+// RepoPermissionResolver resolves the owner of a Nosis git repository.
 type RepoPermissionResolver struct{}
 
 func (r *RepoPermissionResolver) ResolveOwner(store stores.Store, resourceID string) (string, error) {
 	events, err := store.QueryEvents(nostr.Filter{
-		Kinds: []int{16629},
+		Kinds: []int{31415},
 		Tags:  nostr.TagMap{"r": []string{resourceID}},
 	})
 	if err != nil {

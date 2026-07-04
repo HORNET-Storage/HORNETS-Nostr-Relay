@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,31 +12,32 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/config"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
+	"github.com/HORNET-Storage/hornet-storage/lib/sidecar"
 	"github.com/HORNET-Storage/hornet-storage/services/push"
+	hsClient "github.com/hornet-storage/hornets-hyperswarm/clients/go/hyperswarm"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/stores/badgerhold"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/moderation"
 	"github.com/HORNET-Storage/hornet-storage/lib/subscription"
+	"github.com/HORNET-Storage/hornet-storage/lib/transports/websocket"
+	"github.com/HORNET-Storage/hornet-storage/lib/wot"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/upnp"
 
 	"github.com/spf13/viper"
-
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/protocol"
-
-	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
-	"github.com/HORNET-Storage/hornet-storage/lib/transports/libp2p"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/web"
 
@@ -86,7 +89,9 @@ import (
 
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/claim"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/download"
+	nostr_relay "github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/nostr_relay"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/query"
+	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/services"
 	"github.com/HORNET-Storage/hornet-storage/lib/handlers/scionic/upload"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
@@ -97,6 +102,9 @@ import (
 var (
 	compactDB      = flag.Bool("compact", false, "Run database compaction to reclaim any potential disk space before starting regular services")
 	memoryProfiler = flag.Bool("profile", false, "Run pprof memory profiler enabling memory usage debugging")
+	bootstrapSetup = flag.Bool("bootstrap-setup", false, "Run first-time setup server before starting relay services")
+	setupHost      = flag.String("setup-host", "127.0.0.1", "Host/interface for first-time setup server")
+	setupPort      = flag.Int("setup-port", 11012, "Port for first-time setup server")
 )
 
 func init() {
@@ -125,19 +133,103 @@ func init() {
 
 	// Initialze upnp system if enabled
 	if viper.GetBool("server.upnp") {
-		upnp, err := upnp.Init(ctx)
+		upnpManager, err := upnp.Init(ctx)
 		if err != nil {
 			logging.Error("UPnP init failed", map[string]interface{}{
 				"error": err,
 			})
+			return
+		}
+		if upnpManager == nil {
+			logging.Error("UPnP init failed", map[string]interface{}{
+				"error": "no UPnP router discovered",
+			})
+			return
 		}
 
-		ip, err := upnp.ExternalIP()
+		ip, err := upnpManager.ExternalIP()
 		if err == nil {
 			logging.Info("UPnP External IP", map[string]interface{}{
 				"ip": ip,
 			})
+		} else {
+			logging.Error("Failed to get UPnP external IP", map[string]interface{}{
+				"error": err,
+			})
 		}
+	}
+}
+
+func deriveAirlockDHTPublicKeyFromPrivateKey(privateKey string) (string, error) {
+	privateKeyBytes, err := signing.DecodeKey(strings.TrimSpace(privateKey))
+	if err != nil {
+		return "", fmt.Errorf("invalid Airlock private key: %w", err)
+	}
+
+	if len(privateKeyBytes) != ed25519.SeedSize {
+		return "", fmt.Errorf("invalid Airlock private key length: expected %d bytes, got %d", ed25519.SeedSize, len(privateKeyBytes))
+	}
+
+	ed25519PrivateKey := ed25519.NewKeyFromSeed(privateKeyBytes)
+	ed25519PublicKey := ed25519PrivateKey.Public().(ed25519.PublicKey)
+	return hex.EncodeToString(ed25519PublicKey), nil
+}
+
+func syncAirlockServiceDHTPubkey() (string, error) {
+	airlockConfigPath := defaultAirlockConfigPath()
+	airlockConfig := readYAMLMap(airlockConfigPath)
+	if len(airlockConfig) == 0 {
+		return "", fmt.Errorf("airlock config not found at %s", airlockConfigPath)
+	}
+
+	privateKey := strings.TrimSpace(fmt.Sprint(airlockConfig["private_key"]))
+	if privateKey == "" {
+		return "", fmt.Errorf("airlock private_key missing in %s", airlockConfigPath)
+	}
+
+	return deriveAirlockDHTPublicKeyFromPrivateKey(privateKey)
+}
+
+func forwardSidecarDHTPort(client *hsClient.Client) func() {
+	if !viper.GetBool("server.upnp") {
+		return func() {}
+	}
+
+	upnpManager := upnp.Get()
+	if upnpManager == nil {
+		logging.Warn("UPnP is enabled but no router was discovered for HyperDHT port mapping", nil)
+		return func() {}
+	}
+
+	status, err := client.Status()
+	if err != nil {
+		logging.Error("Failed to read sidecar status for HyperDHT UPnP mapping", map[string]interface{}{
+			"error": err,
+		})
+		return func() {}
+	}
+	if status == nil || status.DHT == nil || status.DHT.Port <= 0 || status.DHT.Port > 65535 {
+		logging.Warn("Sidecar HyperDHT port unavailable for UPnP mapping", map[string]interface{}{
+			"status": status,
+		})
+		return func() {}
+	}
+
+	port := uint16(status.DHT.Port)
+	if err := upnpManager.ForwardPort(port, "Hornet Storage HyperDHT"); err != nil {
+		logging.Error("Failed to forward HyperDHT port using UPnP", map[string]interface{}{
+			"port":  port,
+			"error": err,
+		})
+		return func() {}
+	}
+
+	logging.Info("Forwarded HyperDHT port using UPnP", map[string]interface{}{
+		"port": port,
+	})
+
+	return func() {
+		upnpManager.RemovePort(port)
 	}
 }
 
@@ -162,16 +254,34 @@ func main() {
 		})
 	}
 
+	if *bootstrapSetup {
+		if err := runBootstrapSetup(ctx, *setupHost, *setupPort); err != nil {
+			logging.Fatalf("Bootstrap setup failed: %v", err)
+		}
+
+		if err := config.InitConfig(); err != nil {
+			logging.Fatalf("Failed to reinitialize config after bootstrap setup: %v", err)
+		}
+
+		settings, err = config.GetConfig()
+		if err != nil {
+			logging.Fatalf("Failed to reload config after bootstrap setup: %v", err)
+		}
+	}
+
 	serializedPrivateKey := viper.GetString("relay.private_key")
 
 	// Add diagnostic logging for config state
 	logging.Info("Config initialization diagnostic", map[string]interface{}{
-		"config_file_exists": viper.ConfigFileUsed() != "",
-		"config_file_path":   viper.ConfigFileUsed(),
-		"private_key_exists": len(serializedPrivateKey) > 0,
-		"dht_key_exists":     len(viper.GetString("relay.dht_key")) > 0,
-		"public_key_exists":  len(viper.GetString("relay.public_key")) > 0,
-		"wallet_key_exists":  len(viper.GetString("external_services.wallet.key")) > 0,
+		"config_file_exists":     viper.ConfigFileUsed() != "",
+		"config_file_path":       viper.ConfigFileUsed(),
+		"private_key_exists":     len(serializedPrivateKey) > 0,
+		"legacy_dht_key_exists":  len(viper.GetString("relay.dht_key")) > 0,
+		"dht_seed_exists":        len(viper.GetString("relay.dht_seed")) > 0,
+		"dht_public_key_exists":  len(viper.GetString("relay.dht_public_key")) > 0,
+		"dht_private_key_exists": len(viper.GetString("relay.dht_private_key")) > 0,
+		"public_key_exists":      len(viper.GetString("relay.public_key")) > 0,
+		"wallet_key_exists":      len(viper.GetString("external_services.wallet.key")) > 0,
 	})
 
 	// Track if we need to save config at the end
@@ -215,20 +325,87 @@ func main() {
 		}
 	}
 
-	dhtKey := viper.GetString("relay.dht_key")
-
-	if len(dhtKey) <= 0 {
-		dhtKey, err := synckeys.DeriveKeyFromNsec(serializedPrivateKey)
-		if err != nil {
-			logging.Errorf("Failed to generate DHT key: %v", err)
+	legacyDHTSeed := strings.TrimSpace(viper.GetString("relay.dht_key"))
+	dhtSeed := strings.TrimSpace(viper.GetString("relay.dht_seed"))
+	if dhtSeed == "" && legacyDHTSeed != "" {
+		dhtSeed = legacyDHTSeed
+		if err := config.UpdateConfig("relay.dht_seed", dhtSeed, true); err != nil {
+			logging.Errorf("Failed to migrate legacy relay.dht_key to relay.dht_seed: %v", err)
 		} else {
-			// Use UpdateConfig with save=false
-			config.UpdateConfig("relay.dht_key", dhtKey, true)
 			configNeedsSave = true
-
-			logging.Info("Generated new server DHT key", map[string]interface{}{
-				"dht_key": dhtKey,
+			logging.Info("Migrated legacy relay DHT seed configuration", map[string]interface{}{
+				"dht_seed": dhtSeed,
 			})
+		}
+	}
+	if legacyDHTSeed != "" {
+		if err := config.RemoveConfigKey("relay.dht_key"); err != nil {
+			logging.Errorf("Failed to remove legacy relay.dht_key config entry: %v", err)
+		} else {
+			logging.Info("Removed legacy relay.dht_key config entry", nil)
+		}
+	}
+
+	var dhtIdentity *synckeys.DHTIdentity
+	if dhtSeed == "" {
+		dhtIdentity, err = synckeys.DeriveDHTIdentityFromPrivateKey(serializedPrivateKey)
+		if err != nil {
+			logging.Errorf("Failed to derive DHT identity from relay private key: %v", err)
+		} else {
+			dhtSeed = dhtIdentity.Seed
+			if err := config.UpdateConfig("relay.dht_seed", dhtSeed, true); err != nil {
+				logging.Errorf("Failed to save derived relay DHT seed: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Generated new relay DHT seed from private key", map[string]interface{}{
+					"dht_seed": dhtSeed,
+				})
+			}
+		}
+	} else {
+		dhtIdentity, err = synckeys.DeriveDHTIdentityFromSeed(dhtSeed)
+		if err != nil {
+			logging.Errorf("Failed to derive DHT identity from configured seed: %v", err)
+		}
+	}
+
+	if dhtIdentity != nil {
+		if currentDHTPublicKey := strings.TrimSpace(viper.GetString("relay.dht_public_key")); currentDHTPublicKey != dhtIdentity.PublicKey {
+			if err := config.UpdateConfig("relay.dht_public_key", dhtIdentity.PublicKey, true); err != nil {
+				logging.Errorf("Failed to save relay DHT public key: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Updated relay DHT public key in configuration", map[string]interface{}{
+					"dht_public_key": dhtIdentity.PublicKey,
+				})
+			}
+		}
+
+		if currentDHTPrivateKey := strings.TrimSpace(viper.GetString("relay.dht_private_key")); currentDHTPrivateKey != dhtIdentity.PrivateKey {
+			if err := config.UpdateConfig("relay.dht_private_key", dhtIdentity.PrivateKey, true); err != nil {
+				logging.Errorf("Failed to save relay DHT private key: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Updated relay DHT private key in configuration", map[string]interface{}{
+					"dht_private_key": dhtIdentity.PrivateKey,
+				})
+			}
+		}
+	}
+
+	if viper.GetInt("server.services.airlock.port") > 0 {
+		airlockDHTPublicKey, err := syncAirlockServiceDHTPubkey()
+		if err != nil {
+			logging.Errorf("Failed to synchronize Airlock DHT public key for service discovery: %v", err)
+		} else if currentAirlockDHTPublicKey := strings.TrimSpace(viper.GetString("server.services.airlock.dht_pubkey")); currentAirlockDHTPublicKey != airlockDHTPublicKey {
+			if err := config.UpdateConfig("server.services.airlock.dht_pubkey", airlockDHTPublicKey, true); err != nil {
+				logging.Errorf("Failed to save Airlock DHT public key for service discovery: %v", err)
+			} else {
+				configNeedsSave = true
+				logging.Info("Synchronized Airlock DHT public key for service discovery", map[string]interface{}{
+					"airlock_dht_public_key": airlockDHTPublicKey,
+				})
+			}
 		}
 	}
 
@@ -292,20 +469,41 @@ func main() {
 		logging.Info("Startup configuration saved successfully")
 	}
 
-	port := config.GetPort("hornets")
-	portStr := fmt.Sprintf("%d", port)
+	// Create HyperDHT listener via sidecar
+	hsClient, err := sidecar.GetClient()
+	if err != nil {
+		logging.Fatal("Failed to connect to hyperswarm sidecar", map[string]interface{}{
+			"error": err,
+		})
+	}
+	defer sidecar.Close()
+	cleanupDHTUPnP := forwardSidecarDHTPort(hsClient)
+	defer cleanupDHTUPnP()
 
-	host := libp2p.GetHostOnPort(serializedPrivateKey, portStr)
+	listener := hsListener.NewHyperswarmListener(hsClient)
+	defer listener.Close()
 
-	if viper.GetBool("server.upnp") {
-		upnp := upnp.Get()
+	_, dhtPublicKey, err := listener.CreateServerFromSeed(dhtSeed)
+	if err != nil {
+		logging.Fatal("Failed to create HyperDHT server", map[string]interface{}{
+			"error": err,
+		})
+	}
 
-		err = upnp.ForwardPort(uint16(port), "LaterCondition")
-		if err != nil {
-			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
-				"port": port,
+	// Store DHT public key for NIP-11 advertisement
+	viper.Set("DHTPublicKey", dhtPublicKey)
+	if currentDHTPublicKey := strings.TrimSpace(viper.GetString("relay.dht_public_key")); currentDHTPublicKey != dhtPublicKey {
+		if err := config.UpdateConfig("relay.dht_public_key", dhtPublicKey, true); err != nil {
+			logging.Errorf("Failed to save sidecar DHT public key: %v", err)
+		} else {
+			configNeedsSave = true
+			logging.Info("Synchronized relay DHT public key with sidecar server", map[string]interface{}{
+				"dht_public_key": dhtPublicKey,
 			})
 		}
+	}
+	if dhtIdentity != nil && dhtIdentity.PublicKey != dhtPublicKey {
+		logging.Errorf("Derived DHT public key does not match sidecar server public key: derived=%s sidecar=%s", dhtIdentity.PublicKey, dhtPublicKey)
 	}
 
 	// Create and initialize database
@@ -397,7 +595,7 @@ func main() {
 	subscription.InitGlobalManager(
 		store,
 		privateKey,
-		dhtKey,
+		dhtPublicKey,
 		settings.AllowedUsersSettings.Tiers,
 	)
 	logging.Info("Global subscription manager initialized successfully")
@@ -458,6 +656,37 @@ func main() {
 			logging.Errorf("Failed to initialize access control: %v", err)
 		} else {
 			logging.Info("Global access control initialized successfully")
+
+			// Populate blacklist cache from stored kind 30078 events at startup
+			if ac := websocket.GetAccessControl(); ac != nil && ac.Blacklist != nil {
+				ac.Blacklist.PopulateFromStore(store)
+				logging.Info("Blacklist cache populated from stored events")
+			}
+
+			// Set the WOT cache lazy-loader so WOT graphs are automatically
+			// reloaded from the DAG store on cache miss (after restart or LRU eviction).
+			if ac := websocket.GetAccessControl(); ac != nil && ac.WotCache != nil {
+				ac.WotCache.SetLoader(func(dagRootHash string) ([]byte, string, error) {
+					dagData, err := store.BuildDagFromStore(dagRootHash, true)
+					if err != nil {
+						return nil, "", fmt.Errorf("DAG not found in store: %w", err)
+					}
+					rootLeaf := dagData.Dag.Leafs[dagData.Dag.Root]
+					if rootLeaf == nil {
+						return nil, "", fmt.Errorf("root leaf missing from DAG")
+					}
+					ownerPubkey := rootLeaf.AdditionalData["wot_owner"]
+					if ownerPubkey == "" {
+						return nil, "", fmt.Errorf("DAG has no wot_owner tag")
+					}
+					binaryData, err := dagData.Dag.GetContentFromLeaf(rootLeaf)
+					if err != nil {
+						return nil, "", fmt.Errorf("failed to extract content: %w", err)
+					}
+					return binaryData, ownerPubkey, nil
+				})
+				logging.Info("WOT cache lazy-loader configured (auto-reload from store on cache miss)")
+			}
 		}
 
 		// Initialize push notification service
@@ -478,16 +707,92 @@ func main() {
 	}
 
 	// Stream Handlers
-	download.AddDownloadHandler(host, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
-		return true
+	download.AddDownloadHandler(listener, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+		accessControl := websocket.GetAccessControl()
+		if accessControl == nil {
+			return true
+		}
+
+		requesterPubkey := ""
+		requesterSignature := ""
+		if pubKey != nil {
+			requesterPubkey = *pubKey
+		}
+		if signature != nil {
+			requesterSignature = *signature
+		}
+
+		return accessControl.CanReadDag(rootLeaf, requesterPubkey, requesterSignature, store) == nil
 	})
 
-	upload.AddUploadHandlerForLibp2p(ctx, host, store, nil, nil)
-	query.AddQueryHandler(host, store)
-	claim.AddClaimOwnershipHandler(host, store)
+	upload.AddUploadHandler(listener, store, func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool {
+		accessControl := websocket.GetAccessControl()
+		if accessControl == nil {
+			return true
+		}
 
-	logging.Infof("Host started with id: %s\n", host.ID())
-	logging.Infof("Host started with address: %s\n", host.Addrs())
+		requesterPubkey := ""
+		if pubKey != nil {
+			requesterPubkey = *pubKey
+		}
+
+		return accessControl.CanWriteDag(rootLeaf, requesterPubkey, store) == nil
+	}, func(dag *merkle_dag.Dag, pubKey *string) {
+		// Detect WOT DAGs by checking root leaf's AdditionalData for wot_file tag.
+		// If present, load the binary content and cache it for WOT permission checks.
+		rootLeaf := dag.Leafs[dag.Root]
+		if rootLeaf == nil || rootLeaf.AdditionalData == nil {
+			return
+		}
+		if rootLeaf.AdditionalData["wot_file"] != "true" {
+			return
+		}
+
+		ownerPubkey := rootLeaf.AdditionalData["wot_owner"]
+		if ownerPubkey == "" && pubKey != nil {
+			ownerPubkey = *pubKey
+		}
+
+		logging.Infof("WOT DAG detected (root: %s, owner: %s) — loading binary for cache", dag.Root, ownerPubkey)
+
+		// Re-read the DAG with content to get the binary bytes
+		dagData, err := store.BuildDagFromStore(dag.Root, true)
+		if err != nil {
+			logging.Errorf("Failed to load WOT DAG content for caching: %v", err)
+			return
+		}
+
+		// For a single-file WOT upload, the content is in the root leaf or reassembled
+		contentLeaf := dagData.Dag.Leafs[dagData.Dag.Root]
+		if contentLeaf == nil {
+			return
+		}
+		binaryData, err := dagData.Dag.GetContentFromLeaf(contentLeaf)
+		if err != nil || len(binaryData) == 0 {
+			logging.Errorf("Failed to extract WOT binary from DAG: %v", err)
+			return
+		}
+
+		// Try to cache it — if parsing fails, the cache.Store call returns an error
+		// and the DAG is treated as a normal upload (fail-safe).
+		accessControl := websocket.GetAccessControl()
+		if accessControl == nil || accessControl.WotCache == nil {
+			logging.Infof("WOT cache not available, skipping cache for DAG %s", dag.Root)
+			return
+		}
+
+		if err := accessControl.WotCache.Store(dag.Root, ownerPubkey, binaryData); err != nil {
+			logging.Infof("WOT DAG %s did not parse as valid WOT binary (proceeding as normal DAG): %v", dag.Root, err)
+		} else {
+			logging.Infof("WOT DAG %s cached successfully for owner %s", dag.Root, ownerPubkey)
+		}
+	})
+	query.AddQueryHandler(listener, store)
+	claim.AddClaimOwnershipHandler(listener, store)
+	services.AddServicesHandler(listener)
+	nostr_relay.AddNostrRelayHandler(listener, store)
+
+	logging.Infof("HyperDHT server started with public key: %s\n", dhtPublicKey)
 
 	// Register All Nostr Stream Handlers
 	// Always register all specific handlers for registered kinds
@@ -524,7 +829,13 @@ func main() {
 	nostr.RegisterHandler("kind/30023", kind30023.BuildKind30023Handler(store))
 	nostr.RegisterHandler("kind/30078", kind30078.BuildKind30078Handler(store))
 	nostr.RegisterHandler("kind/30079", kind30079.BuildKind30079Handler(store))
-	nostr.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
+	// Pass WotCache to kind 31415 handler so it can invalidate stale WOT cache entries
+	// when permission events are updated with new wot_file tags.
+	var wotCacheForHandler *wot.Cache
+	if ac := websocket.GetAccessControl(); ac != nil {
+		wotCacheForHandler = ac.WotCache
+	}
+	nostr.RegisterHandler("kind/31415", kind16629.BuildKind31415Handler(store, wotCacheForHandler))
 	nostr.RegisterHandler("kind/16630", kind16630.BuildKind16630Handler(store))
 	nostr.RegisterHandler("kind/10010", kind10010.BuildKind10010Handler(store))
 	nostr.RegisterHandler("kind/19841", kind19841.BuildKind19841Handler(store))
@@ -544,14 +855,16 @@ func main() {
 	nostr.RegisterHandler("filter", filter.BuildFilterHandler(store))
 	nostr.RegisterHandler("count", count.BuildCountsHandler(store))
 
-	// Auth event not supported for the libp2p connections yet
+	// Auth event not supported for the stream connections yet
 	//nostr.RegisterHandler("auth", auth.BuildAuthHandler(store))
 
-	// Register a libp2p handler for every stream handler
+	// Register a hyperswarm handler for every nostr stream handler
 	for kind := range nostr.GetHandlers() {
 		handler := nostr.GetHandler(kind)
 
-		wrapper := func(stream network.Stream) {
+		wrapper := func(stream lib_types.Stream) {
+			defer stream.Close()
+
 			read := func() ([]byte, error) {
 				decoder := json.NewDecoder(stream)
 
@@ -573,11 +886,9 @@ func main() {
 			}
 
 			handler(read, write)
-
-			stream.Close()
 		}
 
-		host.SetStreamHandler(protocol.ID("/nostr/event/"+kind), middleware.SessionMiddleware(host)(wrapper))
+		listener.SetStreamHandler("/nostr/event/"+kind, wrapper)
 	}
 
 	// Web Panel

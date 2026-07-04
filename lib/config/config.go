@@ -16,6 +16,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 
 	"github.com/HORNET-Storage/hornet-storage/lib/types"
 )
@@ -123,8 +124,81 @@ func InitConfig() error {
 	return nil
 }
 
+func normalizeAllowedUsersConfigValues() {
+	if strings.TrimSpace(viper.GetString("allowed_users.read")) == "" {
+		legacyRead := strings.TrimSpace(viper.GetString("allowed_users.read_access.scope"))
+		if legacyRead != "" {
+			viper.Set("allowed_users.read", legacyRead)
+		}
+	}
+
+	if strings.TrimSpace(viper.GetString("allowed_users.write")) == "" {
+		legacyWrite := strings.TrimSpace(viper.GetString("allowed_users.write_access.scope"))
+		if legacyWrite != "" {
+			viper.Set("allowed_users.write", legacyWrite)
+		}
+	}
+
+	normalizeAllowedUsersConfigKey("allowed_users.mode")
+	normalizeAllowedUsersConfigKey("allowed_users.read")
+	normalizeAllowedUsersConfigKey("allowed_users.write")
+}
+
+func normalizeAllowedUsersConfigKey(key string) {
+	value := strings.TrimSpace(viper.GetString(key))
+	if value == "" {
+		return
+	}
+
+	normalized := normalizeAllowedUsersConfigValue(value)
+	if normalized != value {
+		viper.Set(key, normalized)
+	}
+}
+
+func normalizeAllowedUsersConfigValue(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "only_me":
+		return "only-me"
+	case "invite_only":
+		return "invite-only"
+	default:
+		return value
+	}
+}
+
+func normalizeRelayDHTConfigValues() {
+	if strings.TrimSpace(viper.GetString("relay.dht_seed")) == "" {
+		legacyDHTSeed := strings.TrimSpace(viper.GetString("relay.dht_key"))
+		if legacyDHTSeed != "" {
+			viper.Set("relay.dht_seed", legacyDHTSeed)
+		}
+	}
+}
+
+func canonicalConfigKey(key string) string {
+	switch key {
+	case "relay.dht_key":
+		return "relay.dht_seed"
+	default:
+		return key
+	}
+}
+
+func legacyConfigAliasesForKey(key string) []string {
+	switch key {
+	case "relay.dht_seed":
+		return []string{"relay.dht_key"}
+	default:
+		return nil
+	}
+}
+
 // reloadConfigCache loads the configuration from viper into the cache
 func reloadConfigCache() error {
+	normalizeAllowedUsersConfigValues()
+	normalizeRelayDHTConfigValues()
+
 	config := &types.Config{}
 	if err := viper.Unmarshal(config); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
@@ -240,7 +314,188 @@ func GetPath(subPath string) string {
 	return filepath.Join(GetDataDir(), subPath)
 }
 
-// SaveConfig saves the current configuration to file
+// safeWriteKeys performs a read-modify-write on the YAML config file,
+// updating only the specified dot-path keys. This avoids the
+// viper.WriteConfig() problem where viper dumps its entire (possibly
+// incomplete) in-memory tree and nukes keys it doesn't know about.
+//
+// Must be called while writeMutex is held.
+func safeWriteKeys(keys map[string]interface{}) error {
+	configPath := viper.ConfigFileUsed()
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	// Read existing file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Parse into ordered map
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("failed to parse config YAML: %w", err)
+	}
+
+	// root is a Document node; its first child is the mapping
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return fmt.Errorf("unexpected YAML structure")
+	}
+	mapping := root.Content[0]
+
+	for dotPath, value := range keys {
+		setYAMLNode(mapping, strings.Split(dotPath, "."), value)
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config YAML: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// safeRemoveKey removes a dot-path key from the YAML config file without
+// rewriting the rest of the file. Must be called while writeMutex is held.
+func safeRemoveKey(dotPath string) error {
+	configPath := viper.ConfigFileUsed()
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("failed to parse config YAML: %w", err)
+	}
+
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return fmt.Errorf("unexpected YAML structure")
+	}
+
+	removeYAMLNode(root.Content[0], strings.Split(dotPath, "."))
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config YAML: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// removeYAMLNode removes a key from a yaml.Node mapping tree by dot-path segments.
+func removeYAMLNode(mapping *yaml.Node, path []string) {
+	if mapping.Kind != yaml.MappingNode || len(path) == 0 {
+		return
+	}
+
+	key := path[0]
+	rest := path[1:]
+
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			if len(rest) == 0 {
+				// Remove this key-value pair
+				mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+				return
+			}
+			if mapping.Content[i+1].Kind == yaml.MappingNode {
+				removeYAMLNode(mapping.Content[i+1], rest)
+			}
+			return
+		}
+	}
+}
+
+// setYAMLNode traverses/creates the path in a yaml.Node mapping tree and
+// sets the leaf to the given value.
+func setYAMLNode(mapping *yaml.Node, path []string, value interface{}) {
+	if mapping.Kind != yaml.MappingNode {
+		return
+	}
+
+	key := path[0]
+	rest := path[1:]
+
+	// Search existing keys
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == key {
+			if len(rest) == 0 {
+				// Leaf: replace value node
+				mapping.Content[i+1] = valueToYAMLNode(value)
+				return
+			}
+			// Recurse into sub-mapping
+			if mapping.Content[i+1].Kind == yaml.MappingNode {
+				setYAMLNode(mapping.Content[i+1], rest, value)
+				return
+			}
+			// Exists but not a mapping — replace with one so we can nest
+			newMap := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			mapping.Content[i+1] = newMap
+			setYAMLNode(newMap, rest, value)
+			return
+		}
+	}
+
+	// Key not found — append
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+	if len(rest) == 0 {
+		mapping.Content = append(mapping.Content, keyNode, valueToYAMLNode(value))
+	} else {
+		newMap := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		mapping.Content = append(mapping.Content, keyNode, newMap)
+		setYAMLNode(newMap, rest, value)
+	}
+}
+
+// valueToYAMLNode converts a Go value into a yaml.Node scalar.
+func valueToYAMLNode(v interface{}) *yaml.Node {
+	n := &yaml.Node{Kind: yaml.ScalarNode}
+	switch val := v.(type) {
+	case string:
+		n.Tag = "!!str"
+		n.Value = val
+	case int:
+		n.Tag = "!!int"
+		n.Value = strconv.Itoa(val)
+	case int64:
+		n.Tag = "!!int"
+		n.Value = strconv.FormatInt(val, 10)
+	case float64:
+		if val == float64(int64(val)) {
+			n.Tag = "!!int"
+			n.Value = strconv.FormatInt(int64(val), 10)
+		} else {
+			n.Tag = "!!float"
+			n.Value = strconv.FormatFloat(val, 'f', -1, 64)
+		}
+	case bool:
+		n.Tag = "!!bool"
+		n.Value = strconv.FormatBool(val)
+	default:
+		n.Tag = "!!str"
+		n.Value = fmt.Sprintf("%v", val)
+	}
+	return n
+}
+
+// SaveConfig saves the current configuration to file.
+// WARNING: This uses viper.WriteConfig() which rewrites the entire file.
+// Prefer UpdateConfig or UpdateMultipleSections for surgical updates.
 func SaveConfig() error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
@@ -260,19 +515,27 @@ func UpdateConfig(key string, value interface{}, save bool) error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
+	canonicalKey := canonicalConfigKey(key)
+
 	// Check if the value actually changed
-	currentValue := viper.Get(key)
+	currentValue := viper.Get(canonicalKey)
 	if isConfigValueEqual(currentValue, value) {
-		log.Printf("No change for %s, skipping update", key)
+		log.Printf("No change for %s, skipping update", canonicalKey)
 		return nil
 	}
 
-	log.Printf("Updating %s: %v -> %v", key, currentValue, value)
-	viper.Set(key, value)
+	log.Printf("Updating %s: %v -> %v", canonicalKey, currentValue, value)
+	viper.Set(canonicalKey, value)
 
 	if save {
-		if err := viper.WriteConfig(); err != nil {
+		if err := safeWriteKeys(map[string]interface{}{canonicalKey: value}); err != nil {
 			return err
+		}
+
+		for _, legacyKey := range legacyConfigAliasesForKey(canonicalKey) {
+			if err := safeRemoveKey(legacyKey); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -286,18 +549,23 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 	writeMutex.Lock()
 	defer writeMutex.Unlock()
 
-	hasChanges := false
+	changedKeys := make(map[string]interface{})
+	keysToRemove := make(map[string]struct{})
 
 	// Process each section
 	for sectionName, sectionValue := range settings {
 		sectionMap, ok := sectionValue.(map[string]interface{})
 		if !ok {
 			// Handle simple top-level values
-			currentValue := viper.Get(sectionName)
+			canonicalSectionName := canonicalConfigKey(sectionName)
+			currentValue := viper.Get(canonicalSectionName)
 			if !isConfigValueEqual(currentValue, sectionValue) {
-				log.Printf("Updating %s: %v -> %v", sectionName, currentValue, sectionValue)
-				viper.Set(sectionName, sectionValue)
-				hasChanges = true
+				log.Printf("Updating %s: %v -> %v", canonicalSectionName, currentValue, sectionValue)
+				viper.Set(canonicalSectionName, sectionValue)
+				changedKeys[canonicalSectionName] = sectionValue
+				for _, legacyKey := range legacyConfigAliasesForKey(canonicalSectionName) {
+					keysToRemove[legacyKey] = struct{}{}
+				}
 			}
 			continue
 		}
@@ -310,30 +578,43 @@ func UpdateMultipleSections(settings map[string]interface{}) error {
 			// Handle nested sections
 			if nestedMap, ok := fieldValue.(map[string]interface{}); ok {
 				for nestedField, nestedValue := range nestedMap {
-					nestedKey := fullKey + "." + nestedField
+					nestedKey := canonicalConfigKey(fullKey + "." + nestedField)
 					currentValue := viper.Get(nestedKey)
 					if !isConfigValueEqual(currentValue, nestedValue) {
 						log.Printf("  Updating %s: %v -> %v", nestedKey, currentValue, nestedValue)
 						viper.Set(nestedKey, nestedValue)
-						hasChanges = true
+						changedKeys[nestedKey] = nestedValue
+						for _, legacyKey := range legacyConfigAliasesForKey(nestedKey) {
+							keysToRemove[legacyKey] = struct{}{}
+						}
 					}
 				}
 			} else {
-				currentValue := viper.Get(fullKey)
+				canonicalKey := canonicalConfigKey(fullKey)
+				currentValue := viper.Get(canonicalKey)
 				if !isConfigValueEqual(currentValue, fieldValue) {
-					log.Printf("  Updating %s: %v -> %v", fullKey, currentValue, fieldValue)
-					viper.Set(fullKey, fieldValue)
-					hasChanges = true
+					log.Printf("  Updating %s: %v -> %v", canonicalKey, currentValue, fieldValue)
+					viper.Set(canonicalKey, fieldValue)
+					changedKeys[canonicalKey] = fieldValue
+					for _, legacyKey := range legacyConfigAliasesForKey(canonicalKey) {
+						keysToRemove[legacyKey] = struct{}{}
+					}
 				}
 			}
 		}
 	}
 
 	// Only save if there were changes
-	if hasChanges {
+	if len(changedKeys) > 0 {
 		log.Println("Saving configuration changes...")
-		if err := viper.WriteConfig(); err != nil {
+		if err := safeWriteKeys(changedKeys); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		for keyToRemove := range keysToRemove {
+			if err := safeRemoveKey(keyToRemove); err != nil {
+				return fmt.Errorf("failed to clean up legacy config key %s: %w", keyToRemove, err)
+			}
 		}
 
 		// Reload cache after save
@@ -486,7 +767,7 @@ func UpdateNIPMapping(kind, nip string) error {
 	mappings[kind] = nip
 	viper.Set("nip_mappings", mappings)
 
-	if err := viper.WriteConfig(); err != nil {
+	if err := safeWriteKeys(map[string]interface{}{"nip_mappings." + kind: nip}); err != nil {
 		return err
 	}
 
@@ -506,11 +787,28 @@ func RemoveNIPMapping(kind string) error {
 	delete(mappings, kind)
 	viper.Set("nip_mappings", mappings)
 
-	if err := viper.WriteConfig(); err != nil {
+	// For removal we need to rewrite — use safeRemoveKey
+	if err := safeRemoveKey("nip_mappings." + kind); err != nil {
 		return err
 	}
 
 	// Reload cache after update
+	return reloadConfigCache()
+}
+
+// RemoveConfigKey removes a single configuration key from the YAML file and cache.
+func RemoveConfigKey(key string) error {
+	writeMutex.Lock()
+	defer writeMutex.Unlock()
+
+	if err := safeRemoveKey(key); err != nil {
+		return err
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		return err
+	}
+
 	return reloadConfigCache()
 }
 
@@ -603,7 +901,7 @@ func setDefaults() {
 	// Server defaults
 	viper.SetDefault("server.port", 11000)
 	viper.SetDefault("server.bind_address", "0.0.0.0")
-	viper.SetDefault("server.upnp", false)
+	viper.SetDefault("server.upnp", true)
 	viper.SetDefault("server.nostr", true)
 	viper.SetDefault("server.hornets", true)
 	viper.SetDefault("server.web", true)
@@ -626,9 +924,9 @@ func setDefaults() {
 
 	// Relay defaults
 	viper.SetDefault("relay.name", "HORNETS")
-	viper.SetDefault("relay.description", "HORNETS relay, the home of GitNestr")
+	viper.SetDefault("relay.description", "HORNETS relay, the home of Nosis")
 	viper.SetDefault("relay.contact", "support@hornetstorage.com")
-	viper.SetDefault("relay.icon", "http://localhost:11002/logo-dark-192.png")
+	viper.SetDefault("relay.icon", "http://localhost:11002/logo.png")
 	viper.SetDefault("relay.software", "HORNETS")
 	viper.SetDefault("relay.version", "0.0.1")
 	viper.SetDefault("relay.service_tag", "hornet-storage-service")
@@ -636,7 +934,9 @@ func setDefaults() {
 	viper.SetDefault("relay.secret_key", "hornets-secret-key")
 	viper.SetDefault("relay.private_key", "")
 	viper.SetDefault("relay.public_key", "")
-	viper.SetDefault("relay.dht_key", "")
+	viper.SetDefault("relay.dht_seed", "")
+	viper.SetDefault("relay.dht_public_key", "")
+	viper.SetDefault("relay.dht_private_key", "")
 
 	// Content filtering defaults
 	viper.SetDefault("content_filtering.text_filter.enabled", true)
@@ -655,22 +955,25 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.allow_unregistered_kinds", false) // Default to false for security
 	viper.SetDefault("event_filtering.registered_kinds", []int{
 		0, 1, 3, 5, 6, 7, 8, // Basic kinds (NO kind 2, 4, or 16 handlers in main.go)
+		72, 73, 74, 75, 76, 77, // Repository event kinds
 		443, 444, 445, // MIP kinds (MLS group messaging)
-		1059,                   // NIP-59 Gift Wrap (encrypted DMs)
-		1063, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
-		9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
+		1059,                         // NIP-59 Gift Wrap (encrypted DMs)
+		1063, 1111, 1808, 1809, 1984, // Special kinds (NO 1060 handler)
+		6927, 7007, 9372, 9373, 9735, 9802, // Payment/Zap kinds (NO 9803 handler)
 		10000, 10001, 10002, 10010, // List kinds
 		10051,        // MIP-00 KeyPackage
 		10411,        // Relay info kind (NO 10011 or 10022 handlers)
 		11011,        // Relay list kind
-		16629, 16630, // Ephemeral kinds
+		31415, 16630, // Parameterized replaceable kinds (repository permissions), branch metadata
 		19841, 19842, 19843, // Subscription kinds
 		22242,               // Auth kind
 		30000, 30008, 30009, // Parameterized replaceable kinds
-		30023, 30078, 30079, // Long-form content kinds
+		30023, 30078, 30079, 30301, 30302, // Long-form content kinds
+		31416,                              // Release artifact sets (parameterized replaceable)
+		30303,                              // Repository blacklist (parameterized replaceable)
 	})
 	viper.SetDefault("event_filtering.moderation_mode", "strict")
-	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051"})
+	viper.SetDefault("event_filtering.kind_whitelist", []string{"kind0", "kind1", "kind22242", "kind10010", "kind19841", "kind19842", "kind19843", "kind10002", "kind1111", "kind1808", "kind1809", "kind443", "kind444", "kind445", "kind1059", "kind10051", "kind72", "kind73", "kind74", "kind75", "kind76", "kind77", "kind6927", "kind7007", "kind31415", "kind16630", "kind31416", "kind30078", "kind30301", "kind30302", "kind30303"})
 	viper.SetDefault("event_filtering.dynamic_kinds.enabled", false)
 	viper.SetDefault("event_filtering.dynamic_kinds.allowed_kinds", []int{})
 	viper.SetDefault("event_filtering.protocols.enabled", false)
@@ -697,12 +1000,11 @@ func setDefaults() {
 	viper.SetDefault("event_filtering.media_definitions.binary.extensions", []string{".bin", ".dat", ".blob"})
 	viper.SetDefault("event_filtering.media_definitions.binary.max_size_mb", 100)
 
-	// Allowed users defaults - free mode for rapid testing
+	// Allowed users defaults - public relay for rapid testing
 	viper.SetDefault("allowed_users.mode", "public")
-	viper.SetDefault("allowed_users.read_access.enabled", true)
-	viper.SetDefault("allowed_users.read_access.scope", "all_users")
-	viper.SetDefault("allowed_users.write_access.enabled", true)
-	viper.SetDefault("allowed_users.write_access.scope", "all_users")
+	viper.SetDefault("allowed_users.read", "all_users")
+	viper.SetDefault("allowed_users.write", "all_users")
+	viper.SetDefault("allowed_users.repo_access_override_kinds", []int{72, 73, 74, 75, 76, 77, 1111, 6927, 7007, 31415, 16630, 31416, 30078, 30301, 30302, 30303})
 	viper.SetDefault("allowed_users.last_updated", 0)
 	viper.SetDefault("allowed_users.batch_update_on_startup", false) // Disable batch update by default for performance
 
@@ -791,8 +1093,10 @@ func setDefaults() {
 		// Custom kinds
 		"9372":  "888", // Custom application
 		"9373":  "888", // Custom application
-		"16629": "888", // Custom HORNETS
-		"16630": "888", // Custom HORNETS
+		"31415": "888", // Custom HORNETS (repository permissions, parameterized replaceable)
+		"16630": "888", // Custom HORNETS (branch metadata)
+		"31416": "888", // Release artifact sets
+		"30303": "888", // Custom HORNETS (repository blacklist)
 
 		// Additional kinds
 		"10010": "51",  // Additional list type
@@ -882,17 +1186,21 @@ func GetAllSettingsAsMap() (map[string]interface{}, error) {
 
 	// Relay settings
 	settings["relay"] = map[string]interface{}{
-		"name":           cfg.Relay.Name,
-		"description":    cfg.Relay.Description,
-		"contact":        cfg.Relay.Contact,
-		"icon":           cfg.Relay.Icon,
-		"software":       cfg.Relay.Software,
-		"version":        cfg.Relay.Version,
-		"service_tag":    cfg.Relay.ServiceTag,
-		"supported_nips": cfg.Relay.SupportedNIPs,
-		"secret_key":     cfg.Relay.SecretKey,
-		"private_key":    cfg.Relay.PrivateKey,
-		"dht_key":        cfg.Relay.DHTKey,
+		"name":            cfg.Relay.Name,
+		"description":     cfg.Relay.Description,
+		"contact":         cfg.Relay.Contact,
+		"icon":            cfg.Relay.Icon,
+		"software":        cfg.Relay.Software,
+		"version":         cfg.Relay.Version,
+		"service_tag":     cfg.Relay.ServiceTag,
+		"supported_nips":  cfg.Relay.SupportedNIPs,
+		"secret_key":      cfg.Relay.SecretKey,
+		"private_key":     cfg.Relay.PrivateKey,
+		"public_key":      cfg.Relay.PublicKey,
+		"dht_seed":        cfg.Relay.DHTSeed,
+		"dht_public_key":  cfg.Relay.DHTPublicKey,
+		"dht_private_key": cfg.Relay.DHTPrivateKey,
+		"dht_key":         cfg.Relay.DHTSeed,
 	}
 
 	// Content filtering settings
@@ -932,11 +1240,12 @@ func GetAllSettingsAsMap() (map[string]interface{}, error) {
 
 	// Allowed users settings
 	settings["allowed_users"] = map[string]interface{}{
-		"mode":         cfg.AllowedUsersSettings.Mode,
-		"read":         cfg.AllowedUsersSettings.Read,
-		"write":        cfg.AllowedUsersSettings.Write,
-		"tiers":        cfg.AllowedUsersSettings.Tiers,
-		"last_updated": cfg.AllowedUsersSettings.LastUpdated,
+		"mode":                       cfg.AllowedUsersSettings.Mode,
+		"read":                       cfg.AllowedUsersSettings.Read,
+		"write":                      cfg.AllowedUsersSettings.Write,
+		"repo_access_override_kinds": cfg.AllowedUsersSettings.RepoAccessOverrideKinds,
+		"tiers":                      cfg.AllowedUsersSettings.Tiers,
+		"last_updated":               cfg.AllowedUsersSettings.LastUpdated,
 	}
 
 	// Push notifications settings

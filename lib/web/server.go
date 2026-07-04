@@ -265,14 +265,14 @@ func StartServer(store stores.Store, ctx context.Context) error {
 	})
 
 	// Settings routes
-	app.Get("/api/settings", settings.GetSettings)
-	app.Post("/api/settings", func(c *fiber.Ctx) error {
+	secured.Get("/settings", settings.GetSettings)
+	secured.Post("/settings", func(c *fiber.Ctx) error {
 		return settings.UpdateSettings(c, store)
 	})
 
 	// Individual setting routes (optional - for granular control)
-	app.Get("/api/settings/:key", settings.GetSettingValue)
-	app.Put("/api/settings/:key", settings.UpdateSettingValue)
+	secured.Get("/settings/:key", settings.GetSettingValue)
+	secured.Put("/settings/:key", settings.UpdateSettingValue)
 
 	// Relay count route
 	app.Get("/api/relay/count", func(c *fiber.Ctx) error {

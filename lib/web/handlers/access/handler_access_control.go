@@ -45,8 +45,9 @@ func GetAllowedUsersPaginated(c *fiber.Ctx, store stores.Store) error {
 
 func AddAllowedUser(c *fiber.Ctx, store stores.Store) error {
 	var req struct {
-		Npub string `json:"npub"`
-		Tier string `json:"tier"`
+		Npub     string `json:"npub"`
+		Tier     string `json:"tier"`
+		CanWrite *bool  `json:"can_write"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -78,7 +79,12 @@ func AddAllowedUser(c *fiber.Ctx, store stores.Store) error {
 		})
 	}
 
-	if err := statsStore.AddAllowedUser(*serializedPubKey, req.Tier, createdBy); err != nil {
+	canWrite := true
+	if req.CanWrite != nil {
+		canWrite = *req.CanWrite
+	}
+
+	if err := statsStore.AddAllowedUser(*serializedPubKey, canWrite, req.Tier, createdBy); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to add NPUB to read list",
 		})

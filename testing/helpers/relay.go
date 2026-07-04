@@ -406,7 +406,7 @@ func registerTestHandlers(store *badgerhold.BadgerholdStore, privateKeyStr strin
 	nostrHandlers.RegisterHandler("kind/5", kind5.BuildKind5Handler(store))
 	nostrHandlers.RegisterHandler("kind/72", kind72.BuildKind72Handler(store))
 	nostrHandlers.RegisterHandler("kind/7", kind7.BuildKind7Handler(store))
-	nostrHandlers.RegisterHandler("kind/16629", kind16629.BuildKind16629Handler(store))
+	nostrHandlers.RegisterHandler("kind/31415", kind16629.BuildKind31415Handler(store))
 
 	// Universal handler for other kinds
 	nostrHandlers.RegisterHandler("universal", universal.BuildUniversalHandler(store))

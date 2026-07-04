@@ -11,6 +11,7 @@ import (
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	"github.com/HORNET-Storage/hornet-storage/lib/stores"
+	"github.com/HORNET-Storage/hornet-storage/lib/wot"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -30,7 +31,11 @@ func isGUID(s string) bool {
 	return uuidRegex.MatchString(strings.ToLower(s))
 }
 
-func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+func BuildKind31415Handler(store stores.Store, wotCache ...*wot.Cache) func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
+	var cache *wot.Cache
+	if len(wotCache) > 0 {
+		cache = wotCache[0]
+	}
 	handler := func(read lib_nostr.KindReader, write lib_nostr.KindWriter) {
 		var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -57,14 +62,14 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Validate tags
 		message := validateTags(env.Event.Tags, env.Event.PubKey)
 		if len(message) > 0 {
-			write("NOTICE", message)
+			write("OK", env.Event.ID, false, message)
 			return
 		}
 
 		// Extract r tag (repo identifier - immutable, used as unique key)
 		rTag := getTagValue(env.Event.Tags, "r")
 		if rTag == "" {
-			write("NOTICE", "Missing 'r' tag (repository identifier)")
+			write("OK", env.Event.ID, false, "Missing 'r' tag (repository identifier)")
 			return
 		}
 
@@ -74,19 +79,19 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		// Determine ownership type and get the owner pubkey
 		isOrgRepo, ownerPubkey, orgDtag := parseOwnership(aTag, rTag, env.Event.PubKey)
 
-		logging.Infof("[Kind16629] Processing event - rTag: %s, aTag: %s, isOrg: %v, owner: %s, publisher: %s",
+		logging.Infof("[Kind31415] Processing event - rTag: %s, aTag: %s, isOrg: %v, owner: %s, publisher: %s",
 			rTag, aTag, isOrgRepo, ownerPubkey, env.Event.PubKey)
 
 		// Query for existing events with the same r tag
 		existingEvents, err := store.QueryEvents(nostr.Filter{
-			Kinds: []int{16629},
+			Kinds: []int{31415},
 			Tags: nostr.TagMap{
 				"r": []string{rTag},
 			},
 		})
 		if err != nil {
-			logging.Errorf("[Kind16629] Error querying existing events: %v", err)
-			write("NOTICE", "Failed to query existing events")
+			logging.Errorf("[Kind31415] Error querying existing events: %v", err)
+			write("OK", env.Event.ID, false, "Failed to query existing events")
 			return
 		}
 
@@ -108,27 +113,54 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 			// Migration: new event has 'a' tag, existing events don't
 			isMigrationToOrg = !existingHasATag
 			if isMigrationToOrg {
-				logging.Infof("[Kind16629] Detected migration scenario: repo %s is being migrated to org", rTag)
+				logging.Infof("[Kind31415] Detected migration scenario: repo %s is being migrated to org", rTag)
 			}
 		}
 
-		logging.Infof("[Kind16629] Found %d existing events for r tag: %s", len(existingEvents), rTag)
+		logging.Infof("[Kind31415] Found %d existing events for r tag: %s", len(existingEvents), rTag)
 
 		// Verify the publisher has permission to create/update this event
 		if !verifyPublisherPermission(store, env.Event.PubKey, isOrgRepo, ownerPubkey, orgDtag, isFirstEvent, isMigrationToOrg) {
-			logging.Infof("[Kind16629] Permission denied for pubkey %s on repo %s (isOrg: %v, isFirst: %v, isMigration: %v)",
+			logging.Infof("[Kind31415] Permission denied for pubkey %s on repo %s (isOrg: %v, isFirst: %v, isMigration: %v)",
 				env.Event.PubKey, rTag, isOrgRepo, isFirstEvent, isMigrationToOrg)
-			write("NOTICE", "Permission denied: you are not authorized to update this repository's permissions")
+			write("OK", env.Event.ID, false, "Permission denied: you are not authorized to update this repository's permissions")
 			return
+		}
+
+		// Validate wot_file binding before storing: if the event declares a WOT file,
+		// the DAG must already exist in the store with matching ownership metadata.
+		// (Upload always precedes the permission event in client flow.)
+		if wotHash := getTagValue(env.Event.Tags, "wot_file"); wotHash != "" {
+			rootData, err := store.RetrieveLeaf(wotHash, wotHash, false)
+			if err != nil {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: DAG %s not found in store (upload must precede permission event)", wotHash))
+				return
+			}
+			leaf := rootData.Leaf
+			if leaf.AdditionalData == nil || leaf.AdditionalData["wot_file"] != "true" {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: DAG %s is not a WOT file", wotHash))
+				return
+			}
+			wotOwner := strings.ToLower(strings.TrimSpace(leaf.AdditionalData["wot_owner"]))
+			eventOwner := strings.ToLower(strings.TrimSpace(ownerPubkey))
+			if wotOwner != eventOwner {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: wot_owner (%s) does not match repo owner (%s)", wotOwner, eventOwner))
+				return
+			}
+			if rootData.PublicKey != "" && strings.ToLower(rootData.PublicKey) != eventOwner {
+				write("OK", env.Event.ID, false, fmt.Sprintf("wot_file binding failed: DAG uploader (%s) does not match repo owner (%s)", rootData.PublicKey, eventOwner))
+				return
+			}
+			logging.Infof("[Kind31415] WOT file binding validated: DAG %s owned by %s", wotHash, eventOwner)
 		}
 
 		// Store the new event first
 		if err := store.StoreEvent(&env.Event); err != nil {
-			write("NOTICE", "Failed to store the event")
+			write("OK", env.Event.ID, false, "Failed to store the event")
 			return
 		}
 
-		logging.Infof("[Kind16629] Successfully stored new event %s", env.Event.ID)
+		logging.Infof("[Kind31415] Successfully stored new event %s", env.Event.ID)
 
 		// After successful storage, delete ALL old events with the same r tag
 		// (there should only be one, but delete all to fix any previous duplicates)
@@ -136,16 +168,48 @@ func BuildKind16629Handler(store stores.Store) func(read lib_nostr.KindReader, w
 		for _, oldEvent := range existingEvents {
 			if oldEvent.ID != env.Event.ID {
 				if err := store.DeleteEvent(oldEvent.ID); err != nil {
-					logging.Errorf("[Kind16629] Warning: failed to delete old event %s: %v", oldEvent.ID, err)
+					logging.Errorf("[Kind31415] Warning: failed to delete old event %s: %v", oldEvent.ID, err)
 				} else {
 					deletedCount++
-					logging.Infof("[Kind16629] Deleted old event %s", oldEvent.ID)
+					logging.Infof("[Kind31415] Deleted old event %s", oldEvent.ID)
 				}
 			}
 		}
 
 		if deletedCount > 0 {
-			logging.Infof("[Kind16629] Deleted %d old events for r tag: %s", deletedCount, rTag)
+			logging.Infof("[Kind31415] Deleted %d old events for r tag: %s", deletedCount, rTag)
+		}
+
+		// Invalidate stale WOT cache entries and delete orphaned WOT DAGs
+		// when the wot_file tag changes.
+		newWotHash := getTagValue(env.Event.Tags, "wot_file")
+		for _, oldEvent := range existingEvents {
+			if oldEvent.ID == env.Event.ID {
+				continue
+			}
+			oldWotHash := getTagValue(oldEvent.Tags, "wot_file")
+			if oldWotHash != "" && oldWotHash != newWotHash {
+				// Invalidate cache entry
+				if cache != nil {
+					cache.Invalidate(oldWotHash)
+				}
+
+				// Delete orphaned WOT DAG if no other permission event references it
+				otherRefs, qErr := store.QueryEvents(nostr.Filter{
+					Kinds: []int{31415},
+					Tags:  nostr.TagMap{"wot_file": []string{oldWotHash}},
+					Limit: 1,
+				})
+				if qErr == nil && len(otherRefs) == 0 {
+					if dErr := store.DeleteDag(oldWotHash); dErr != nil {
+						logging.Infof("[Kind31415] Failed to delete orphaned WOT DAG %s: %v", oldWotHash, dErr)
+					} else {
+						logging.Infof("[Kind31415] Deleted orphaned WOT DAG %s (replaced by %s)", oldWotHash, newWotHash)
+					}
+				} else if qErr == nil {
+					logging.Infof("[Kind31415] Skipping deletion of WOT DAG %s — still referenced by another event", oldWotHash)
+				}
+			}
 		}
 
 		// Successfully processed event
@@ -239,14 +303,14 @@ func verifyPublisherPermission(store stores.Store, publisherPubkey string, isOrg
 func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey string, orgDtag string) bool {
 	// Org owner is always a member
 	if pubkey == orgOwnerPubkey {
-		logging.Infof("[Kind16629] Pubkey %s is org owner", pubkey)
+		logging.Infof("[Kind31415] Pubkey %s is org owner", pubkey)
 		return true
 	}
 
 	// Build the org address for querying: "39504:orgOwnerPubkey:orgDtag"
 	orgAddress := fmt.Sprintf("%d:%s:%s", OrgEventKind, orgOwnerPubkey, orgDtag)
 
-	logging.Infof("[Kind16629] Checking if %s is a verified member of org %s", pubkey, orgAddress)
+	logging.Infof("[Kind31415] Checking if %s is a verified member of org %s", pubkey, orgAddress)
 
 	// Query for invitations to this user for this organization
 	invitations, err := store.QueryEvents(nostr.Filter{
@@ -258,17 +322,17 @@ func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey strin
 		},
 	})
 	if err != nil {
-		logging.Errorf("[Kind16629] Error querying invitations: %v", err)
+		logging.Errorf("[Kind31415] Error querying invitations: %v", err)
 		return false
 	}
 
-	logging.Infof("[Kind16629] Found %d invitations for pubkey %s", len(invitations), pubkey)
+	logging.Infof("[Kind31415] Found %d invitations for pubkey %s", len(invitations), pubkey)
 
 	// Check each invitation for a valid acceptance
 	for _, invitation := range invitations {
 		// Check if the invitation has been deleted
 		if isEventDeleted(store, invitation.ID, orgOwnerPubkey) {
-			logging.Infof("[Kind16629] Invitation %s has been deleted", invitation.ID)
+			logging.Infof("[Kind31415] Invitation %s has been deleted", invitation.ID)
 			continue
 		}
 
@@ -281,7 +345,7 @@ func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey strin
 			},
 		})
 		if err != nil {
-			logging.Errorf("[Kind16629] Error querying invitation responses: %v", err)
+			logging.Errorf("[Kind31415] Error querying invitation responses: %v", err)
 			continue
 		}
 
@@ -291,18 +355,18 @@ func isVerifiedOrgMember(store stores.Store, pubkey string, orgOwnerPubkey strin
 			if status == "accepted" {
 				// Check if the acceptance has been deleted
 				if isEventDeleted(store, response.ID, pubkey) {
-					logging.Infof("[Kind16629] Acceptance %s has been deleted", response.ID)
+					logging.Infof("[Kind31415] Acceptance %s has been deleted", response.ID)
 					continue
 				}
 
-				logging.Infof("[Kind16629] Found valid acceptance for pubkey %s (invitation: %s, acceptance: %s)",
+				logging.Infof("[Kind31415] Found valid acceptance for pubkey %s (invitation: %s, acceptance: %s)",
 					pubkey, invitation.ID, response.ID)
 				return true
 			}
 		}
 	}
 
-	logging.Infof("[Kind16629] Pubkey %s is NOT a verified org member", pubkey)
+	logging.Infof("[Kind31415] Pubkey %s is NOT a verified org member", pubkey)
 	return false
 }
 
@@ -316,7 +380,7 @@ func isEventDeleted(store stores.Store, eventID string, authorPubkey string) boo
 		},
 	})
 	if err != nil {
-		logging.Errorf("[Kind16629] Error checking deletion status: %v", err)
+		logging.Errorf("[Kind31415] Error checking deletion status: %v", err)
 		return false
 	}
 
@@ -334,6 +398,10 @@ func isValidHexPubkey(s string) bool {
 		}
 	}
 	return true
+}
+
+func isValidDHTPublicKey(s string) bool {
+	return isValidHexPubkey(s)
 }
 
 // validateRepoIdentifier validates a repository identifier which can be in one of three formats:
@@ -443,13 +511,14 @@ func validateATag(value string) string {
 	return ""
 }
 
-// validateTags checks if the tags array contains the expected structure for a Kind 16629 event.
+// validateTags checks if the tags array contains the expected structure for a Kind 31415 event.
 func validateTags(tags nostr.Tags, eventPubkey string) string {
 	var rTagValue string
 	var aTagValue string
 	var nTagValue string
 	var cloneTagValue string
 	var relayTagValue string
+	var visibilityTagValue string
 	hasPermissionTag := false
 
 	for _, tag := range tags {
@@ -479,11 +548,14 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 		if tag[0] == "relay" && len(tag) >= 2 {
 			relayTagValue = tag[1]
 		}
+		if tag[0] == "visibility" && len(tag) >= 2 {
+			visibilityTagValue = strings.ToLower(strings.TrimSpace(tag[1]))
+		}
 
 		// Ensure at least one valid permission tag is present
-		if tag[0] == "p" && len(tag) == 3 {
+		if tag[0] == "p" && len(tag) >= 3 {
 			permissionLevel := tag[2]
-			if permissionLevel == "maintainer" || permissionLevel == "write" || permissionLevel == "triage" {
+			if permissionLevel == "maintainer" || permissionLevel == "write" || permissionLevel == "triage" || permissionLevel == "read" || permissionLevel == "encrypted-write" {
 				hasPermissionTag = true
 			} else {
 				return "Invalid permission level: " + permissionLevel
@@ -499,6 +571,21 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 	// Validate r tag format
 	if errMsg := validateRTag(rTagValue); errMsg != "" {
 		return errMsg
+	}
+
+	// Validate required d tag (parameterized replaceable identifier, must match r tag)
+	dTagValue := ""
+	for _, tag := range tags {
+		if len(tag) >= 2 && tag[0] == "d" {
+			dTagValue = tag[1]
+			break
+		}
+	}
+	if dTagValue == "" {
+		return "Missing 'd' tag (parameterized replaceable identifier)."
+	}
+	if dTagValue != rTagValue {
+		return "The 'd' tag value must match the 'r' tag value."
 	}
 
 	// Validate required n tag (repo name for efficient relay queries)
@@ -535,6 +622,10 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 		return errMsg
 	}
 
+	if visibilityTagValue != "" && visibilityTagValue != "public" && visibilityTagValue != "private" {
+		return "Invalid 'visibility' tag: expected 'public' or 'private'."
+	}
+
 	if !hasPermissionTag {
 		return "Missing valid 'p' tag (authorized user and permission level)."
 	}
@@ -543,16 +634,16 @@ func validateTags(tags nostr.Tags, eventPubkey string) string {
 }
 
 // validateCloneTag validates the clone tag format and consistency with other tags.
-// Expected format: nestr://<host>[:<port>][/path]?id=<GUID>&repo_author=<author>&repo_name=<name>
+// Expected format: nosis://<host>[:<port>][/path]?id=<GUID>&repo_author=<author>&repo_name=<name>
 func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
 	parsed, err := url.Parse(cloneURL)
 	if err != nil {
 		return fmt.Sprintf("Invalid 'clone' tag: failed to parse URL: %s", err)
 	}
 
-	// Must use nestr:// scheme
-	if parsed.Scheme != "nestr" {
-		return fmt.Sprintf("Invalid 'clone' tag: expected 'nestr://' scheme, got '%s://'", parsed.Scheme)
+	// Must use nosis:// scheme
+	if parsed.Scheme != "nosis" {
+		return fmt.Sprintf("Invalid 'clone' tag: expected 'nosis://' scheme, got '%s://'", parsed.Scheme)
 	}
 
 	// Must have a host
@@ -604,19 +695,33 @@ func validateCloneTag(cloneURL, rTag, nTag, aTag, eventPubkey string) string {
 }
 
 // validateRelayTag validates the relay tag format.
-// Expected format: ws://<host>:<port>[/path] or wss://<host>[/path]
+// Expected format: ws://<host>:<port>[/path], wss://<host>[/path], nosis://<dht-key>, or a raw 64-char DHT public key.
 func validateRelayTag(relayURL string) string {
+	if isValidDHTPublicKey(relayURL) {
+		return ""
+	}
+
 	parsed, err := url.Parse(relayURL)
 	if err != nil {
 		return fmt.Sprintf("Invalid 'relay' tag: failed to parse URL: %s", err)
 	}
 
-	if parsed.Scheme != "ws" && parsed.Scheme != "wss" {
-		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://' or 'wss://' scheme, got '%s://'", parsed.Scheme)
+	if parsed.Scheme != "ws" && parsed.Scheme != "wss" && parsed.Scheme != "nosis" {
+		return fmt.Sprintf("Invalid 'relay' tag: expected 'ws://', 'wss://', or 'nosis://' scheme, got '%s://'", parsed.Scheme)
 	}
 
 	if parsed.Host == "" {
 		return "Invalid 'relay' tag: missing host"
+	}
+
+	if parsed.Scheme == "nosis" {
+		host := parsed.Hostname()
+		if !isValidDHTPublicKey(host) {
+			return "Invalid 'relay' tag: nosis relay address must contain a 64-character DHT public key"
+		}
+		if parsed.Port() != "" || parsed.Path != "" {
+			return "Invalid 'relay' tag: nosis relay address must be 'nosis://<dht-public-key>'"
+		}
 	}
 
 	return ""

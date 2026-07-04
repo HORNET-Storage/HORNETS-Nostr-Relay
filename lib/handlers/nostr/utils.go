@@ -32,7 +32,7 @@ func ValidateEvent(write KindWriter, env nostr.EventEnvelope, expectedKind int) 
 
 	timeCheck := TimeCheck(env.Event.CreatedAt.Time().Unix())
 	if !timeCheck {
-		write("OK", env.Event.ID, false, "The event creation date must be after January 1, 2019")
+		write("OK", env.Event.ID, false, "The event creation date must not be more than 2 seconds in the future")
 		return false
 	}
 
@@ -143,6 +143,11 @@ func extractInterfaceValues(data ...interface{}) []interface{} {
 		}
 	}
 	return extracted
+}
+
+// ExtractInterfaceValues is the exported form of extractInterfaceValues.
+func ExtractInterfaceValues(data ...interface{}) []interface{} {
+	return extractInterfaceValues(data...)
 }
 
 func CloseStream(stream network.Stream) {

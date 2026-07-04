@@ -90,7 +90,7 @@ func (u *UPnPManager) ForwardPort(port uint16, description string) error {
 
 	ip := u.client.LocalAddr().String()
 	for _, proto := range []string{"TCP", "UDP"} {
-		if err := u.client.AddPortMapping("", port, proto, port, ip, true, description, 3600); err != nil {
+		if err := u.client.AddPortMapping("", port, proto, port, ip, true, description, 0); err != nil {
 			return fmt.Errorf("failed to forward %s port %d: %v", proto, port, err)
 		}
 	}

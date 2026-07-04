@@ -174,7 +174,7 @@ func CreateGenericEvent(kp *TestKeyPair, kind int, content string, tags nostr.Ta
 }
 
 // CreateCascadeDeleteEvent creates a kind 72 cascade delete event.
-// resourceID is the "r" tag (GUID), permissionKind is the "k" tag (e.g. "16629").
+// resourceID is the "r" tag (GUID), permissionKind is the "k" tag (e.g. "31415").
 func CreateCascadeDeleteEvent(kp *TestKeyPair, resourceID string, permissionKind string, reason string) (*nostr.Event, error) {
 	tags := nostr.Tags{
 		{"r", resourceID},

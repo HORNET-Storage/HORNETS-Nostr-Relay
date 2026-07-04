@@ -1818,14 +1818,18 @@ func (store *GormStatisticsStore) GetAllowedUser(npub string) (*types.AllowedUse
 	return &user, nil
 }
 
-func (store *GormStatisticsStore) AddAllowedUser(npub string, tier string, createdBy string) error {
+func (store *GormStatisticsStore) AddAllowedUser(npub string, canWrite bool, tier string, createdBy string) error {
 	allowedNpub := types.AllowedUser{
 		Npub:      npub,
 		Tier:      tier,
+		ReadOnly:  !canWrite,
 		CreatedBy: createdBy,
 	}
 
-	return store.DB.Create(&allowedNpub).Error
+	return store.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "npub"}},
+		DoUpdates: clause.AssignmentColumns([]string{"tier", "read_only", "created_by"}),
+	}).Create(&allowedNpub).Error
 }
 
 func (store *GormStatisticsStore) RemoveAllowedUser(npub string) error {
@@ -1838,10 +1842,14 @@ func (store *GormStatisticsStore) BulkAddAllowedUser(users []types.AllowedUser) 
 			allowedUser := types.AllowedUser{
 				Npub:      user.Npub,
 				Tier:      user.Tier,
+				ReadOnly:  user.ReadOnly,
 				CreatedBy: user.CreatedBy,
 			}
 
-			if err := tx.Create(&allowedUser).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "npub"}},
+				DoUpdates: clause.AssignmentColumns([]string{"tier", "read_only", "created_by"}),
+			}).Create(&allowedUser).Error; err != nil {
 				return err
 			}
 		}

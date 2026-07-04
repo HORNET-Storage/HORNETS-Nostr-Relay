@@ -181,7 +181,7 @@ func (store *BadgerholdStore) StoreEvent(ev *nostr.Event) error {
 			return err
 		}
 		for _, tag := range ev.Tags {
-			if len(tag) < 2 || len(tag[0]) != 1 {
+			if len(tag) < 2 || tag[0] == "" {
 				continue
 			}
 			if err := tx.Set(tagIndexKey(tag[0], tag[1], ts, ev.ID), nil); err != nil {
@@ -259,7 +259,7 @@ func (store *BadgerholdStore) DeleteEvent(eventID string) error {
 		_ = tx.Delete(authorTimeKey(ev.PubKey, ts, eventID))
 		_ = tx.Delete(eventTimeKey(ts, eventID))
 		for _, tag := range ev.Tags {
-			if len(tag) < 2 || len(tag[0]) != 1 {
+			if len(tag) < 2 || tag[0] == "" {
 				continue
 			}
 			_ = tx.Delete(tagIndexKey(tag[0], tag[1], ts, eventID))
@@ -340,6 +340,10 @@ func queryByIDs(tx *badger.Txn, filter nostr.Filter, limit int) ([]*nostr.Event,
 }
 
 func queryByTags(tx *badger.Txn, filter nostr.Filter, limit int) ([]*nostr.Event, error) {
+	if hasNonIndexedTagFilters(filter.Tags) {
+		return queryByFilterScan(tx, filter, limit)
+	}
+
 	var primaryName string
 	var primaryValues []string
 	for name, values := range filter.Tags {
@@ -353,6 +357,29 @@ func queryByTags(tx *badger.Txn, filter nostr.Filter, limit int) ([]*nostr.Event
 		prefixes[i] = []byte(fmt.Sprintf("%s%s:%s\x00", prefixTag, primaryName, v))
 	}
 	return collectFromPrefixes(tx, prefixes, filter, limit)
+}
+
+func hasNonIndexedTagFilters(tags nostr.TagMap) bool {
+	for name := range tags {
+		trimmedName := strings.TrimPrefix(name, "#")
+		if len(trimmedName) != 1 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func queryByFilterScan(tx *badger.Txn, filter nostr.Filter, limit int) ([]*nostr.Event, error) {
+	if len(filter.Kinds) > 0 {
+		return queryByKinds(tx, filter, limit)
+	}
+
+	if len(filter.Authors) > 0 {
+		return queryByAuthors(tx, filter, limit)
+	}
+
+	return queryAllEvents(tx, filter, limit)
 }
 
 func queryByAuthors(tx *badger.Txn, filter nostr.Filter, limit int) ([]*nostr.Event, error) {
@@ -566,7 +593,7 @@ func CheckSchemaVersion(db *badger.DB) error {
 		if version != currentSchemaVersion {
 			return fmt.Errorf(
 				"database schema version %d is not supported (expected %d).\n"+
-					"Please run:  nestr-tools db migrate --path <database-path>",
+					"Please run:  nosis-tools db migrate --path <database-path>",
 				version, currentSchemaVersion)
 		}
 		return nil
@@ -576,7 +603,7 @@ func CheckSchemaVersion(db *badger.DB) error {
 		return fmt.Errorf(
 			"this database uses the old BadgerHold event format.\n" +
 				"The relay now requires schema v2 (raw BadgerDB events).\n" +
-				"Please run:  nestr-tools db migrate --path <database-path>\n" +
+				"Please run:  nosis-tools db migrate --path <database-path>\n" +
 				"to convert your data before starting the relay")
 	}
 

@@ -7,21 +7,19 @@ import (
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/ipfs/go-cid"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
 
 	merkle_dag "github.com/HORNET-Storage/Scionic-Merkle-Tree/v2/dag"
 	types "github.com/HORNET-Storage/hornet-storage/lib"
-	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 
+	"github.com/HORNET-Storage/hornet-storage/lib/logging"
 	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 )
 
-func AddDownloadHandler(libp2phost host.Host, store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) {
-	libp2phost.SetStreamHandler("/download", middleware.SessionMiddleware(libp2phost)(BuildDownloadStreamHandler(store, canDownloadDag)))
+func AddDownloadHandler(listener *hsListener.HyperswarmListener, store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) {
+	listener.SetStreamHandler("/download", BuildDownloadStreamHandler(store, canDownloadDag))
 }
 
 func AddDownloadHandlerForWebsockets(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) func(*websocket.Conn) {
@@ -40,20 +38,17 @@ func AddDownloadHandlerForWebsockets(store stores.Store, canDownloadDag func(roo
 	}
 }
 
-func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) func(network.Stream) {
-	downloadStreamHandler := func(stream network.Stream) {
-		ctx := context.Background()
-		libp2pStream := libp2p_stream.New(stream, ctx)
-
+func BuildDownloadStreamHandler(store stores.Store, canDownloadDag func(rootLeaf *merkle_dag.DagLeaf, pubKey *string, signature *string) bool) hsListener.StreamHandler {
+	downloadStreamHandler := func(stream lib_types.Stream) {
 		defer stream.Close()
 
-		message, err := lib_stream.WaitForDownloadMessage(libp2pStream)
+		message, err := lib_stream.WaitForDownloadMessage(stream)
 		if err != nil {
-			lib_stream.WriteErrorToStream(libp2pStream, "Failed to receive download message", err)
+			lib_stream.WriteErrorToStream(stream, "Failed to receive download message", err)
 			return
 		}
 
-		handleDownload(store, libp2pStream, message, canDownloadDag)
+		handleDownload(store, stream, message, canDownloadDag)
 	}
 
 	return downloadStreamHandler
@@ -79,7 +74,15 @@ func handleDownload(store stores.Store, stream lib_types.Stream, message *lib_ty
 
 	rootLeaf := rootData.Leaf
 
+	// Log every download request for diagnostics (previously silent — cost the original WOT bug diagnosis)
+	requesterID := "anonymous"
+	if message.PublicKey != "" {
+		requesterID = message.PublicKey
+	}
+	logging.Infof("[DOWNLOAD] Request for root %s from %s", message.Root, requesterID)
+
 	if canDownloadDag != nil && !canDownloadDag(&rootLeaf, &message.PublicKey, &message.Signature) {
+		logging.Infof("[DOWNLOAD] DENIED root %s for %s", message.Root, requesterID)
 		lib_stream.WriteErrorToStream(stream, "Not allowed to download this", nil)
 		return
 	}

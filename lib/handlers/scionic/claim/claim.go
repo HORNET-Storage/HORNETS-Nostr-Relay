@@ -1,85 +1,80 @@
 package claim
 
 import (
-	"context"
 	"encoding/hex"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
 
+	lib_types "github.com/HORNET-Storage/go-hornet-storage-lib/lib"
 	"github.com/HORNET-Storage/go-hornet-storage-lib/lib/signing"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
-	"github.com/HORNET-Storage/hornet-storage/lib/sessions/libp2p/middleware"
 	stores "github.com/HORNET-Storage/hornet-storage/lib/stores"
 	types "github.com/HORNET-Storage/hornet-storage/lib/types"
 
 	lib_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr"
-	libp2p_stream "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/libp2p"
+	hsListener "github.com/HORNET-Storage/go-hornet-storage-lib/lib/connmgr/hyperswarm"
 )
 
-func AddClaimOwnershipHandler(libp2phost host.Host, store stores.Store) {
-	libp2phost.SetStreamHandler("/claim-ownership", middleware.SessionMiddleware(libp2phost)(BuildClaimOwnershipHandler(store)))
+func AddClaimOwnershipHandler(listener *hsListener.HyperswarmListener, store stores.Store) {
+	listener.SetStreamHandler("/claim-ownership", BuildClaimOwnershipHandler(store))
 }
 
-func BuildClaimOwnershipHandler(store stores.Store) func(network.Stream) {
-	handler := func(stream network.Stream) {
-		ctx := context.Background()
-		libp2pStream := libp2p_stream.New(stream, ctx)
+func BuildClaimOwnershipHandler(store stores.Store) hsListener.StreamHandler {
+	handler := func(stream lib_types.Stream) {
 		defer stream.Close()
 
 		// Read the claim ownership message
-		message, err := lib_stream.ReadMessageFromStream[types.ClaimOwnershipMessage](libp2pStream)
+		message, err := lib_stream.ReadMessageFromStream[types.ClaimOwnershipMessage](stream)
 		if err != nil {
-			writeErrorResponse(libp2pStream, "Failed to receive claim ownership message")
+			writeErrorResponse(stream, "Failed to receive claim ownership message")
 			return
 		}
 
 		// Validate required fields
 		if message.Root == "" {
-			writeErrorResponse(libp2pStream, "Root hash is required")
+			writeErrorResponse(stream, "Root hash is required")
 			return
 		}
 		if message.PublicKey == "" {
-			writeErrorResponse(libp2pStream, "Public key is required")
+			writeErrorResponse(stream, "Public key is required")
 			return
 		}
 		if message.Signature == "" {
-			writeErrorResponse(libp2pStream, "Signature is required")
+			writeErrorResponse(stream, "Signature is required")
 			return
 		}
 
 		// Deserialize and verify the public key
 		publicKey, err := signing.DeserializePublicKey(message.PublicKey)
 		if err != nil {
-			writeErrorResponse(libp2pStream, "Failed to deserialize public key")
+			writeErrorResponse(stream, "Failed to deserialize public key")
 			return
 		}
 
 		// Deserialize the signature
 		signatureBytes, err := hex.DecodeString(message.Signature)
 		if err != nil {
-			writeErrorResponse(libp2pStream, "Failed to decode signature hex")
+			writeErrorResponse(stream, "Failed to decode signature hex")
 			return
 		}
 
 		signature, err := schnorr.ParseSignature(signatureBytes)
 		if err != nil {
-			writeErrorResponse(libp2pStream, "Failed to parse signature")
+			writeErrorResponse(stream, "Failed to parse signature")
 			return
 		}
 
 		// Verify signature: public key must have signed the root hash
 		err = signing.VerifySerializedCIDSignature(signature, message.Root, publicKey)
 		if err != nil {
-			writeErrorResponse(libp2pStream, "Signature verification failed")
+			writeErrorResponse(stream, "Signature verification failed")
 			return
 		}
 
 		// Serialize the public key for storage (normalized format)
 		serializedPublicKey, err := signing.SerializePublicKey(publicKey)
 		if err != nil {
-			writeErrorResponse(libp2pStream, "Failed to serialize public key")
+			writeErrorResponse(stream, "Failed to serialize public key")
 			return
 		}
 
@@ -87,19 +82,19 @@ func BuildClaimOwnershipHandler(store stores.Store) func(network.Stream) {
 		err = store.ClaimOwnership(message.Root, *serializedPublicKey, hex.EncodeToString(signature.Serialize()))
 		if err != nil {
 			logging.Infof("Claim ownership failed for root %s: %v", message.Root, err)
-			writeErrorResponse(libp2pStream, err.Error())
+			writeErrorResponse(stream, err.Error())
 			return
 		}
 
 		logging.Infof("Ownership claimed for root %s by %s", message.Root, (*serializedPublicKey)[:16]+"...")
 
 		// Send success response
-		lib_stream.WriteMessageToStream(libp2pStream, lib_stream.BuildResponseMessage(true, "Ownership claimed successfully"))
+		lib_stream.WriteMessageToStream(stream, lib_stream.BuildResponseMessage(true, "Ownership claimed successfully"))
 	}
 
 	return handler
 }
 
-func writeErrorResponse(stream *libp2p_stream.Libp2pStream, message string) {
+func writeErrorResponse(stream lib_types.Stream, message string) {
 	lib_stream.WriteErrorToStream(stream, message, nil)
 }

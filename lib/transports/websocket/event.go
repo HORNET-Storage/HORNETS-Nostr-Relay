@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/nbd-wtf/go-nostr"
-	"github.com/spf13/viper"
 
 	lib_nostr "github.com/HORNET-Storage/hornet-storage/lib/handlers/nostr"
 	"github.com/HORNET-Storage/hornet-storage/lib/logging"
@@ -40,7 +39,7 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 
 	// Check write access permissions using H.O.R.N.E.T Allowed Users system
 	if accessControl := GetAccessControl(); accessControl != nil {
-		err := accessControl.CanWrite(env.Event.PubKey)
+		err := accessControl.CanWriteEvent(&env.Event, store)
 		if err != nil {
 			logging.Infof("Write access denied for pubkey: %s", env.Event.PubKey)
 			write("OK", env.Event.ID, false, "Event rejected: Write access denied")
@@ -61,21 +60,17 @@ func handleEventMessage(c *websocket.Conn, env *nostr.EventEnvelope, _ *connecti
 		}
 		// Use the specific handler
 		handleEventWithHandler(c, env, handler)
-	} else {
-		// No specific handler - this is an unregistered kind
-		if viper.GetBool("event_filtering.allow_unregistered_kinds") {
-			// Use universal handler for unregistered kinds
-			universalHandler := lib_nostr.GetHandler("universal")
-			if universalHandler != nil {
-				logging.Infof("Handling unregistered kind %d with universal handler", env.Kind)
-				handleEventWithHandler(c, env, universalHandler)
-			} else {
-				write("OK", env.Event.ID, false, "Universal handler not available")
-			}
+	} else if lib_nostr.IsKindAllowed(env.Kind) {
+		universalHandler := lib_nostr.GetHandler("universal")
+		if universalHandler != nil {
+			logging.Infof("Handling allowed kind %d with universal handler", env.Kind)
+			handleEventWithHandler(c, env, universalHandler)
 		} else {
-			logging.Infof("Rejected unregistered kind %d (allow_unregistered_kinds=false)", env.Kind)
-			write("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
+			write("OK", env.Event.ID, false, "Universal handler not available")
 		}
+	} else {
+		logging.Infof("Rejected kind %d (not allowed by event filtering config)", env.Kind)
+		write("OK", env.Event.ID, false, fmt.Sprintf("Unregistered kind %d not allowed", env.Kind))
 	}
 }
 
@@ -94,12 +89,16 @@ func handleEventWithHandler(c *websocket.Conn, env *nostr.EventEnvelope, handler
 		}
 	}
 
+	// Store the event first, then notify. This ensures subscribers who
+	// re-query after receiving the notification will always find the event.
+	handler(read, write)
+
+	// Notify live WebSocket subscribers (async — pushed to a buffered channel
+	// and processed by a dedicated goroutine, so this is non-blocking).
 	notifyListeners(&env.Event)
 
 	// Process event for push notifications
 	if pushService := push.GetGlobalPushService(); pushService != nil {
 		pushService.ProcessEvent(&env.Event)
 	}
-
-	handler(read, write)
 }

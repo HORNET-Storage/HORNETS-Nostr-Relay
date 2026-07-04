@@ -256,6 +256,8 @@ func BuildBlossomServer(store stores.Store) *fiber.App {
 func StartBlossomServer(app *fiber.App) error {
 	address := viper.GetString("server.address")
 	port := config.GetPort("blossom")
+	cleanupUPnP := forwardPortIfEnabled(port, "Hornet Storage Blossom")
+	defer cleanupUPnP()
 
 	logging.Info("Starting Blossom server", map[string]interface{}{
 		"address": address,
@@ -265,17 +267,6 @@ func StartBlossomServer(app *fiber.App) error {
 	err := app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
 		logging.Fatalf("error starting blossom server: %v\n", err)
-	}
-
-	if viper.GetBool("server.upnp") {
-		upnp := upnp.Get()
-
-		err := upnp.ForwardPort(uint16(port), "Hornet Storage Blossom")
-		if err != nil {
-			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
-				"port": port,
-			})
-		}
 	}
 
 	return err
@@ -290,24 +281,46 @@ func StartServer(app *fiber.App) error {
 
 	address := viper.GetString("server.address")
 	port := config.GetPort("nostr")
+	cleanupUPnP := forwardPortIfEnabled(port, "Hornet Storage Nostr Relay")
+	defer cleanupUPnP()
 
 	err = app.Listen(fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
 		logging.Fatalf("error starting nostr server: %v\n", err)
 	}
 
-	if viper.GetBool("server.upnp") {
-		upnp := upnp.Get()
+	return err
+}
 
-		err := upnp.ForwardPort(uint16(port), "Hornet Storage Nostr Relay")
-		if err != nil {
-			logging.Error("Failed to forward port using UPnP", map[string]interface{}{
-				"port": port,
-			})
-		}
+func forwardPortIfEnabled(port int, description string) func() {
+	if !viper.GetBool("server.upnp") {
+		return func() {}
 	}
 
-	return err
+	upnpManager := upnp.Get()
+	if upnpManager == nil {
+		logging.Warn("UPnP is enabled but no router was discovered", map[string]interface{}{
+			"port": port,
+		})
+		return func() {}
+	}
+
+	if err := upnpManager.ForwardPort(uint16(port), description); err != nil {
+		logging.Error("Failed to forward port using UPnP", map[string]interface{}{
+			"port":  port,
+			"error": err,
+		})
+		return func() {}
+	}
+
+	logging.Info("Forwarded port using UPnP", map[string]interface{}{
+		"port":        port,
+		"description": description,
+	})
+
+	return func() {
+		upnpManager.RemovePort(uint16(port))
+	}
 }
 
 func handleRelayInfoRequests(c *fiber.Ctx) error {
@@ -343,10 +356,16 @@ func GetRelayInfo() NIP11RelayInfo {
 
 	// These values are set in main.go init() for backward compatibility
 	basePort := viper.GetInt("server.port")
+	relayMode := viper.GetString("allowed_users.mode")
+	readAccess := viper.GetString("allowed_users.read")
+	writeAccess := viper.GetString("allowed_users.write")
 	relayInfo := NIP11RelayInfo{
 		Name:          viper.GetString("relay.name"),
 		Description:   viper.GetString("relay.description"),
 		Pubkey:        publicKeyHex, // Keep for internal use, excluded from JSON
+		RelayMode:     relayMode,
+		ReadAccess:    readAccess,
+		WriteAccess:   writeAccess,
 		Contact:       contact,
 		Icon:          viper.GetString("relay.icon"),
 		SupportedNIPs: viper.GetIntSlice("relay.supported_nips"),
@@ -359,19 +378,21 @@ func GetRelayInfo() NIP11RelayInfo {
 	relayInfo.Services = buildServicesMap()
 
 	privKey, _, err := signing.DeserializePrivateKey(viper.GetString("relay.private_key"))
-	libp2pId := viper.GetString("LibP2PID")
-	libp2pAddrs := viper.GetStringSlice("LibP2PAddrs")
-	if libp2pId != "" && len(libp2pAddrs) > 0 && err == nil {
+	dhtPubkey := viper.GetString("DHTPublicKey")
+	if dhtPubkey != "" && err == nil {
+		relayInfo.DHTPubkey = dhtPubkey
 		relayInfo.HornetExtension = &HornetExtension{
-			LibP2PID:    libp2pId,
-			LibP2PAddrs: libp2pAddrs,
+			RelayMode:   relayMode,
+			ReadAccess:  readAccess,
+			WriteAccess: writeAccess,
+			DHTPubkey:   dhtPubkey,
 		}
 		err = SignRelay(&relayInfo, privKey)
 		if err != nil {
 			logging.Infof("Error signing relay info: %v", err)
 		}
 	} else {
-		logging.Infof("Not advertising hornet extension because libp2pID == %s and libp2paddrs == %s", libp2pId, libp2pAddrs)
+		logging.Infof("Not advertising hornet extension because dht_pubkey == %s", dhtPubkey)
 	}
 
 	return relayInfo
@@ -399,12 +420,14 @@ func buildServicesMap() RelayServices {
 		hostKey := fmt.Sprintf("server.services.%s.host", serviceName)
 		pathKey := fmt.Sprintf("server.services.%s.path", serviceName)
 		pubkeyKey := fmt.Sprintf("server.services.%s.pubkey", serviceName)
+		dhtPubkeyKey := fmt.Sprintf("server.services.%s.dht_pubkey", serviceName)
 
 		endpoint := &ServiceEndpoint{
-			Host:   viper.GetString(hostKey),
-			Port:   port,
-			Path:   viper.GetString(pathKey),
-			Pubkey: viper.GetString(pubkeyKey),
+			Host:      viper.GetString(hostKey),
+			Port:      port,
+			Path:      viper.GetString(pathKey),
+			Pubkey:    viper.GetString(pubkeyKey),
+			DHTPubkey: viper.GetString(dhtPubkeyKey),
 		}
 
 		services[serviceName] = endpoint
@@ -476,16 +499,9 @@ func PackRelayForSig(nr *NIP11RelayInfo) []byte {
 	packed = append(packed, 0)
 
 	if nr.HornetExtension != nil {
-		// Pack ID
-		packed = append(packed, []byte(nr.HornetExtension.LibP2PID)...)
+		// Pack DHT public key
+		packed = append(packed, []byte(nr.HornetExtension.DHTPubkey)...)
 		packed = append(packed, 0) // null terminator
-
-		// Pack Addrs
-		for _, addr := range nr.HornetExtension.LibP2PAddrs {
-			packed = append(packed, []byte(addr)...)
-			packed = append(packed, 0) // null terminator
-		}
-		packed = append(packed, 0) // double null terminator to indicate end of Addrs
 
 		// Pack LastUpdated
 		unixTime := nr.HornetExtension.LastUpdated.Unix()

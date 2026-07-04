@@ -47,7 +47,7 @@ func BuildKind444Handler(store stores.Store) func(read lib_nostr.KindReader, wri
 		// Validate time check (prevent time travel)
 		timeCheck := lib_nostr.TimeCheck(env.Event.CreatedAt.Time().Unix())
 		if !timeCheck {
-			write("OK", env.Event.ID, false, "The event creation date must be after January 1, 2019")
+			write("OK", env.Event.ID, false, "The event creation date must not be more than 2 seconds in the future")
 			return
 		}
 

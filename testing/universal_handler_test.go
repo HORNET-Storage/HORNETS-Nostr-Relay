@@ -29,7 +29,7 @@ func TestUniversal_RegularEvents_StoredAsIs(t *testing.T) {
 	user, _ := helpers.GenerateKeyPair()
 
 	// Test regular kind numbers that DON'T have specific handlers
-	// Avoid: 0 (metadata), 1 (notes), 3 (contacts), 5 (delete), 7 (reaction), 16629 (repo perms)
+	// Avoid: 0 (metadata), 1 (notes), 3 (contacts), 5 (delete), 7 (reaction), 31415 (repo perms)
 	regularKinds := []int{2, 4, 6, 8, 1000, 9999}
 
 	for _, kind := range regularKinds {

@@ -2,17 +2,29 @@ allowed_users:
     batch_update_on_startup: false
     last_updated: 0
     mode: public
-    read_access:
-        enabled: true
-        scope: all_users
+    read: all_users
+    repo_access_override_kinds:
+        - 72
+        - 73
+        - 74
+        - 75
+        - 76
+        - 77
+        - 1111
+        - 6927
+        - 7007
+        - 31415
+        - 16630
+        - 31416
+        - 30078
+        - 30301
+        - 30302
     tiers:
         - monthly_limit_bytes: 104857600
           name: Basic
           price_sats: 0
           unlimited: false
-    write_access:
-        enabled: true
-        scope: all_users
+    write: all_users
 content_filtering:
     image_moderation:
         check_interval_seconds: 30
@@ -41,8 +53,11 @@ event_filtering:
         - kind7
         - kind8
         - kind1063
+        - kind1111
         - kind1808
         - kind1984
+        - kind6927
+        - kind7007
         - kind9372
         - kind9373
         - kind9735
@@ -53,7 +68,7 @@ event_filtering:
         - kind10010
         - kind10411
         - kind11011
-        - kind16629
+        - kind31415
         - kind16630
         - kind19841
         - kind19842
@@ -65,12 +80,15 @@ event_filtering:
         - kind30023
         - kind30078
         - kind30079
-        - kind76
-        - kind75
-        - kind74
+        - kind31416
+        - kind30301
+        - kind30302
+        - kind72
         - kind73
-        - kind16629
-        - kind16630
+        - kind74
+        - kind75
+        - kind76
+        - kind77
         - kind1809
     media_definitions:
         audio:
@@ -134,9 +152,12 @@ event_filtering:
         - 445
         - 1059
         - 1063
+        - 1111
         - 1808
         - 1809
         - 1984
+        - 6927
+        - 7007
         - 9372
         - 9373
         - 9735
@@ -148,7 +169,7 @@ event_filtering:
         - 10051
         - 10411
         - 11011
-        - 16629
+        - 31415
         - 16630
         - 19841
         - 19842
@@ -159,11 +180,16 @@ event_filtering:
         - 30009
         - 30023
         - 30078
+        - 31416
         - 30079
-        - 76
-        - 75
-        - 74
+        - 30301
+        - 30302
+        - 72
         - 73
+        - 74
+        - 75
+        - 76
+        - 77
 external_services:
     moderator:
         url: http://moderator:8000
@@ -211,7 +237,7 @@ nip_mappings:
     "10411": "888"
     "11011": "888"
     "11888": "888"
-    "16629": "888"
+    "31415": "888"
     "16630": "888"
     "19841": "888"
     "19842": "888"
@@ -244,9 +270,11 @@ push_notifications:
         worker_count: 10
 relay:
     contact: support@hornetstorage.com
-    description: HORNETS relay, the home of GitNestr
-    dht_key: 020439cb396ec92c283048f989c342fe3833cc5a
-    icon: http://localhost:11002/logo-dark-192.png
+    description: HORNETS relay, the home of Nosis
+    dht_seed: ""
+    dht_public_key: ""
+    dht_private_key: ""
+    icon: http://localhost:11002/logo.png
     name: HORNETS
     private_key: c600149fe1207dd0cf5284d0a4bd767dc192181940d2a2b08f9571445f308a02
     public_key: 336b884334a2ad004b9b5c0d24ea727e0dfa9d9f6088d37386731611a2b38bcd
@@ -276,7 +304,7 @@ relay:
 server:
     bind_address: 0.0.0.0
     port: 11000
-    upnp: false
+    upnp: true
     data_path: ./data
     demo: false
     hornets: true
@@ -288,3 +316,15 @@ server:
             host: ""
             port: 11006
             pubkey: ""
+            dht_pubkey: ""
+# Hyperswarm sidecar configuration
+# A single sidecar process is shared by all HORNET applications on the machine.
+# The relay starts it in persistent mode; other tools (nosis, airlock) connect to it.
+sidecar:
+    # RPC address of the sidecar process
+    address: "127.0.0.1:9100"
+    # Path to the hornets-hyperswarm binary. If set, the relay will start the
+    # sidecar automatically if one is not already running.
+    executable: ""
+    # Mode when starting a new sidecar: "persistent" (recommended for relay)
+    mode: "persistent"

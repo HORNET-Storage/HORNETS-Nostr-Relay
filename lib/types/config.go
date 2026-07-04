@@ -72,7 +72,10 @@ type RelayConfig struct {
 	SupportedNIPs []int  `mapstructure:"supported_nips"`
 	SecretKey     string `mapstructure:"secret_key"`
 	PrivateKey    string `mapstructure:"private_key"`
-	DHTKey        string `mapstructure:"dht_key"`
+	PublicKey     string `mapstructure:"public_key"`
+	DHTSeed       string `mapstructure:"dht_seed"`
+	DHTPublicKey  string `mapstructure:"dht_public_key"`
+	DHTPrivateKey string `mapstructure:"dht_private_key"`
 }
 
 // ContentFilteringConfig holds content filtering configuration
@@ -150,9 +153,10 @@ type SubscriptionTier struct {
 
 // AllowedUsersSettings represents the unified access control configuration
 type AllowedUsersSettings struct {
-	Mode        string             `json:"mode" mapstructure:"mode"`   // only-me, invite-only, public, subscription
-	Read        string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only-me
-	Write       string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only-me
-	Tiers       []SubscriptionTier `json:"tiers" mapstructure:"tiers"`
-	LastUpdated int64              `json:"last_updated" mapstructure:"last_updated"`
+	Mode                    string             `json:"mode" mapstructure:"mode"`   // only-me, invite-only, public, subscription
+	Read                    string             `json:"read" mapstructure:"read"`   // all_users, paid_users, allowed_users, only-me
+	Write                   string             `json:"write" mapstructure:"write"` // all_users, paid_users, allowed_users, only-me
+	RepoAccessOverrideKinds []int              `json:"repo_access_override_kinds" mapstructure:"repo_access_override_kinds"`
+	Tiers                   []SubscriptionTier `json:"tiers" mapstructure:"tiers"`
+	LastUpdated             int64              `json:"last_updated" mapstructure:"last_updated"`
 }
