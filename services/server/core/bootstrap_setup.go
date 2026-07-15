@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"context"
@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/HORNET-Storage/hdk-nostr-go/lib/signing"
@@ -945,7 +943,16 @@ func renderBootstrapSetupPage(token string) string {
 </html>`, token)
 }
 
-func runBootstrapSetup(ctx context.Context, host string, port int) error {
+// ErrSetupInterrupted is returned by RunBootstrapSetup when a shutdown was
+// requested through the stop channel before setup completed. Callers treat
+// it as a deliberate stop rather than a setup failure.
+var ErrSetupInterrupted = errors.New("bootstrap setup interrupted")
+
+// RunBootstrapSetup serves the first-time setup UI on host:port and blocks
+// until the operator applies a configuration, the context is cancelled, or a
+// shutdown is requested through stop. A nil stop channel disables
+// caller-driven interruption.
+func RunBootstrapSetup(ctx context.Context, host string, port int, stop <-chan struct{}) error {
 	if !needsBootstrapSetup() {
 		logging.Info("Bootstrap setup already completed - continuing normal startup", nil)
 		return nil
@@ -1076,17 +1083,13 @@ func runBootstrapSetup(ctx context.Context, host string, port int) error {
 		"addr": addr,
 	})
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-
 	select {
 	case <-ctx.Done():
 		_ = app.Shutdown()
 		return ctx.Err()
-	case <-sigCh:
+	case <-stop:
 		_ = app.Shutdown()
-		return fmt.Errorf("bootstrap setup interrupted")
+		return ErrSetupInterrupted
 	case err := <-errCh:
 		if err != nil {
 			return err
